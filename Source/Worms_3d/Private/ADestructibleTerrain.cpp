@@ -28,8 +28,8 @@ ADestructibleTerrain::ADestructibleTerrain()
     TerrainWidth = 2000.0f;
     TerrainHeight = 2000.0f;
     TerrainDepth = 1000.0f;
-    HorizontalResolution = 25; // 50 subdivisions en largeur
-    VerticalResolution = 25; // 50 subdivisions en hauteur
+    HorizontalResolution = 15; // 50 subdivisions en largeur
+    VerticalResolution = 15; // 50 subdivisions en hauteur
     bIsInitialized = false;
     bModificationsApplied = false;
     

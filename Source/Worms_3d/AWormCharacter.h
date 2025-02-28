@@ -7,7 +7,16 @@
 #include "InputActionValue.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "GameFramework/PlayerController.h"
 #include "AWormCharacter.generated.h"
+
+
+UENUM(BlueprintType)
+enum class ECameraMode : uint8
+{
+    ThirdPerson UMETA(DisplayName = "Third Person"),
+    FirstPerson UMETA(DisplayName = "First Person")
+};
 
 UCLASS()
 class WORMS_3D_API AWormCharacter : public ACharacter
@@ -73,6 +82,9 @@ public:
     // Et ajoutez l'input action:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input")
     class UInputAction* AimAction;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input")
+    class UInputAction* TestCameraAction;
     // Fonction Override
     virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -125,10 +137,20 @@ public:
     // Fonction pour adjuster la puissance du tir
     UFUNCTION(BlueprintCallable, Category = "Worm")
     void AdjustPower(float Delta);
+    // Ajoutez également cette fonction Multicast
+    UFUNCTION(NetMulticast, Reliable)
+    void Multicast_UpdateWeaponRotation(FRotator NewRotation);
+
+    UFUNCTION(Server, Reliable, WithValidation)
+    void Server_UpdateWeaponRotation(FRotator NewRotation);
+    // RPC Multicast pour propager la rotation aux clients
+
 protected:
     void OnAimActionStarted(const FInputActionValue& Value);
     void OnAimActionEnded(const FInputActionValue& Value);
     void UpdateAimingWidget();
+    void ValidateCameraComponents();
+
 
     // Système de tour
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Worm")
@@ -280,7 +302,18 @@ protected:
     void Server_EndTurn();
     // Initialisation du Enhanced Input System
     void SetupEnhancedInput(APlayerController* PlayerController);
-    
+    UPROPERTY(BlueprintReadOnly, Category = "Camera")
+    ECameraMode CurrentCameraMode;
+
+    // Ajoutez une fonction pour définir directement le mode de caméra
+    UFUNCTION(BlueprintCallable, Category = "Camera")
+    void SetCameraMode(ECameraMode NewMode);
+
+    UFUNCTION(BlueprintCallable, Category = "Camera")
+    void ForceToggleCamera();
     UPROPERTY()
     FVector OriginalCameraLocation;
+    void OnTestCameraAction(const FInputActionValue& Value);
+    
+
 };

@@ -140,6 +140,14 @@ void AWormWeapon::ShowTrajectory(bool bShow)
     APawn* OwnerPawn = Cast<APawn>(GetOwner());
     AWormCharacter* OwnerChar = Cast<AWormCharacter>(OwnerPawn);
     
+    // Log détaillé pour vérifier les conditions
+    UE_LOG(LogTemp, Warning, TEXT("ShowTrajectory(%s): OwnerPawn=%s, LocallyControlled=%s, OwnerChar=%s, IsMyTurn=%s"),
+        bShow ? TEXT("true") : TEXT("false"),
+        OwnerPawn ? *OwnerPawn->GetName() : TEXT("NULL"),
+        OwnerPawn && OwnerPawn->IsLocallyControlled() ? TEXT("Yes") : TEXT("No"),
+        OwnerChar ? *OwnerChar->GetName() : TEXT("NULL"),
+        OwnerChar && OwnerChar->IsMyTurn() ? TEXT("Yes") : TEXT("No"));
+    
     // Vérifier trois conditions:
     // 1. L'arme appartient à un Pawn
     // 2. C'est le Pawn contrôlé localement
@@ -147,6 +155,7 @@ void AWormWeapon::ShowTrajectory(bool bShow)
     if (!OwnerPawn || !OwnerPawn->IsLocallyControlled() || (OwnerChar && !OwnerChar->IsMyTurn()))
     {
         // Si non, ne pas montrer/cacher la trajectoire
+        UE_LOG(LogTemp, Warning, TEXT("Not showing trajectory - conditions not met"));
         return;
     }
 
@@ -157,6 +166,8 @@ void AWormWeapon::ShowTrajectory(bool bShow)
     }
     
     // Le reste du code reste inchangé
+    UE_LOG(LogTemp, Warning, TEXT("Setting trajectory visibility to: %s"), bShow ? TEXT("Visible") : TEXT("Hidden"));
+    
     TrajectorySpline->SetVisibility(bShow);
     if (AimingEffectComponent)
     {
@@ -167,6 +178,7 @@ void AWormWeapon::ShowTrajectory(bool bShow)
     {
         ImpactPreviewComponent->SetVisibility(bShow);
     }
+    
     for (UStaticMeshComponent* Point : TrajectoryPoints)
     {
         if (Point)
@@ -202,6 +214,10 @@ void AWormWeapon::UpdateTrajectory()
     FRotator MuzzleRotation = WeaponMesh->GetSocketRotation(MuzzleSocketName);
     FVector LaunchVelocity = MuzzleRotation.Vector() * FirePower;
     
+    // Log pour débogage
+    UE_LOG(LogTemp, Verbose, TEXT("Updating trajectory: Start=%s, Direction=%s, Power=%.1f"),
+        *StartLocation.ToString(), *MuzzleRotation.Vector().ToString(), FirePower);
+    
     // Paramètres de simulation
     float TimeStep = SimulationTimeStep;
     float MaxSimTime = SimulationDuration;
@@ -217,7 +233,40 @@ void AWormWeapon::UpdateTrajectory()
     // Ajouter le point initial
     SimulatedTrajectoryPoints.Add(CurrentLocation);
     
+    // Préparer les paramètres de collision
+    FCollisionQueryParams CollisionParams;
+    CollisionParams.AddIgnoredActor(this);
+    CollisionParams.AddIgnoredActor(GetOwner());
+    
+    // IMPORTANT: Ignorer tous les personnages Worm et leurs armes
+    TArray<AActor*> AllWormCharacters;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormCharacter::StaticClass(), AllWormCharacters);
+    for (AActor* Actor : AllWormCharacters)
+    {
+        CollisionParams.AddIgnoredActor(Actor);
+        
+        // Ignorer aussi les armes attachées
+        AWormCharacter* Character = Cast<AWormCharacter>(Actor);
+        if (Character && Character->CurrentWeapon)
+        {
+            CollisionParams.AddIgnoredActor(Character->CurrentWeapon);
+        }
+    }
+    
+    // Ignorer aussi toutes les armes
+    TArray<AActor*> AllWeapons;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormWeapon::StaticClass(), AllWeapons);
+    for (AActor* Weapon : AllWeapons)
+    {
+        CollisionParams.AddIgnoredActor(Weapon);
+    }
+    
+    // Configuration de la collision (plus de détails et d'informations)
+    CollisionParams.bTraceComplex = true;
+    CollisionParams.bReturnPhysicalMaterial = true;
+    
     // Simuler chaque étape
+    bool bHitSomething = false;
     for (float CurrentTime = 0.0f; CurrentTime < MaxSimTime && SimulatedTrajectoryPoints.Num() < TrajectoryPointCount; CurrentTime += TimeStep)
     {
         // Mise à jour de la position avec la vélocité actuelle
@@ -233,19 +282,20 @@ void AWormWeapon::UpdateTrajectory()
         // Vérifier si le point a touché quelque chose
         FHitResult HitResult;
         FVector EndTrace = CurrentLocation + CurrentVelocity * TimeStep;
-        FCollisionQueryParams CollisionParams;
-        CollisionParams.AddIgnoredActor(this);
-        CollisionParams.AddIgnoredActor(GetOwner());
         
+        // Tracer la ligne pour détecter les collisions (utiliser ECC_Visibility au lieu de ECC_WorldStatic)
         if (GetWorld()->LineTraceSingleByChannel(HitResult, CurrentLocation, EndTrace, ECC_Visibility, CollisionParams))
         {
+            // Debug
+            UE_LOG(LogTemp, Verbose, TEXT("Trajectory hit: %s at %s"), 
+                *HitResult.GetActor()->GetName(), *HitResult.Location.ToString());
+            
             // Dessiner un point de débug à l'emplacement de l'impact (visible en PIE)
-            if (OwnerPawn->IsLocallyControlled())
-            {
-                DrawDebugSphere(GetWorld(), HitResult.Location, 20.0f, 8, FColor::Red, false, 0.1f);
-            }            
+            DrawDebugSphere(GetWorld(), HitResult.Location, 20.0f, 8, FColor::Red, false, 0.1f);
+            
             // Ajouter le point d'impact et arrêter la simulation
             SimulatedTrajectoryPoints.Add(HitResult.Location);
+            bHitSomething = true;
             break;
         }
     }
@@ -297,6 +347,9 @@ void AWormWeapon::UpdateTrajectory()
         float PulseScale = 1.0f + 0.2f * FMath::Sin(Time * 5.0f);
         ImpactPreviewComponent->SetWorldScale3D(FVector(PulseScale));
     }
+    
+    UE_LOG(LogTemp, Verbose, TEXT("Trajectory simulation complete: %d points, hit something: %s"),
+     SimulatedTrajectoryPoints.Num(), bHitSomething ? TEXT("Yes") : TEXT("No"));
 }
 
 

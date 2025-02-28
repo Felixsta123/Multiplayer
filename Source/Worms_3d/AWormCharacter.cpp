@@ -32,7 +32,8 @@ AWormCharacter::AWormCharacter()
     MovementPoints = MaxMovementPoints;
     WeaponCooldown = 0.5f;
     LastWeaponUseTime = 0.0f;
-    
+    CurrentCameraMode = ECameraMode::ThirdPerson;
+
     // Configurer le Character Movement Component
     GetCharacterMovement()->GravityScale = 1.5f;
     GetCharacterMovement()->AirControl = 0.8f;
@@ -63,7 +64,6 @@ AWormCharacter::AWormCharacter()
     CameraZoomSpeed = 50.0f;
     CurrentCameraDistance = DefaultCameraDistance;
     bUseFirstPersonViewWhenAiming = true;
-    OriginalCameraLocation = FollowCamera->GetRelativeLocation();
 
 }
 
@@ -79,6 +79,26 @@ void AWormCharacter::BeginPlay()
         CurrentCameraDistance = DefaultCameraDistance;
         CameraBoom->TargetArmLength = CurrentCameraDistance;
     }
+
+    ValidateCameraComponents();
+    
+    if (FollowCamera)
+    {
+        OriginalCameraLocation = FollowCamera->GetRelativeLocation();
+        UE_LOG(LogTemp, Warning, TEXT("Saved original camera location: %s"), 
+            *OriginalCameraLocation.ToString());
+    }
+
+    // Sauvegarder la position originale si ce n'est pas déjà fait
+    if (FollowCamera && OriginalCameraLocation.IsZero())
+    {
+        OriginalCameraLocation = FollowCamera->GetRelativeLocation();
+        UE_LOG(LogTemp, Warning, TEXT("Saved original camera location in BeginPlay: %s"), 
+            *OriginalCameraLocation.ToString());
+    }
+    
+    // Force le mode TPS au démarrage
+    SetCameraMode(ECameraMode::ThirdPerson);
     // Configurer l'Enhanced Input pour le joueur local
     if (IsLocallyControlled())
     {
@@ -162,6 +182,11 @@ void AWormCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
         {
             EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, this, &AWormCharacter::OnMoveAction);
         }
+        if (TestCameraAction)
+        {
+            EnhancedInputComponent->BindAction(TestCameraAction, ETriggerEvent::Started, this, &AWormCharacter::OnTestCameraAction);
+        }
+
         
         // Binding for jumping
         if (JumpAction)
@@ -334,12 +359,28 @@ void AWormCharacter::OnPrevWeaponAction(const FInputActionValue& Value)
 
 void AWormCharacter::Tick(float DeltaTime)
 {
+
     Super::Tick(DeltaTime);
-    if (WeaponPivotComponent && CurrentWeapon && IsLocallyControlled())
+
+    // Mise à jour de l'arme seulement si on est contrôlé localement et qu'on a une arme
+    if (IsLocallyControlled() && WeaponPivotComponent && CurrentWeapon)
     {
         FRotator ControlRotation = GetControlRotation();
         WeaponPivotComponent->SetWorldRotation(FRotator(0.0f, ControlRotation.Yaw, 0.0f));
+    
+        // Envoyer au serveur si c'est un client et que c'est notre tour
+        if (GetLocalRole() < ROLE_Authority && bIsMyTurn)
+        {
+            // Envoyer moins souvent pour réduire le trafic réseau (toutes les 5 frames)
+            static int32 FrameCounter = 0;
+            if (++FrameCounter >= 5)
+            {
+                Server_UpdateWeaponRotation(ControlRotation);
+                FrameCounter = 0;
+            }
+        }
     }
+        
     // Si c'est mon tour, consommer des points de mouvement basés sur la distance parcourue
     if (bIsMyTurn && HasAuthority())
     {
@@ -452,13 +493,17 @@ void AWormCharacter::LimitMovementWhenNotMyTurn()
 
 void AWormCharacter::FireWeapon()
 {
-    // Vérifier si on peut tirer (c'est notre tour, cooldown écoulé)
 
-        // Logs détaillés pour le débogage
 
     float CurrentTime = UGameplayStatics::GetTimeSeconds(this);
     if (bIsMyTurn && CurrentWeapon && (CurrentTime - LastWeaponUseTime >= WeaponCooldown))
     {
+        // Cacher la trajectoire AVANT de tirer
+        if (CurrentWeapon)
+        {
+            CurrentWeapon->ShowTrajectory(false);
+        }
+        
         // Mettre à jour le timestamp
         LastWeaponUseTime = CurrentTime;
         UE_LOG(LogTemp, Warning, TEXT("FireWeapon called on %s (IsLocallyControlled: %s)"), 
@@ -607,37 +652,50 @@ void AWormCharacter::SpawnCurrentWeapon()
     
     if (CurrentWeapon)
     {
+        // Créer d'abord le composant pivot pour la rotation de l'arme
+        if (WeaponPivotComponent)
+        {
+            WeaponPivotComponent->DestroyComponent();
+        }
+        
+        WeaponPivotComponent = NewObject<USceneComponent>(this, TEXT("WeaponPivot"));
+        WeaponPivotComponent->RegisterComponent();
+        
         if (GetMesh()->DoesSocketExist(WeaponSocketName))
         {
-            // Attacher l'arme avec des règles personnalisées
-            // Nous utilisons KeepWorld pour maintenir la rotation que nous avons définie
-            CurrentWeapon->AttachToComponent(GetMesh(), 
-                FAttachmentTransformRules::KeepWorldTransform, 
+            WeaponPivotComponent->AttachToComponent(GetMesh(), 
+                FAttachmentTransformRules::SnapToTargetNotIncludingScale, 
                 WeaponSocketName);
                 
-            // Créer un component scene pour suivre la direction du regard
-            USceneComponent* WeaponPivot = NewObject<USceneComponent>(this, TEXT("WeaponPivot"));
-            WeaponPivot->RegisterComponent();
-            WeaponPivot->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, WeaponSocketName);
-            
-            // Réattacher l'arme au pivot
-            CurrentWeapon->GetRootComponent()->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
-            CurrentWeapon->AttachToComponent(WeaponPivot, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-            
-            // Configurer l'update de rotation dans Tick
-            WeaponPivotComponent = WeaponPivot;
+            // Appliquer la rotation initiale au pivot
+            FRotator ControlRotation = GetControlRotation();
+            WeaponPivotComponent->SetWorldRotation(FRotator(0.0f, ControlRotation.Yaw, 0.0f));
         }
         else
         {
-            CurrentWeapon->AttachToComponent(GetRootComponent(), 
+            WeaponPivotComponent->AttachToComponent(GetRootComponent(), 
                 FAttachmentTransformRules::SnapToTargetNotIncludingScale);
         }
         
+        // Attacher l'arme au pivot
+        CurrentWeapon->AttachToComponent(WeaponPivotComponent, 
+            FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+        
         CurrentWeapon->SetOwner(this);
-        UE_LOG(LogTemp, Warning, TEXT("Server created weapon: %s"), *CurrentWeapon->GetName());
+        UE_LOG(LogTemp, Warning, TEXT("Server created weapon: %s, attached to pivot: %p"),
+            *CurrentWeapon->GetName(), WeaponPivotComponent);
+            
+        // Forcer une mise à jour réseau
+        ForceNetUpdate();
+        
+        // Notifier les clients du changement d'arme
+        Multicast_WeaponChanged();
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("Failed to create weapon!"));
     }
 }
-
 void AWormCharacter::Multicast_WeaponChanged_Implementation()
 {
     // Cette fonction est appelée sur tous les clients, pas besoin de vérifier l'autorité
@@ -686,27 +744,10 @@ void AWormCharacter::OnRep_CurrentWeaponIndex()
     // Détruire l'arme actuelle si elle existe
     if (CurrentWeapon)
     {
-        // Modification ici pour utiliser la même logique que dans SpawnCurrentWeapon
-        if (GetMesh()->DoesSocketExist(WeaponSocketName))
-        {
-            // Créer un component scene pour suivre la direction du regard (comme dans SpawnCurrentWeapon)
-            USceneComponent* WeaponPivot = NewObject<USceneComponent>(this, TEXT("WeaponPivot"));
-            WeaponPivot->RegisterComponent();
-            WeaponPivot->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, WeaponSocketName);
-            
-            // Réattacher l'arme au pivot
-            CurrentWeapon->GetRootComponent()->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
-            CurrentWeapon->AttachToComponent(WeaponPivot, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-            
-            // Configurer l'update de rotation dans Tick
-            WeaponPivotComponent = WeaponPivot;
-        }
-        else
-        {
-            CurrentWeapon->AttachToComponent(GetRootComponent(), 
-                FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-        }
+        CurrentWeapon->Destroy();
+        CurrentWeapon = nullptr;
     }
+    
     // Vérifier si nous avons des armes disponibles
     if (AvailableWeapons.Num() <= 0)
     {
@@ -722,25 +763,38 @@ void AWormCharacter::OnRep_CurrentWeaponIndex()
         return;
     }
     
-    // Créer l'arme localement sur le client
+    // Créer d'abord le composant pivot pour la rotation
+    if (WeaponPivotComponent)
+    {
+        WeaponPivotComponent->DestroyComponent();
+    }
+    
+    WeaponPivotComponent = NewObject<USceneComponent>(this, TEXT("WeaponPivot"));
+    WeaponPivotComponent->RegisterComponent();
+    
+    if (GetMesh()->DoesSocketExist(WeaponSocketName))
+    {
+        WeaponPivotComponent->AttachToComponent(GetMesh(), 
+            FAttachmentTransformRules::SnapToTargetNotIncludingScale, 
+            WeaponSocketName);
+            
+        // Appliquer la rotation initiale au pivot
+        FRotator ControlRotation = GetControlRotation();
+        WeaponPivotComponent->SetWorldRotation(FRotator(0.0f, ControlRotation.Yaw, 0.0f));
+    }
+    else
+    {
+        WeaponPivotComponent->AttachToComponent(GetRootComponent(), 
+            FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+    }
+    
+    // Créer l'arme
     FActorSpawnParameters SpawnParams;
     SpawnParams.Owner = this;
     SpawnParams.Instigator = GetInstigator();
     
-    // Déterminer où spawner l'arme
-    FTransform SpawnTransform;
-    if (GetMesh()->DoesSocketExist(WeaponSocketName))
-    {
-        SpawnTransform = GetMesh()->GetSocketTransform(WeaponSocketName);
-        UE_LOG(LogTemp, Warning, TEXT("Using socket %s for weapon on client"), *WeaponSocketName.ToString());
-    }
-    else
-    {
-        // Fallback si le socket n'existe pas
-        SpawnTransform = GetActorTransform();
-        SpawnTransform.AddToTranslation(FVector(50.0f, 0.0f, 0.0f));
-        UE_LOG(LogTemp, Warning, TEXT("No socket found for weapon, using fallback position on client"));
-    }
+    // Spawner au niveau du pivot
+    FTransform SpawnTransform = WeaponPivotComponent->GetComponentTransform();
     
     // Spawner l'arme
     CurrentWeapon = GetWorld()->SpawnActor<AWormWeapon>(
@@ -751,28 +805,20 @@ void AWormCharacter::OnRep_CurrentWeaponIndex()
     
     if (CurrentWeapon)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Client successfully created weapon: %s"), *CurrentWeapon->GetName());
-        
-        // Attacher l'arme
-        if (GetMesh()->DoesSocketExist(WeaponSocketName))
-        {
-            CurrentWeapon->AttachToComponent(GetMesh(), 
-                FAttachmentTransformRules::SnapToTargetNotIncludingScale, 
-                WeaponSocketName);
-        }
-        else
-        {
-            CurrentWeapon->AttachToComponent(GetRootComponent(), 
-                FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-        }
+        // Attacher l'arme au pivot
+        CurrentWeapon->AttachToComponent(WeaponPivotComponent, 
+            FAttachmentTransformRules::SnapToTargetNotIncludingScale);
         
         CurrentWeapon->SetOwner(this);
+        
+        UE_LOG(LogTemp, Warning, TEXT("Client successfully created weapon: %s"), *CurrentWeapon->GetName());
     }
     else
     {
         UE_LOG(LogTemp, Error, TEXT("Client failed to create weapon!"));
     }
 }
+
 void AWormCharacter::ApplyDamageToWorm(float DamageAmount, FVector ImpactDirection)
 {
     if (HasAuthority())
@@ -853,7 +899,11 @@ void AWormCharacter::SetIsMyTurn(bool bNewTurn)
             GetCharacterMovement()->Velocity = FVector::ZeroVector;
             GetCharacterMovement()->MaxWalkSpeed = 0;
         }
-        
+        if (bNewTurn && IsLocallyControlled())
+        {
+            UE_LOG(LogTemp, Warning, TEXT("My turn started - validating camera components"));
+            ValidateCameraComponents();
+        }
         // Appeler l'événement BlueprintNativeEvent seulement si l'état a changé
         if (bOldTurn != bIsMyTurn)
         {
@@ -1046,7 +1096,6 @@ void AWormCharacter::DiagnoseWeapons()
 
 void AWormCharacter::SetAiming(bool bIsAiming)
 {
-    // Si on a une arme, activer/désactiver la prévisualisation
     if (CurrentWeapon)
     {
         // Appeler la méthode pour montrer/cacher la trajectoire
@@ -1056,9 +1105,18 @@ void AWormCharacter::SetAiming(bool bIsAiming)
     // Basculer le mode de caméra si activé
     if (bUseFirstPersonViewWhenAiming)
     {
-        ToggleCameraMode(bIsAiming);
+        // Choisir le mode approprié selon l'état de visée
+        ECameraMode DesiredMode = bIsAiming 
+            ? ECameraMode::FirstPerson 
+            : ECameraMode::ThirdPerson;
+        
+        // Ne changer que si nécessaire
+        if (CurrentCameraMode != DesiredMode)
+        {
+            SetCameraMode(DesiredMode);
+        }
     }
-    
+    // Widget de visée
     if (bIsAiming)
     {
         if (IsLocallyControlled() && AimingWidgetClass && !AimingWidget)
@@ -1079,36 +1137,52 @@ void AWormCharacter::SetAiming(bool bIsAiming)
             AimingWidget = nullptr;
         }
     }
-
 }
 
 void AWormCharacter::ToggleCameraMode(bool bFirstPerson)
 {
-    if (FollowCamera && FPSCamera)
+    // Vérifier que les deux caméras existent avant de continuer
+    if (!FollowCamera || !FPSCamera)
     {
-        FollowCamera->SetActive(!bFirstPerson);
-        FPSCamera->SetActive(bFirstPerson);
+        UE_LOG(LogTemp, Error, TEXT("Camera components are null! FollowCamera: %p, FPSCamera: %p"), 
+            FollowCamera, FPSCamera);
+        return;
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("ToggleCameraMode: Switching to %s view"), 
+        bFirstPerson ? TEXT("first-person") : TEXT("third-person"));
         
-        // Contrôle de la visibilité du mesh en FPS pour éviter les clips/clipping
-        if (bFirstPerson)
-        {
-            // Option 1: Cacher tout le mesh (simple mais peut être indésirable)
-            // GetMesh()->SetOwnerNoSee(true);
-            
-            // Option 2: Ajuster la distance de rendu (meilleur)
-            FollowCamera->SetRelativeLocation(FVector(0, 0, -50));
-        }
-        else
-        {
-            // Restaurer la visibilité normale
-            // GetMesh()->SetOwnerNoSee(false);
-            FollowCamera->SetRelativeLocation(OriginalCameraLocation);
-        }
+    // Activer/désactiver les caméras
+    FollowCamera->SetActive(!bFirstPerson);
+    FPSCamera->SetActive(bFirstPerson);
+    
+    // Vérifier l'état après activation
+    UE_LOG(LogTemp, Warning, TEXT("Camera activation: FollowCamera: %s, FPSCamera: %s"),
+        FollowCamera->IsActive() ? TEXT("Active") : TEXT("Inactive"),
+        FPSCamera->IsActive() ? TEXT("Active") : TEXT("Inactive"));
+    
+    // Contrôle de la visibilité du mesh en FPS pour éviter les clips/clipping
+    if (bFirstPerson)
+    {
+        // Option 2: Ajuster la distance de rendu (meilleur)
+        FollowCamera->SetRelativeLocation(FVector(0, 0, -50));
+    }
+    else
+    {
+        // Restaurer la visibilité normale
+        FollowCamera->SetRelativeLocation(OriginalCameraLocation);
+        UE_LOG(LogTemp, Warning, TEXT("Restored camera to position: %s"), 
+            *OriginalCameraLocation.ToString());
     }
 }
-
 void AWormCharacter::OnAimActionStarted(const FInputActionValue& Value)
 {
+    // Valider les caméras avant d'activer le mode visée
+    if (IsLocallyControlled())
+    {
+        ValidateCameraComponents();
+    }
+    
     SetAiming(true);
 }
 
@@ -1170,5 +1244,269 @@ void AWormCharacter::AdjustPower(float PowerLevel)
         float Delta = (ActualPower - CurrentPower) / CurrentWeapon->PowerAdjustmentStep;
         
         CurrentWeapon->AdjustPower(Delta);
+    }
+}
+bool AWormCharacter::Server_UpdateWeaponRotation_Validate(FRotator NewRotation)
+{
+    return true;
+}
+
+void AWormCharacter::Server_UpdateWeaponRotation_Implementation(FRotator NewRotation)
+{
+    if (WeaponPivotComponent)
+    {
+        WeaponPivotComponent->SetWorldRotation(FRotator(0.0f, NewRotation.Yaw, 0.0f));
+        
+        // Propager aux clients via Multicast si nécessaire
+        Multicast_UpdateWeaponRotation(NewRotation);
+    }
+}
+
+
+void AWormCharacter::Multicast_UpdateWeaponRotation_Implementation(FRotator NewRotation)
+{
+    // Ne pas exécuter sur le client qui a envoyé la rotation (pour éviter les doublons)
+    if (!IsLocallyControlled() && WeaponPivotComponent)
+    {
+        WeaponPivotComponent->SetWorldRotation(FRotator(0.0f, NewRotation.Yaw, 0.0f));
+    }
+}
+
+void AWormCharacter::ValidateCameraComponents()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Validating camera components for %s"), *GetName());
+    
+    bool bNeedsRecreation = false;
+    
+    // Vérifier si CameraBoom existe
+    if (!CameraBoom)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("CameraBoom is missing, recreating..."));
+        CameraBoom = NewObject<USpringArmComponent>(this, TEXT("RecreatedCameraBoom"));
+        CameraBoom->SetupAttachment(RootComponent);
+        CameraBoom->TargetArmLength = DefaultCameraDistance;
+        CameraBoom->bUsePawnControlRotation = true;
+        CameraBoom->RegisterComponent();
+        bNeedsRecreation = true;
+    }
+    
+    // Vérifier FollowCamera
+    if (!FollowCamera)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("FollowCamera is missing, recreating..."));
+        FollowCamera = NewObject<UCameraComponent>(this, TEXT("RecreatedFollowCamera"));
+        FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
+        FollowCamera->bUsePawnControlRotation = false;
+        FollowCamera->RegisterComponent();
+        FollowCamera->SetActive(true);
+        bNeedsRecreation = true;
+    }
+    
+    // Vérifier FPSCamera
+    if (!FPSCamera)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("FPSCamera is missing, recreating..."));
+        FPSCamera = NewObject<UCameraComponent>(this, TEXT("RecreatedFPSCamera"));
+        FPSCamera->SetupAttachment(GetMesh(), TEXT("head"));
+        FPSCamera->bUsePawnControlRotation = true;
+        FPSCamera->SetActive(false);
+        FPSCamera->RegisterComponent();
+        bNeedsRecreation = true;
+    }
+    
+    // Si on a recréé des composants, réinitialiser les paramètres
+    if (bNeedsRecreation)
+    {
+        // Sauvegarder la position originale
+        if (FollowCamera)
+        {
+            OriginalCameraLocation = FollowCamera->GetRelativeLocation();
+        }
+        
+        // Définir la distance de caméra
+        if (CameraBoom)
+        {
+            CurrentCameraDistance = DefaultCameraDistance;
+            CameraBoom->TargetArmLength = CurrentCameraDistance;
+        }
+    }
+    
+    // Vérifier l'état des caméras
+    UE_LOG(LogTemp, Warning, TEXT("Camera components: CameraBoom: %p, FollowCamera: %p, FPSCamera: %p"),
+        CameraBoom, FollowCamera, FPSCamera);
+}
+
+void AWormCharacter::SetCameraMode(ECameraMode NewMode)
+{
+    // Si le mode est déjà celui demandé, ne rien faire
+    if (CurrentCameraMode == NewMode)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Camera is already in %s mode"), 
+            NewMode == ECameraMode::FirstPerson ? TEXT("first-person") : TEXT("third-person"));
+        return;
+    }
+    
+    // Enregistrer l'ancien mode pour le log
+    ECameraMode OldMode = CurrentCameraMode;
+    
+    // Définir le nouveau mode
+    CurrentCameraMode = NewMode;
+    
+    UE_LOG(LogTemp, Warning, TEXT("SetCameraMode: Switching from %s to %s"),
+        OldMode == ECameraMode::FirstPerson ? TEXT("first-person") : TEXT("third-person"),
+        NewMode == ECameraMode::FirstPerson ? TEXT("first-person") : TEXT("third-person"));
+    
+    // Vérifier que les composants existent
+    if (!FollowCamera || !FPSCamera || !CameraBoom)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Camera components missing in SetCameraMode: CameraBoom: %p, FollowCamera: %p, FPSCamera: %p"),
+            CameraBoom, FollowCamera, FPSCamera);
+        
+        // Tenter de récupérer les composants
+        if (!CameraBoom) CameraBoom = FindComponentByClass<USpringArmComponent>();
+        if (!FollowCamera) FollowCamera = FindComponentByClass<UCameraComponent>();
+        if (!FPSCamera) 
+        {
+            // Recherche plus spécifique pour FPSCamera
+            TArray<UCameraComponent*> Cameras;
+            GetComponents<UCameraComponent>(Cameras);
+            for (UCameraComponent* Camera : Cameras)
+            {
+                if (Camera != FollowCamera)
+                {
+                    FPSCamera = Camera;
+                    break;
+                }
+            }
+        }
+        
+        // Si toujours pas de caméras, sortir
+        if (!FollowCamera || !FPSCamera || !CameraBoom)
+        {
+            UE_LOG(LogTemp, Error, TEXT("Still missing camera components after recovery attempt"));
+            return;
+        }
+    }
+    
+    APlayerController* PC = Cast<APlayerController>(GetController());
+    
+    // Configurer les caméras selon le mode
+    if (NewMode == ECameraMode::FirstPerson)
+    {
+        // Désactiver la caméra TPS
+        if (FollowCamera)
+        {
+            FollowCamera->SetActive(false);
+            UE_LOG(LogTemp, Verbose, TEXT("Deactivated FollowCamera"));
+        }
+        
+        // Activer la caméra FPS
+        if (FPSCamera)
+        {
+            FPSCamera->SetActive(true);
+            UE_LOG(LogTemp, Verbose, TEXT("Activated FPSCamera"));
+            
+            // S'assurer que la caméra FPS est bien attachée à la tête
+            if (!FPSCamera->IsAttachedTo(GetMesh()) && GetMesh())
+            {
+                FPSCamera->AttachToComponent(GetMesh(), 
+                    FAttachmentTransformRules::SnapToTargetNotIncludingScale, 
+                    TEXT("head"));
+                UE_LOG(LogTemp, Verbose, TEXT("Attached FPSCamera to head socket"));
+            }
+        }
+        
+        // Cacher le mesh du personnage en FPS
+        if (GetMesh())
+        {
+            GetMesh()->SetOwnerNoSee(true);
+            UE_LOG(LogTemp, Verbose, TEXT("Set mesh to not visible to owner"));
+        }
+    }
+    else // ThirdPerson
+    {
+        // Désactiver la caméra FPS
+        if (FPSCamera)
+        {
+            FPSCamera->SetActive(false);
+            UE_LOG(LogTemp, Verbose, TEXT("Deactivated FPSCamera"));
+        }
+        
+        // Activer la caméra TPS
+        if (FollowCamera)
+        {
+            FollowCamera->SetActive(true);
+            UE_LOG(LogTemp, Verbose, TEXT("Activated FollowCamera"));
+            
+            // S'assurer que la caméra TPS est bien attachée au bras
+            if (!FollowCamera->IsAttachedTo(CameraBoom) && CameraBoom)
+            {
+                FollowCamera->AttachToComponent(CameraBoom, 
+                    FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+                    USpringArmComponent::SocketName);
+                UE_LOG(LogTemp, Verbose, TEXT("Attached FollowCamera to CameraBoom"));
+            }
+            
+            // Restaurer la position originale si nécessaire
+            if (!OriginalCameraLocation.IsZero())
+            {
+                FollowCamera->SetRelativeLocation(OriginalCameraLocation);
+                UE_LOG(LogTemp, Verbose, TEXT("Reset camera location to: %s"), 
+                    *OriginalCameraLocation.ToString());
+            }
+        }
+        
+        // Rendre le mesh visible à nouveau
+        if (GetMesh())
+        {
+            GetMesh()->SetOwnerNoSee(false);
+            UE_LOG(LogTemp, Verbose, TEXT("Set mesh to visible to owner"));
+        }
+    }
+    
+    // Forcer la mise à jour du viewport
+    if (PC && IsLocallyControlled())
+    {
+        // Utiliser SetViewTarget pour être sûr que la vue est mise à jour
+        PC->SetViewTargetWithBlend(this, 0.1f);
+        UE_LOG(LogTemp, Warning, TEXT("Updated viewtarget for player controller"));
+    }
+    
+    // Vérifier l'état final des caméras
+    UE_LOG(LogTemp, Warning, TEXT("Camera final state after SetCameraMode: FollowCamera: %s, FPSCamera: %s"),
+        FollowCamera && FollowCamera->IsActive() ? TEXT("Active") : TEXT("Inactive"),
+        FPSCamera && FPSCamera->IsActive() ? TEXT("Active") : TEXT("Inactive"));
+}
+
+void AWormCharacter::ForceToggleCamera()
+{
+    // Basculer entre les deux modes
+    ECameraMode NewMode = (CurrentCameraMode == ECameraMode::FirstPerson) 
+        ? ECameraMode::ThirdPerson 
+        : ECameraMode::FirstPerson;
+    
+    // Appeler la fonction dédiée
+    SetCameraMode(NewMode);
+}
+
+void AWormCharacter::OnTestCameraAction(const FInputActionValue& Value)
+{
+    // Basculer explicitement entre les modes avec la nouvelle fonction
+    if (CurrentCameraMode == ECameraMode::FirstPerson)
+    {
+        SetCameraMode(ECameraMode::ThirdPerson);
+    }
+    else
+    {
+        SetCameraMode(ECameraMode::FirstPerson);
+    }
+    
+    // Afficher un message à l'écran
+    if (GEngine && IsLocallyControlled())
+    {
+        FString Message = FString::Printf(TEXT("Camera Mode: %s"), 
+            CurrentCameraMode == ECameraMode::FirstPerson ? TEXT("First Person") : TEXT("Third Person"));
+        
+        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow, Message);
     }
 }
