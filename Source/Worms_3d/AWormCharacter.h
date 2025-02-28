@@ -7,6 +7,7 @@
 #include "InputActionValue.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "Camera/CameraComponent.h" // Include the header for UCameraComponent
 #include "GameFramework/PlayerController.h"
 #include "AWormCharacter.generated.h"
 
@@ -26,6 +27,19 @@ class WORMS_3D_API AWormCharacter : public ACharacter
 public:
     AWormCharacter();
 
+    UPROPERTY()
+    UCameraComponent* TempCamera;
+    
+    UFUNCTION(BlueprintCallable, Category = "Camera")
+    void SwitchToFirstPersonView();
+
+    UFUNCTION(BlueprintCallable, Category = "Camera")
+    void SwitchToThirdPersonView();
+
+    UFUNCTION(BlueprintPure, Category = "Camera")
+    bool IsViewingFromFirstPerson() const;
+
+    
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI")
     TSubclassOf<UUserWidget> AimingWidgetClass;
 
