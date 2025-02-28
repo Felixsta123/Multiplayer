@@ -50,6 +50,7 @@ void AWormProjectile::BeginPlay()
     // Démarrer le timer pour l'explosion automatique
     if (HasAuthority())
     {
+        
         GetWorldTimerManager().SetTimer(DetonationTimerHandle, this, &AWormProjectile::Explode, DetonationDelay, false);
     }
 }

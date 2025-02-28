@@ -63,6 +63,8 @@ AWormCharacter::AWormCharacter()
     CameraZoomSpeed = 50.0f;
     CurrentCameraDistance = DefaultCameraDistance;
     bUseFirstPersonViewWhenAiming = true;
+    OriginalCameraLocation = FollowCamera->GetRelativeLocation();
+
 }
 
 // Modifie BeginPlay pour initialiser l'Enhanced Input
@@ -113,6 +115,7 @@ void AWormCharacter::BeginPlay()
         }
     }
 }
+
 // Nouvelle fonction pour gérer quand un controller possède ce personnage
 void AWormCharacter::PossessedBy(AController* NewController)
 {
@@ -332,7 +335,7 @@ void AWormCharacter::OnPrevWeaponAction(const FInputActionValue& Value)
 void AWormCharacter::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    if (WeaponPivotComponent && CurrentWeapon)
+    if (WeaponPivotComponent && CurrentWeapon && IsLocallyControlled())
     {
         FRotator ControlRotation = GetControlRotation();
         WeaponPivotComponent->SetWorldRotation(FRotator(0.0f, ControlRotation.Yaw, 0.0f));
@@ -389,6 +392,7 @@ void AWormCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
     DOREPLIFETIME(AWormCharacter, CurrentWeapon);
     DOREPLIFETIME(AWormCharacter, MovementPoints);
     DOREPLIFETIME(AWormCharacter, AvailableWeapons);
+    DOREPLIFETIME(AWormCharacter, WeaponPivotComponent);
 }
 void AWormCharacter::MoveForward(float Value)
 {
@@ -682,10 +686,27 @@ void AWormCharacter::OnRep_CurrentWeaponIndex()
     // Détruire l'arme actuelle si elle existe
     if (CurrentWeapon)
     {
-        CurrentWeapon->Destroy();
-        CurrentWeapon = nullptr;
+        // Modification ici pour utiliser la même logique que dans SpawnCurrentWeapon
+        if (GetMesh()->DoesSocketExist(WeaponSocketName))
+        {
+            // Créer un component scene pour suivre la direction du regard (comme dans SpawnCurrentWeapon)
+            USceneComponent* WeaponPivot = NewObject<USceneComponent>(this, TEXT("WeaponPivot"));
+            WeaponPivot->RegisterComponent();
+            WeaponPivot->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, WeaponSocketName);
+            
+            // Réattacher l'arme au pivot
+            CurrentWeapon->GetRootComponent()->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+            CurrentWeapon->AttachToComponent(WeaponPivot, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+            
+            // Configurer l'update de rotation dans Tick
+            WeaponPivotComponent = WeaponPivot;
+        }
+        else
+        {
+            CurrentWeapon->AttachToComponent(GetRootComponent(), 
+                FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+        }
     }
-    
     // Vérifier si nous avons des armes disponibles
     if (AvailableWeapons.Num() <= 0)
     {
@@ -982,7 +1003,19 @@ void AWormCharacter::DiagnoseWeapons()
     UE_LOG(LogTemp, Warning, TEXT("AvailableWeapons.Num(): %d"), AvailableWeapons.Num());
     UE_LOG(LogTemp, Warning, TEXT("CurrentWeaponIndex: %d"), CurrentWeaponIndex);
     UE_LOG(LogTemp, Warning, TEXT("CurrentWeapon: %s"), CurrentWeapon ? *CurrentWeapon->GetName() : TEXT("NULL"));
-    
+    if (!HasAuthority() && IsLocallyControlled())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Client-specific weapon diagnosis:"));
+        UE_LOG(LogTemp, Warning, TEXT("  - Control Rotation: %s"), *GetControlRotation().ToString());
+        if (WeaponPivotComponent)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("  - Weapon Pivot Rotation: %s"), *WeaponPivotComponent->GetComponentRotation().ToString());
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("  - Weapon Pivot Component is NULL"));
+        }
+    }
     if (GetMesh())
     {
         UE_LOG(LogTemp, Warning, TEXT("Socket '%s' exists: %s"), 
@@ -1063,13 +1096,13 @@ void AWormCharacter::ToggleCameraMode(bool bFirstPerson)
             // GetMesh()->SetOwnerNoSee(true);
             
             // Option 2: Ajuster la distance de rendu (meilleur)
-            FollowCamera->SetRelativeLocation(FVector(0, 0, 0));
+            FollowCamera->SetRelativeLocation(FVector(0, 0, -50));
         }
         else
         {
             // Restaurer la visibilité normale
             // GetMesh()->SetOwnerNoSee(false);
-            FollowCamera->SetRelativeLocation(FVector(0, 0, 0));
+            FollowCamera->SetRelativeLocation(OriginalCameraLocation);
         }
     }
 }

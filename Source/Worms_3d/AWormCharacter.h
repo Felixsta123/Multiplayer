@@ -119,7 +119,7 @@ public:
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Worm")
     AWormWeapon* CurrentWeapon;
     
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", Replicated)
     USceneComponent* WeaponPivotComponent;
     
     // Fonction pour adjuster la puissance du tir
@@ -281,5 +281,6 @@ protected:
     // Initialisation du Enhanced Input System
     void SetupEnhancedInput(APlayerController* PlayerController);
     
-
+    UPROPERTY()
+    FVector OriginalCameraLocation;
 };

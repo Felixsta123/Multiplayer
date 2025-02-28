@@ -2,6 +2,7 @@
 #include "WormWeapon.h"
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
+#include "AWormCharacter.h"
 #include "Components/SplineComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "DrawDebugHelpers.h"
@@ -11,7 +12,7 @@
 
 AWormWeapon::AWormWeapon()
 {
-    PrimaryActorTick.bCanEverTick = true; // Activé pour mettre à jour la trajectoire
+    PrimaryActorTick.bCanEverTick = true;
     
     // Créer le composant mesh
     WeaponMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("WeaponMesh"));
@@ -21,6 +22,9 @@ AWormWeapon::AWormWeapon()
     TrajectorySpline = CreateDefaultSubobject<USplineComponent>(TEXT("TrajectorySpline"));
     TrajectorySpline->SetupAttachment(RootComponent);
     TrajectorySpline->SetVisibility(false);
+    
+    // *** Ajouter cette ligne pour que la spline ne soit pas répliquée ***
+    TrajectorySpline->SetIsReplicated(false);
     
     // Configurer la réplication
     bReplicates = true;
@@ -46,71 +50,76 @@ void AWormWeapon::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Initialiser les points de trajectoire
-    for (int32 i = 0; i < TrajectoryPointCount; ++i)
-    {
-        UStaticMeshComponent* PointMesh = NewObject<UStaticMeshComponent>(this);
-        PointMesh->SetupAttachment(TrajectorySpline);
-
-        // Vérifier si le mesh de point est assigné
-        if (TrajectoryPointMesh)
-        {
-            PointMesh->SetStaticMesh(TrajectoryPointMesh);
-        }
-
-        PointMesh->SetRelativeScale3D(FVector(0.5f, 0.5f, 0.5f));
-        PointMesh->SetVisibility(false);
-        PointMesh->RegisterComponent();
-        TrajectoryPoints.Add(PointMesh);
-    }
-
     APawn* OwnerPawn = Cast<APawn>(GetOwner());
-    if (AimingEffect && OwnerPawn && OwnerPawn->IsLocallyControlled())
+    
+    // Ne créer les points de trajectoire que pour le client qui contrôle le personnage
+    if (OwnerPawn && OwnerPawn->IsLocallyControlled())
     {
-        AimingEffectComponent = UGameplayStatics::SpawnEmitterAttached(
-            AimingEffect,
-            WeaponMesh,
-            MuzzleSocketName,
-            FVector::ZeroVector,
-            FRotator::ZeroRotator,
-            FVector(1.0f),
-            EAttachLocation::SnapToTarget,
-            false,
-            EPSCPoolMethod::AutoRelease
-        );
-
-        if (AimingEffectComponent)
+        // Initialiser les points de trajectoire
+        for (int32 i = 0; i < TrajectoryPointCount; ++i)
         {
-            AimingEffectComponent->SetVisibility(false);
-        }
-    }
+            UStaticMeshComponent* PointMesh = NewObject<UStaticMeshComponent>(this);
+            PointMesh->SetupAttachment(TrajectorySpline);
 
-    // Créer un matériau dynamique pour la trajectoire
-    if (TrajectoryMaterial)
-    {
-        TrajectoryMaterialInstance = UMaterialInstanceDynamic::Create(TrajectoryMaterial, this);
-
-        // Appliquer le matériau à tous les points de trajectoire
-        for (UStaticMeshComponent* Point : TrajectoryPoints)
-        {
-            if (Point && TrajectoryMaterialInstance)
+            if (TrajectoryPointMesh)
             {
-                Point->SetMaterial(0, TrajectoryMaterialInstance);
+                PointMesh->SetStaticMesh(TrajectoryPointMesh);
+            }
+
+            PointMesh->SetRelativeScale3D(FVector(0.5f, 0.5f, 0.5f));
+            PointMesh->SetVisibility(false);
+            PointMesh->RegisterComponent();
+            TrajectoryPoints.Add(PointMesh);
+        }
+
+        // Créer l'effet d'aide à la visée
+        if (AimingEffect)
+        {
+            AimingEffectComponent = UGameplayStatics::SpawnEmitterAttached(
+                AimingEffect,
+                WeaponMesh,
+                MuzzleSocketName,
+                FVector::ZeroVector,
+                FRotator::ZeroRotator,
+                FVector(1.0f),
+                EAttachLocation::SnapToTarget,
+                false,
+                EPSCPoolMethod::AutoRelease
+            );
+
+            if (AimingEffectComponent)
+            {
+                AimingEffectComponent->SetVisibility(false);
             }
         }
+
+        // Créer un matériau dynamique pour la trajectoire
+        if (TrajectoryMaterial)
+        {
+            TrajectoryMaterialInstance = UMaterialInstanceDynamic::Create(TrajectoryMaterial, this);
+
+            // Appliquer le matériau à tous les points de trajectoire
+            for (UStaticMeshComponent* Point : TrajectoryPoints)
+            {
+                if (Point && TrajectoryMaterialInstance)
+                {
+                    Point->SetMaterial(0, TrajectoryMaterialInstance);
+                }
+            }
+        }
+
+        // Créer le composant de prévisualisation d'impact
+        if (ImpactPreviewMesh)
+        {
+            ImpactPreviewComponent = NewObject<UStaticMeshComponent>(this);
+            ImpactPreviewComponent->SetStaticMesh(ImpactPreviewMesh);
+            ImpactPreviewComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+            ImpactPreviewComponent->SetVisibility(false);
+            ImpactPreviewComponent->RegisterComponent();
+        }
     }
 
-    // Créer le composant de prévisualisation d'impact
-    if (ImpactPreviewMesh && OwnerPawn && OwnerPawn->IsLocallyControlled())
-    {
-        ImpactPreviewComponent = NewObject<UStaticMeshComponent>(this);
-        ImpactPreviewComponent->SetStaticMesh(ImpactPreviewMesh);
-        ImpactPreviewComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-        ImpactPreviewComponent->SetVisibility(false);
-        ImpactPreviewComponent->RegisterComponent();
-    }
-
-    // Cacher la trajectoire au début
+    // Cacher la trajectoire au début (pour tous les clients)
     ShowTrajectory(false);
 }
 
@@ -127,13 +136,27 @@ void AWormWeapon::Tick(float DeltaTime)
 
 void AWormWeapon::ShowTrajectory(bool bShow)
 {
+    // Vérification que ce code s'exécute uniquement sur le client local qui est actuellement en train de jouer
+    APawn* OwnerPawn = Cast<APawn>(GetOwner());
+    AWormCharacter* OwnerChar = Cast<AWormCharacter>(OwnerPawn);
+    
+    // Vérifier trois conditions:
+    // 1. L'arme appartient à un Pawn
+    // 2. C'est le Pawn contrôlé localement
+    // 3. C'est son tour de jouer
+    if (!OwnerPawn || !OwnerPawn->IsLocallyControlled() || (OwnerChar && !OwnerChar->IsMyTurn()))
+    {
+        // Si non, ne pas montrer/cacher la trajectoire
+        return;
+    }
+
     if (!TrajectorySpline)
     {
         UE_LOG(LogTemp, Error, TEXT("Cannot show trajectory: TrajectorySpline is null!"));
         return;
     }
     
-    // Activer/désactiver la visibilité de la spline et des points
+    // Le reste du code reste inchangé
     TrajectorySpline->SetVisibility(bShow);
     if (AimingEffectComponent)
     {
@@ -152,7 +175,6 @@ void AWormWeapon::ShowTrajectory(bool bShow)
         }
     }
     
-    // Mettre à jour la trajectoire si elle devient visible
     if (bShow)
     {
         UpdateTrajectory();
@@ -161,16 +183,17 @@ void AWormWeapon::ShowTrajectory(bool bShow)
 
 void AWormWeapon::UpdateTrajectory()
 {
+    APawn* OwnerPawn = Cast<APawn>(GetOwner());
+    AWormCharacter* OwnerChar = Cast<AWormCharacter>(OwnerPawn);
+    
+    if (!OwnerPawn || !OwnerPawn->IsLocallyControlled() || (OwnerChar && !OwnerChar->IsMyTurn()))
+    {
+        return;
+    }
+
     if (!TrajectorySpline)
     {
         UE_LOG(LogTemp, Error, TEXT("Cannot update trajectory: TrajectorySpline is null!"));
-        return;
-    }
-    
-    // Uniquement pour les clients contrôlés localement
-    APawn* OwnerPawn = Cast<APawn>(GetOwner());
-    if (!OwnerPawn || !OwnerPawn->IsLocallyControlled())
-    {
         return;
     }
     
@@ -217,8 +240,10 @@ void AWormWeapon::UpdateTrajectory()
         if (GetWorld()->LineTraceSingleByChannel(HitResult, CurrentLocation, EndTrace, ECC_Visibility, CollisionParams))
         {
             // Dessiner un point de débug à l'emplacement de l'impact (visible en PIE)
-            DrawDebugSphere(GetWorld(), HitResult.Location, 20.0f, 8, FColor::Red, false, 0.1f);
-            
+            if (OwnerPawn->IsLocallyControlled())
+            {
+                DrawDebugSphere(GetWorld(), HitResult.Location, 20.0f, 8, FColor::Red, false, 0.1f);
+            }            
             // Ajouter le point d'impact et arrêter la simulation
             SimulatedTrajectoryPoints.Add(HitResult.Location);
             break;
@@ -329,7 +354,9 @@ void AWormWeapon::Fire()
         SpawnParams.Owner = GetOwner();
         SpawnParams.Instigator = Cast<APawn>(GetOwner());
         ShowTrajectory(false);
-
+        //ignore the weapon itself for collision
+        SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+        
         // Spawner le projectile
         AActor* Projectile = GetWorld()->SpawnActor<AActor>(ProjectileClass, MuzzleLocation, MuzzleRotation, SpawnParams);
         
