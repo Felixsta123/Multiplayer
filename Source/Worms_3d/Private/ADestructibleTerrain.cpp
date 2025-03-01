@@ -565,10 +565,7 @@ bool ADestructibleTerrain::IsVertexInModification(const FVector& Vertex, const F
     FVector LocalVertex = Vertex;
     
     // Log pour déboguer
-    UE_LOG(LogTemp, Log, TEXT("Checking vertex at (%f, %f, %f) against modification at (%f, %f) with size (%f, %f)"),
-        LocalVertex.X, LocalVertex.Y, LocalVertex.Z,
-        Modification.Position.X, Modification.Position.Y,
-        Modification.Size.X, Modification.Size.Y);
+    //UE_LOG(LogTemp, Log, TEXT("Checking vertex at (%f, %f, %f) against modification at (%f, %f) with size (%f, %f)"),LocalVertex.X, LocalVertex.Y, LocalVertex.Z,Modification.Position.X, Modification.Position.Y,Modification.Size.X, Modification.Size.Y);
     
     // Considérer que le vertex est en 2D (X, Z)
     float VertexX = LocalVertex.X;

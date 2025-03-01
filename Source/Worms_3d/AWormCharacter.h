@@ -20,17 +20,6 @@ public:
     AWormCharacter();
 
     // === SYSTÈME DE CAMÉRA SIMPLIFIÉ ===
-    UPROPERTY()
-    UCameraComponent* TempCamera;
-    
-    UFUNCTION(BlueprintCallable, Category = "Camera")
-    void SwitchToFirstPersonView();
-
-    UFUNCTION(BlueprintCallable, Category = "Camera")
-    void SwitchToThirdPersonView();
-
-    UFUNCTION(BlueprintPure, Category = "Camera")
-    bool IsInFirstPersonMode() const;
 
     // Paramètres généraux de caméra
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
@@ -57,7 +46,7 @@ public:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     class UCameraComponent* FollowCamera;
-    // Et ajoutez:
+
     UPROPERTY()
     float DefaultArmLength;
     
@@ -137,8 +126,6 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Debug")
     void DiagnoseWeapons();
     
-    UFUNCTION(BlueprintCallable, Category = "Debug")
-    void DiagnoseCamerasSimple();
 
 protected:
     // === ÉTAT DU PERSONNAGE ===
