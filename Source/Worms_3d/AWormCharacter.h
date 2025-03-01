@@ -46,7 +46,18 @@ public:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     class UCameraComponent* FollowCamera;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UCameraComponent* FPSCamera;
 
+    //SavedCameraDistance
+    float SavedCameraDistance;
+
+    //void AWormCharacter::ToggleCameraMode(bool bUseFPSCamera)
+    UFUNCTION(BlueprintCallable, Category = "Camera")
+    void ToggleCameraMode(bool bUseFPSCamera);
+    
+    UPROPERTY(EditDefaultsOnly, Category = "Camera")
+    FName HeadSocketName;
     UPROPERTY()
     float DefaultArmLength;
     

@@ -39,26 +39,35 @@ AWormCharacter::AWormCharacter()
     GetCharacterMovement()->JumpZVelocity = 600.0f;
     GetCharacterMovement()->BrakingDecelerationWalking = 2000.0f;
     bAutoEndTurnTimerActive = false;
-
+    //set up both the camera boom and the follow camera
     CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
     if (CameraBoom)
     {
         CameraBoom->SetupAttachment(RootComponent);
-        CameraBoom->TargetArmLength = 300.0f; // Distance par défaut
+        CameraBoom->TargetArmLength = DefaultCameraDistance;
         CameraBoom->bUsePawnControlRotation = true;
-        
-        // Stocker la longueur par défaut
-        DefaultArmLength = 300.0f;
-        CurrentCameraDistance = DefaultArmLength;
+        CameraBoom->bEnableCameraLag = true;
+        CameraBoom->CameraLagSpeed = 3.0f;
+        CameraBoom->bEnableCameraRotationLag = true;
+        CameraBoom->CameraRotationLagSpeed = 3.0f;
     }
-    
+
     FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
-    if (FollowCamera && CameraBoom)
+    if (FollowCamera)
     {
         FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
         FollowCamera->bUsePawnControlRotation = false;
     }
     
+    
+    HeadSocketName = "head";
+    FPSCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FPSCamera"));
+    if (FPSCamera && GetMesh())
+    {
+        FPSCamera->SetupAttachment(GetMesh(), HeadSocketName);
+        FPSCamera->bUsePawnControlRotation = true;
+        FPSCamera->SetActive(false); // Désactivée par défaut
+    }
     // Valeurs par défaut pour la caméra
     bIsInFirstPersonMode = false;
     bUseFirstPersonViewWhenAiming = true;
@@ -288,14 +297,13 @@ void AWormCharacter::ZoomCamera(float Amount)
 {
     if (CameraBoom && !bIsInFirstPersonMode) // Ne zoomer qu'en mode TPS
     {
-        // Calculer la nouvelle distance en fonction de l'entrée
+        // Calcul et application du zoom comme actuellement
         CurrentCameraDistance = FMath::Clamp(
             CurrentCameraDistance - (Amount * CameraZoomSpeed),
             MinCameraDistance,
             MaxCameraDistance
         );
         
-        // Appliquer la nouvelle distance au spring arm
         CameraBoom->TargetArmLength = CurrentCameraDistance;
     }
 }
@@ -1108,11 +1116,21 @@ void AWormCharacter::SetAiming(bool bIsAiming)
 
 void AWormCharacter::OnAimActionStarted(const FInputActionValue& Value)
 {
+    if (bUseFirstPersonViewWhenAiming)
+    {
+        ToggleCameraMode(true); // Passer en FPS
+    }
+    
     SetAiming(true);
 }
 
 void AWormCharacter::OnAimActionEnded(const FInputActionValue& Value)
 {
+    if (bUseFirstPersonViewWhenAiming)
+    {
+        ToggleCameraMode(false); // Revenir en TPS
+    }
+    
     SetAiming(false);
 }
 
@@ -1171,6 +1189,7 @@ void AWormCharacter::AdjustPower(float PowerLevel)
         CurrentWeapon->AdjustPower(Delta);
     }
 }
+
 bool AWormCharacter::Server_UpdateWeaponRotation_Validate(FRotator NewRotation)
 {
     return true;
@@ -1197,3 +1216,31 @@ void AWormCharacter::Multicast_UpdateWeaponRotation_Implementation(FRotator NewR
     }
 }
 
+
+void AWormCharacter::ToggleCameraMode(bool bUseFPSCamera)
+{
+    if (FollowCamera && FPSCamera)
+    {
+        FollowCamera->SetActive(!bUseFPSCamera);
+        FPSCamera->SetActive(bUseFPSCamera);
+            bIsInFirstPersonMode = bUseFPSCamera;
+        
+        // Cacher le mesh du personnage en FPS si nécessaire
+        if (bUseFPSCamera)
+        {
+            // Sauvegarder la position actuelle du CameraBoom
+            SavedCameraDistance = CameraBoom->TargetArmLength;
+            UE_LOG(LogTemp, Log, TEXT("Saved camera distance: %f"), SavedCameraDistance);   
+            // Option: Rendre invisible certaines parties du mesh
+            // GetMesh()->SetOwnerNoSee(true);
+        }
+        else
+        {
+            // Restaurer la position du CameraBoom
+            CameraBoom->TargetArmLength = SavedCameraDistance;
+            UE_LOG(LogTemp, Log, TEXT("Restored camera distance: %f"), SavedCameraDistance);
+            // Option: Rendre visible le mesh complet
+            // GetMesh()->SetOwnerNoSee(false);
+        }
+    }
+}
