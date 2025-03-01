@@ -32,7 +32,6 @@ AWormCharacter::AWormCharacter()
     MovementPoints = MaxMovementPoints;
     WeaponCooldown = 0.5f;
     LastWeaponUseTime = 0.0f;
-    CurrentCameraMode = ECameraMode::ThirdPerson;
 
     // Configurer le Character Movement Component
     GetCharacterMovement()->GravityScale = 1.5f;
@@ -40,31 +39,21 @@ AWormCharacter::AWormCharacter()
     GetCharacterMovement()->JumpZVelocity = 600.0f;
     GetCharacterMovement()->BrakingDecelerationWalking = 2000.0f;
     bAutoEndTurnTimerActive = false;
-    // Créer le Spring Arm Component (le bras qui contrôle la distance de la caméra)
+    // Configurer le Spring Arm Component standard
     CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
     CameraBoom->SetupAttachment(RootComponent);
-    CameraBoom->TargetArmLength = 300.0f; // Distance initiale de la caméra
-    CameraBoom->bUsePawnControlRotation = true; // La caméra suit la rotation du contrôleur
+    CameraBoom->TargetArmLength = 300.0f; // Distance par défaut
+    DefaultArmLength = 300.0f; // Sauvegarde pour pouvoir y revenir
+    CameraBoom->bUsePawnControlRotation = true;
     
-    // Créer la caméra principale (TPS)
+    // Une seule caméra principale
     FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
     FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
-    FollowCamera->bUsePawnControlRotation = false; // Le bras ajuste déjà la rotation
+    FollowCamera->bUsePawnControlRotation = false;
     
-    // Créer la caméra FPS (pour le mode visée)
-    FPSCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FPSCamera"));
-    FPSCamera->SetupAttachment(GetMesh(), TEXT("head")); // Utiliser le socket de la tête
-    FPSCamera->bUsePawnControlRotation = true;
-    FPSCamera->SetActive(false); // Désactivée par défaut
-    
-    // Valeurs par défaut pour le zoom de caméra
-    DefaultCameraDistance = 300.0f;
-    MinCameraDistance = 100.0f;
-    MaxCameraDistance = 800.0f;
-    CameraZoomSpeed = 50.0f;
-    CurrentCameraDistance = DefaultCameraDistance;
+    // Valeurs par défaut
+    bIsInFirstPersonMode = false;
     bUseFirstPersonViewWhenAiming = true;
-    TempCamera = nullptr;
 
 }
 
@@ -75,31 +64,16 @@ void AWormCharacter::BeginPlay()
     
     LastPosition = GetActorLocation();
     LastWeaponUseTime = UGameplayStatics::GetTimeSeconds(this) - (WeaponCooldown * 2);
+    
     if (CameraBoom)
     {
-        CurrentCameraDistance = DefaultCameraDistance;
+            CurrentCameraDistance = DefaultCameraDistance;
         CameraBoom->TargetArmLength = CurrentCameraDistance;
     }
-
-    ValidateCameraComponents();
     
-    if (FollowCamera)
-    {
-        OriginalCameraLocation = FollowCamera->GetRelativeLocation();
-        UE_LOG(LogTemp, Warning, TEXT("Saved original camera location: %s"), 
-            *OriginalCameraLocation.ToString());
-    }
-
-    // Sauvegarder la position originale si ce n'est pas déjà fait
-    if (FollowCamera && OriginalCameraLocation.IsZero())
-    {
-        OriginalCameraLocation = FollowCamera->GetRelativeLocation();
-        UE_LOG(LogTemp, Warning, TEXT("Saved original camera location in BeginPlay: %s"), 
-            *OriginalCameraLocation.ToString());
-    }
-    
+    // Commencez en mode TPS (par défaut)
+    bIsInFirstPersonMode = false;
     // Force le mode TPS au démarrage
-    SetCameraMode(ECameraMode::ThirdPerson);
     // Configurer l'Enhanced Input pour le joueur local
     if (IsLocallyControlled())
     {
@@ -302,7 +276,7 @@ void AWormCharacter::OnZoomAction(const FInputActionValue& Value)
 
 void AWormCharacter::ZoomCamera(float Amount)
 {
-    if (CameraBoom)
+    if (CameraBoom && !bIsInFirstPersonMode) // Ne zoomer qu'en mode TPS
     {
         // Calculer la nouvelle distance en fonction de l'entrée
         CurrentCameraDistance = FMath::Clamp(
@@ -900,11 +874,6 @@ void AWormCharacter::SetIsMyTurn(bool bNewTurn)
             GetCharacterMovement()->Velocity = FVector::ZeroVector;
             GetCharacterMovement()->MaxWalkSpeed = 0;
         }
-        if (bNewTurn && IsLocallyControlled())
-        {
-            UE_LOG(LogTemp, Warning, TEXT("My turn started - validating camera components"));
-            ValidateCameraComponents();
-        }
         // Appeler l'événement BlueprintNativeEvent seulement si l'état a changé
         if (bOldTurn != bIsMyTurn)
         {
@@ -1100,18 +1069,17 @@ void AWormCharacter::SetAiming(bool bIsAiming)
     // Si on a une arme, activer/désactiver la prévisualisation
     if (CurrentWeapon)
     {
-        // Appeler la méthode pour montrer/cacher la trajectoire
         CurrentWeapon->ShowTrajectory(bIsAiming);
     }
     
-    // Basculer le mode de caméra si activé
+    // Changement de caméra
     if (bUseFirstPersonViewWhenAiming)
     {
-        if (bIsAiming)
+        if (bIsAiming && !bIsInFirstPersonMode)
         {
             SwitchToFirstPersonView();
         }
-        else
+        else if (!bIsAiming && bIsInFirstPersonMode)
         {
             SwitchToThirdPersonView();
         }
@@ -1140,50 +1108,8 @@ void AWormCharacter::SetAiming(bool bIsAiming)
     }
 }
 
-void AWormCharacter::ToggleCameraMode(bool bFirstPerson)
-{
-    // Vérifier que les deux caméras existent avant de continuer
-    if (!FollowCamera || !FPSCamera)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Camera components are null! FollowCamera: %p, FPSCamera: %p"), 
-            FollowCamera, FPSCamera);
-        return;
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("ToggleCameraMode: Switching to %s view"), 
-        bFirstPerson ? TEXT("first-person") : TEXT("third-person"));
-        
-    // Activer/désactiver les caméras
-    FollowCamera->SetActive(!bFirstPerson);
-    FPSCamera->SetActive(bFirstPerson);
-    
-    // Vérifier l'état après activation
-    UE_LOG(LogTemp, Warning, TEXT("Camera activation: FollowCamera: %s, FPSCamera: %s"),
-        FollowCamera->IsActive() ? TEXT("Active") : TEXT("Inactive"),
-        FPSCamera->IsActive() ? TEXT("Active") : TEXT("Inactive"));
-    
-    // Contrôle de la visibilité du mesh en FPS pour éviter les clips/clipping
-    if (bFirstPerson)
-    {
-        // Option 2: Ajuster la distance de rendu (meilleur)
-        FollowCamera->SetRelativeLocation(FVector(0, 0, -50));
-    }
-    else
-    {
-        // Restaurer la visibilité normale
-        FollowCamera->SetRelativeLocation(OriginalCameraLocation);
-        UE_LOG(LogTemp, Warning, TEXT("Restored camera to position: %s"), 
-            *OriginalCameraLocation.ToString());
-    }
-}
 void AWormCharacter::OnAimActionStarted(const FInputActionValue& Value)
 {
-    // Valider les caméras avant d'activer le mode visée
-    if (IsLocallyControlled())
-    {
-        ValidateCameraComponents();
-    }
-    
     SetAiming(true);
 }
 
@@ -1273,380 +1199,111 @@ void AWormCharacter::Multicast_UpdateWeaponRotation_Implementation(FRotator NewR
     }
 }
 
-void AWormCharacter::ValidateCameraComponents()
+
+bool AWormCharacter::IsInFirstPersonMode() const
 {
-    UE_LOG(LogTemp, Warning, TEXT("Validating camera components for %s"), *GetName());
-    
-    bool bNeedsRecreation = false;
-    
-    // Vérifier si CameraBoom existe
-    if (!CameraBoom)
+    return bIsInFirstPersonMode;
+}
+void AWormCharacter::SwitchToFirstPersonView()
+{
+    if (!IsLocallyControlled())
+        return;
+
+    // Save the current rotation of the controller
+    FRotator CurrentRotation = GetControlRotation();
+
+    // Detach the camera from the CameraBoom and attach it directly to the head
+    if (FollowCamera)
     {
-        UE_LOG(LogTemp, Warning, TEXT("CameraBoom is missing, recreating..."));
-        CameraBoom = NewObject<USpringArmComponent>(this, TEXT("RecreatedCameraBoom"));
-        CameraBoom->SetupAttachment(RootComponent);
-        CameraBoom->TargetArmLength = DefaultCameraDistance;
-        CameraBoom->bUsePawnControlRotation = true;
-        CameraBoom->RegisterComponent();
-        bNeedsRecreation = true;
-    }
-    
-    // Vérifier FollowCamera
-    if (!FollowCamera)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("FollowCamera is missing, recreating..."));
-        FollowCamera = NewObject<UCameraComponent>(this, TEXT("RecreatedFollowCamera"));
-        FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
-        FollowCamera->bUsePawnControlRotation = false;
-        FollowCamera->RegisterComponent();
-        FollowCamera->SetActive(true);
-        bNeedsRecreation = true;
-    }
-    
-    // Vérifier FPSCamera
-    if (!FPSCamera)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("FPSCamera is missing, recreating..."));
-        FPSCamera = NewObject<UCameraComponent>(this, TEXT("RecreatedFPSCamera"));
-        FPSCamera->SetupAttachment(GetMesh(), TEXT("head"));
-        FPSCamera->bUsePawnControlRotation = true;
-        FPSCamera->SetActive(false);
-        FPSCamera->RegisterComponent();
-        bNeedsRecreation = true;
-    }
-    
-    // Si on a recréé des composants, réinitialiser les paramètres
-    if (bNeedsRecreation)
-    {
-        // Sauvegarder la position originale
-        if (FollowCamera)
+        FollowCamera->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+
+        if (GetMesh() && GetMesh()->DoesSocketExist(TEXT("head")))
         {
-            OriginalCameraLocation = FollowCamera->GetRelativeLocation();
+            // Attach the camera directly to the head
+            FollowCamera->AttachToComponent(GetMesh(),
+                FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+                TEXT("head"));
         }
-        
-        // Définir la distance de caméra
+        else
+        {
+            // Fallback if no head socket
+            FollowCamera->AttachToComponent(GetRootComponent(),
+                FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+            FollowCamera->SetRelativeLocation(FVector(0, 0, 88.0f));
+        }
+
+        // Disable the CameraBoom to avoid interference
         if (CameraBoom)
         {
-            CurrentCameraDistance = DefaultCameraDistance;
-            CameraBoom->TargetArmLength = CurrentCameraDistance;
+            CameraBoom->TargetArmLength = 0.0f;
         }
-    }
-    
-    // Vérifier l'état des caméras
-    UE_LOG(LogTemp, Warning, TEXT("Camera components: CameraBoom: %p, FollowCamera: %p, FPSCamera: %p"),
-        CameraBoom, FollowCamera, FPSCamera);
-}
 
-void AWormCharacter::SetCameraMode(ECameraMode NewMode)
-{
-    // Si le mode est déjà celui demandé, ne rien faire
-    if (CurrentCameraMode == NewMode)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Camera is already in %s mode"), 
-            NewMode == ECameraMode::FirstPerson ? TEXT("first-person") : TEXT("third-person"));
-        return;
-    }
-    
-    // Enregistrer l'ancien mode pour le log
-    ECameraMode OldMode = CurrentCameraMode;
-    
-    // Définir le nouveau mode
-    CurrentCameraMode = NewMode;
-    
-    UE_LOG(LogTemp, Warning, TEXT("SetCameraMode: Switching from %s to %s"),
-        OldMode == ECameraMode::FirstPerson ? TEXT("first-person") : TEXT("third-person"),
-        NewMode == ECameraMode::FirstPerson ? TEXT("first-person") : TEXT("third-person"));
-    
-    // Vérifier que les composants existent
-    if (!FollowCamera || !FPSCamera || !CameraBoom)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Camera components missing in SetCameraMode: CameraBoom: %p, FollowCamera: %p, FPSCamera: %p"),
-            CameraBoom, FollowCamera, FPSCamera);
-        
-        // Tenter de récupérer les composants
-        if (!CameraBoom) CameraBoom = FindComponentByClass<USpringArmComponent>();
-        if (!FollowCamera) FollowCamera = FindComponentByClass<UCameraComponent>();
-        if (!FPSCamera) 
-        {
-            // Recherche plus spécifique pour FPSCamera
-            TArray<UCameraComponent*> Cameras;
-            GetComponents<UCameraComponent>(Cameras);
-            for (UCameraComponent* Camera : Cameras)
-            {
-                if (Camera != FollowCamera)
-                {
-                    FPSCamera = Camera;
-                    break;
-                }
-            }
-        }
-        
-        // Si toujours pas de caméras, sortir
-        if (!FollowCamera || !FPSCamera || !CameraBoom)
-        {
-            UE_LOG(LogTemp, Error, TEXT("Still missing camera components after recovery attempt"));
-            return;
-        }
-    }
-    
-    APlayerController* PC = Cast<APlayerController>(GetController());
-    
-    // Configurer les caméras selon le mode
-    if (NewMode == ECameraMode::FirstPerson)
-    {
-        // Désactiver la caméra TPS
-        if (FollowCamera)
-        {
-            FollowCamera->SetActive(false);
-            UE_LOG(LogTemp, Verbose, TEXT("Deactivated FollowCamera"));
-        }
-        
-        // Activer la caméra FPS
-        if (FPSCamera)
-        {
-            FPSCamera->SetActive(true);
-            UE_LOG(LogTemp, Verbose, TEXT("Activated FPSCamera"));
-            
-            // S'assurer que la caméra FPS est bien attachée à la tête
-            if (!FPSCamera->IsAttachedTo(GetMesh()) && GetMesh())
-            {
-                FPSCamera->AttachToComponent(GetMesh(), 
-                    FAttachmentTransformRules::SnapToTargetNotIncludingScale, 
-                    TEXT("head"));
-                UE_LOG(LogTemp, Verbose, TEXT("Attached FPSCamera to head socket"));
-            }
-        }
-        
-        // Cacher le mesh du personnage en FPS
+        // Hide the mesh
         if (GetMesh())
         {
             GetMesh()->SetOwnerNoSee(true);
-            UE_LOG(LogTemp, Verbose, TEXT("Set mesh to not visible to owner"));
         }
-    }
-    else // ThirdPerson
-    {
-        // Désactiver la caméra FPS
-        if (FPSCamera)
-        {
-            FPSCamera->SetActive(false);
-            UE_LOG(LogTemp, Verbose, TEXT("Deactivated FPSCamera"));
-        }
-        
-        // Activer la caméra TPS
-        if (FollowCamera)
-        {
-            FollowCamera->SetActive(true);
-            UE_LOG(LogTemp, Verbose, TEXT("Activated FollowCamera"));
-            
-            // S'assurer que la caméra TPS est bien attachée au bras
-            if (!FollowCamera->IsAttachedTo(CameraBoom) && CameraBoom)
-            {
-                FollowCamera->AttachToComponent(CameraBoom, 
-                    FAttachmentTransformRules::SnapToTargetNotIncludingScale,
-                    USpringArmComponent::SocketName);
-                UE_LOG(LogTemp, Verbose, TEXT("Attached FollowCamera to CameraBoom"));
-            }
-            
-            // Restaurer la position originale si nécessaire
-            if (!OriginalCameraLocation.IsZero())
-            {
-                FollowCamera->SetRelativeLocation(OriginalCameraLocation);
-                UE_LOG(LogTemp, Verbose, TEXT("Reset camera location to: %s"), 
-                    *OriginalCameraLocation.ToString());
-            }
-        }
-        
-        // Rendre le mesh visible à nouveau
-        if (GetMesh())
-        {
-            GetMesh()->SetOwnerNoSee(false);
-            UE_LOG(LogTemp, Verbose, TEXT("Set mesh to visible to owner"));
-        }
-    }
-    
-    // Forcer la mise à jour du viewport
-    if (PC && IsLocallyControlled())
-    {
-        // Utiliser SetViewTarget pour être sûr que la vue est mise à jour
-        PC->SetViewTargetWithBlend(this, 0.1f);
-        UE_LOG(LogTemp, Warning, TEXT("Updated viewtarget for player controller"));
-    }
-    
-    // Vérifier l'état final des caméras
-    UE_LOG(LogTemp, Warning, TEXT("Camera final state after SetCameraMode: FollowCamera: %s, FPSCamera: %s"),
-        FollowCamera && FollowCamera->IsActive() ? TEXT("Active") : TEXT("Inactive"),
-        FPSCamera && FPSCamera->IsActive() ? TEXT("Active") : TEXT("Inactive"));
-}
-bool AWormCharacter::IsViewingFromFirstPerson() const
-{
-    return (FPSCamera && FPSCamera->IsActive());
-}
 
-void AWormCharacter::ForceToggleCamera()
-{
-    if (IsViewingFromFirstPerson())
-    {
-        SwitchToThirdPersonView();
-    }
-    else
-    {
-        SwitchToFirstPersonView();
-    }
-}
+        bIsInFirstPersonMode = true;
 
-void AWormCharacter::SwitchToFirstPersonView()
-{
-    UE_LOG(LogTemp, Warning, TEXT("SwitchToFirstPersonView called"));
-    
-    APlayerController* PC = Cast<APlayerController>(GetController());
-    if (!PC || !IsLocallyControlled())
-    {
-        return;
-    }
-    
-    // APPROCHE RADICALE : CRÉER UNE NOUVELLE CAMÉRA TEMPORAIRE
-    if (TempCamera)
-    {
-        TempCamera->DestroyComponent();
-    }
-    
-    TempCamera = NewObject<UCameraComponent>(this, TEXT("TempFPSCamera"));
-    TempCamera->RegisterComponent();
-    
-    // La placer au même endroit que la caméra FPS
-    if (GetMesh() && GetMesh()->DoesSocketExist(TEXT("head")))
-    {
-        TempCamera->AttachToComponent(GetMesh(), 
-            FAttachmentTransformRules::SnapToTargetNotIncludingScale, 
-            TEXT("head"));
-        
-        // Copier les paramètres de FPSCamera si disponible
-        if (FPSCamera)
+        // Debug message
+        if (GEngine)
         {
-            TempCamera->FieldOfView = FPSCamera->FieldOfView;
+            GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red, TEXT("SWITCHED TO FIRST PERSON"));
         }
-    }
-    
-    // Désactiver les autres caméras, activer celle-ci
-    if (FollowCamera) FollowCamera->SetActive(false);
-    if (FPSCamera) FPSCamera->SetActive(true); // On garde quand même celle-ci active
-    TempCamera->SetActive(true);
-    
-    // Manipuler directement le CameraManager
-    PC->SetViewTargetWithBlend(this, 0.0f);
-    
-    // Force la mise à jour immédiate
-    FMinimalViewInfo NewPOV;
-    TempCamera->GetCameraView(0.0f, NewPOV);
-    
-    // Appliquer cette vue directement
-    PC->PlayerCameraManager->SetViewTarget(this);    
-    // Mise à jour forcée du viewport
-    FViewTargetTransitionParams TransitionParams;
-    TransitionParams.BlendTime = 0.0f;
-    PC->PlayerCameraManager->SetViewTarget(this, TransitionParams);
-    
-    // On peut aussi essayer de forcer plus directement
-    PC->PlayerCameraManager->PCOwner->SetControlRotation(TempCamera->GetComponentRotation());
-    
-    // Cacher le mesh pour éviter le clipping
-    if (GetMesh())
-    {
-        GetMesh()->SetOwnerNoSee(true);
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("FORCE FIRST PERSON: TempCamera=%p, Location=%s, Rotation=%s"), 
-        TempCamera, 
-        *TempCamera->GetComponentLocation().ToString(),
-        *TempCamera->GetComponentRotation().ToString());
-        
-    // Forcer une mise à jour du jeu
-    if (GEngine && IsLocallyControlled())
-    {
-        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red, TEXT("SWITCHED TO FIRST PERSON"));
+
+        UE_LOG(LogTemp, Warning, TEXT("SwitchToFirstPersonView: Camera attached to head, TargetArmLength=0"));
     }
 }
-
+// 3. Remplacez complètement SwitchToThirdPersonView:
 void AWormCharacter::SwitchToThirdPersonView()
 {
-    UE_LOG(LogTemp, Warning, TEXT("SwitchToThirdPersonView called"));
-    
-    APlayerController* PC = Cast<APlayerController>(GetController());
-    if (!PC || !IsLocallyControlled())
-    {
+    if (!IsLocallyControlled())
         return;
-    }
-    
-    // APPROCHE RADICALE : CRÉER UNE NOUVELLE CAMÉRA TEMPORAIRE
-    if (TempCamera)
+
+    // Sauvegardez la rotation actuelle du contrôleur
+    FRotator CurrentRotation = GetControlRotation();
+
+    // Réattachez la caméra au CameraBoom
+    if (FollowCamera)
     {
-        TempCamera->DestroyComponent();
-    }
-    
-    TempCamera = NewObject<UCameraComponent>(this, TEXT("TempTPSCamera"));
-    TempCamera->RegisterComponent();
-    
-    // La placer au même endroit que la caméra TPS
-    if (CameraBoom)
-    {
-        TempCamera->AttachToComponent(CameraBoom, 
+        FollowCamera->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+        FollowCamera->AttachToComponent(CameraBoom,
             FAttachmentTransformRules::SnapToTargetNotIncludingScale,
             USpringArmComponent::SocketName);
-        
-        // Copier les paramètres de FollowCamera si disponible
-        if (FollowCamera)
-        {
-            TempCamera->FieldOfView = FollowCamera->FieldOfView;
-            TempCamera->SetRelativeLocation(FollowCamera->GetRelativeLocation());
-            TempCamera->SetRelativeRotation(FollowCamera->GetRelativeRotation());
-        }
     }
-    
-    // Désactiver les autres caméras, activer celle-ci
-    if (FPSCamera) FPSCamera->SetActive(false);
-    if (FollowCamera) FollowCamera->SetActive(true); // On garde quand même celle-ci active
-    TempCamera->SetActive(true);
-    
-    // Manipuler directement le CameraManager
-    PC->SetViewTargetWithBlend(this, 0.0f);
-    
-    // Force la mise à jour immédiate
-    FMinimalViewInfo NewPOV;
-    TempCamera->GetCameraView(0.0f, NewPOV);
-    
-    // Appliquer cette vue directement
-    PC->PlayerCameraManager->SetViewTarget(this);    
-    // Mise à jour forcée du viewport
-    FViewTargetTransitionParams TransitionParams;
-    TransitionParams.BlendTime = 0.0f;
-    PC->PlayerCameraManager->SetViewTarget(this, TransitionParams);
-    
-    // On peut aussi essayer de forcer plus directement
-    PC->PlayerCameraManager->PCOwner->SetControlRotation(TempCamera->GetComponentRotation());
-    
-    // Rendre le mesh visible
+
+    // Restaurez la longueur du bras
+    if (CameraBoom)
+    {
+        CameraBoom->TargetArmLength = DefaultArmLength;
+    }
+
+    // Afficher le mesh
     if (GetMesh())
     {
         GetMesh()->SetOwnerNoSee(false);
     }
-    
-    UE_LOG(LogTemp, Warning, TEXT("FORCE THIRD PERSON: TempCamera=%p, Location=%s, Rotation=%s"), 
-        TempCamera, 
-        *TempCamera->GetComponentLocation().ToString(),
-        *TempCamera->GetComponentRotation().ToString());
-        
-    // Forcer une mise à jour du jeu
-    if (GEngine && IsLocallyControlled())
+
+    bIsInFirstPersonMode = false;
+
+    // Message de débogage
+    if (GEngine)
     {
         GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Green, TEXT("SWITCHED TO THIRD PERSON"));
     }
+
+    UE_LOG(LogTemp, Warning, TEXT("SwitchToThirdPersonView: Camera reattached to CameraBoom, TargetArmLength=%f"), DefaultArmLength);
 }
 
 // Dans OnTestCameraAction et SetAiming, utilisez directement ces fonctions:
+// 5. Ajoutez une fonction pour forcer une mise à jour explicite de la vue
 void AWormCharacter::OnTestCameraAction(const FInputActionValue& Value)
 {
-    if (IsViewingFromFirstPerson())
+    UE_LOG(LogTemp, Warning, TEXT("TEST CAMERA ACTION TRIGGERED"));
+    
+    // Basculer entre les modes
+    if (bIsInFirstPersonMode)
     {
         SwitchToThirdPersonView();
     }
@@ -1654,4 +1311,33 @@ void AWormCharacter::OnTestCameraAction(const FInputActionValue& Value)
     {
         SwitchToFirstPersonView();
     }
+    
+    // Forcer une mise à jour de la caméra
+    if (APlayerController* PC = Cast<APlayerController>(GetController()))
+    {
+        // Cette ligne est cruciale - elle force le controller à se "reconnecter" à la caméra
+        PC->SetViewTargetWithBlend(this, 0.0f);
+    }
+}
+
+void AWormCharacter::DiagnoseCamerasSimple()
+{
+    UE_LOG(LogTemp, Warning, TEXT("=== CAMERA DIAGNOSTIC for %s ==="), *GetName());
+    UE_LOG(LogTemp, Warning, TEXT("IsLocallyControlled: %s"), IsLocallyControlled() ? TEXT("Yes") : TEXT("No"));
+    UE_LOG(LogTemp, Warning, TEXT("TempCamera: %p"), TempCamera);
+    UE_LOG(LogTemp, Warning, TEXT("bIsInFirstPersonMode: %s"), bIsInFirstPersonMode ? TEXT("Yes") : TEXT("No"));
+    
+    if (GetMesh())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Mesh visibility: OwnerNoSee = %s"), 
+            GetMesh()->bOwnerNoSee ? TEXT("True (Hidden)") : TEXT("False (Visible)"));
+    }
+    
+    APlayerController* PC = Cast<APlayerController>(GetController());
+    if (PC)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("ViewTarget: %s"), PC->GetViewTarget() ? *PC->GetViewTarget()->GetName() : TEXT("NULL"));
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("=============================="));
 }
