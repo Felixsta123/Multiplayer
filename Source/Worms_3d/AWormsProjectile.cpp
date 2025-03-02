@@ -3,10 +3,7 @@
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "AWormCharacter.h"
-
-// Variables pour stocker la puissance initiale et la direction
-float AWormProjectile::InitialFirePower = 3000.0f;
-FVector AWormProjectile::FiringDirection = FVector::ForwardVector;
+#include "Net/UnrealNetwork.h"
 
 AWormProjectile::AWormProjectile()
 {
@@ -20,10 +17,12 @@ AWormProjectile::AWormProjectile()
     CollisionComp->InitSphereRadius(5.0f);
     CollisionComp->SetCollisionProfileName("Projectile");
     
-    // Définir les canaux de collision - Ignorer les acteurs Pawn pour éviter de bloquer le tir
-    CollisionComp->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+    // Configuration optimale pour la collision
+    CollisionComp->SetSimulatePhysics(false);  // Sera activé plus tard
+    CollisionComp->SetEnableGravity(true);
+    CollisionComp->SetNotifyRigidBodyCollision(true);  // Hit Events
     
-    // IMPORTANT: TEMPORAIREMENT désactiver les collisions - elles seront activées plus tard
+    // Désactiver initialement les collisions - elles seront activées plus tard
     CollisionComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     
     RootComponent = CollisionComp;
@@ -45,7 +44,12 @@ AWormProjectile::AWormProjectile()
     ProjectileMovement->bRotationFollowsVelocity = true;
     ProjectileMovement->bShouldBounce = true;
     ProjectileMovement->Bounciness = 0.3f;
-    ProjectileMovement->ProjectileGravityScale = 1.0f;  // S'assurer que la gravité est activée
+    ProjectileMovement->ProjectileGravityScale = 1.0f;
+    
+    // Configurer les propriétés du ProjectileMovementComponent pour un meilleur comportement
+    ProjectileMovement->bInitialVelocityInLocalSpace = true;
+    ProjectileMovement->bSimulationEnabled = true;
+    ProjectileMovement->bSweepCollision = true;
     
     // Configurer l'explosion
     ExplosionRadius = 200.0f;
@@ -54,73 +58,123 @@ AWormProjectile::AWormProjectile()
     
     // Définir la durée de vie automatique
     InitialLifeSpan = 10.0f;
+    
+    // Délai avant activation des collisions
+    CollisionActivationDelay = 0.3f;
+    
+    // Initialiser la puissance et la vélocité
+    FirePower = 3000.0f;
+    InitialVelocity = FVector::ForwardVector * FirePower;
+}
+
+void AWormProjectile::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+    
+    // Répliquer ces propriétés
+    DOREPLIFETIME(AWormProjectile, InitialVelocity);
+    DOREPLIFETIME(AWormProjectile, FirePower);
+}
+
+void AWormProjectile::InitializeProjectile(FVector Direction, float Power)
+{
+    if (HasAuthority())
+    {
+        // Stocker la direction et la puissance pour la réplication
+        InitialVelocity = Direction * Power;
+        FirePower = Power;
+        
+        // Configurer le mouvement du projectile
+        if (ProjectileMovement)
+        {
+            ProjectileMovement->Velocity = InitialVelocity;
+            ProjectileMovement->InitialSpeed = Power;
+            ProjectileMovement->MaxSpeed = Power * 1.5f;
+        }
+        
+        UE_LOG(LogTemp, Warning, TEXT("Projectile initialized: Direction=%s, Power=%.1f, Velocity=%s"),
+               *Direction.ToString(), Power, *InitialVelocity.ToString());
+    }
 }
 
 void AWormProjectile::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Obtenir la puissance et la direction initiales
-    if (ProjectileMovement)
+    // Configurer le mouvement du projectile avec la vélocité initiale
+    if (ProjectileMovement && !InitialVelocity.IsNearlyZero())
     {
-        // Tenter d'ajuster la vitesse et la direction si nécessaire
-        if (InitialFirePower > 0.0f && !FiringDirection.IsZero())
-        {
-            ProjectileMovement->Velocity = FiringDirection * InitialFirePower;
-            ProjectileMovement->InitialSpeed = InitialFirePower;
-            ProjectileMovement->MaxSpeed = InitialFirePower * 1.5f;
-            
-            // Forcer une mise à jour immédiate de la vélocité
-            ProjectileMovement->SetVelocityInLocalSpace(FVector(1.0f, 0.0f, 0.0f) * InitialFirePower);
-            
-            UE_LOG(LogTemp, Warning, TEXT("Projectile BeginPlay - Velocity reset: %s (magnitude: %.1f)"),
-                *ProjectileMovement->Velocity.ToString(),
-                ProjectileMovement->Velocity.Size());
-        }
+        ProjectileMovement->Velocity = InitialVelocity;
+        ProjectileMovement->SetVelocityInLocalSpace(InitialVelocity.GetSafeNormal() * FirePower);
+        
+        UE_LOG(LogTemp, Warning, TEXT("Projectile BeginPlay - Velocity set: %s (magnitude: %.1f)"),
+               *ProjectileMovement->Velocity.ToString(),
+               ProjectileMovement->Velocity.Size());
     }
     
-    // Appliquer une impulsion additionnelle au démarrage
-    if (CollisionComp)
-    {
-        CollisionComp->AddImpulse(FiringDirection * InitialFirePower * 2.0f, NAME_None, true);
-        UE_LOG(LogTemp, Warning, TEXT("Applied additional impulse: %s"), 
-               *(FiringDirection * InitialFirePower * 2.0f).ToString());
-    }
+    // Configurer les acteurs à ignorer
+    SetupIgnoredActors();
     
-    // Activer les collisions après un court délai pour éviter les collisions avec le tireur
+    // Activer les collisions après un délai
     FTimerHandle CollisionTimerHandle;
     GetWorldTimerManager().SetTimer(
         CollisionTimerHandle,
-        [this]() {
-            if (CollisionComp)
-            {
-                CollisionComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-                
-                // Log pour confirmer l'activation des collisions
-                UE_LOG(LogTemp, Warning, TEXT("Projectile collisions activated"));
-                
-                // Vérifier la vélocité actuelle
-                if (ProjectileMovement)
-                {
-                    UE_LOG(LogTemp, Warning, TEXT("Current projectile velocity: %s (magnitude: %.1f)"), 
-                        *ProjectileMovement->Velocity.ToString(), 
-                        ProjectileMovement->Velocity.Size());
-                    
-                    // Si la vélocité est trop faible, réappliquer une impulsion
-                    if (ProjectileMovement->Velocity.Size() < 1000.0f)
-                    {
-                        UE_LOG(LogTemp, Warning, TEXT("Velocity too low, reapplying!"));
-                        ProjectileMovement->Velocity = FiringDirection * InitialFirePower;
-                        CollisionComp->AddImpulse(FiringDirection * InitialFirePower * 5.0f, NAME_None, true);
-                    }
-                }
-            }
-        },
-        0.2f, // délai augmenté à 0.2 seconde
-        false // ne pas répéter
+        this,
+        &AWormProjectile::EnableCollisions,
+        CollisionActivationDelay,
+        false
     );
     
-    // Vérifier le propriétaire et ignorer les collisions avec lui
+    // Démarrer le timer pour l'explosion automatique
+    if (HasAuthority())
+    {
+        GetWorldTimerManager().SetTimer(
+            DetonationTimerHandle,
+            this,
+            &AWormProjectile::Explode,
+            DetonationDelay,
+            false
+        );
+    }
+}
+
+void AWormProjectile::EnableCollisions()
+{
+    if (CollisionComp)
+    {
+        // Activer la simulation physique ET les collisions en même temps
+        CollisionComp->SetSimulatePhysics(true);
+        CollisionComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        
+        // S'assurer que les paramètres de collision sont corrects
+        CollisionComp->SetCollisionResponseToAllChannels(ECR_Block);
+        
+        // Exceptions pour les canaux spécifiques si nécessaire
+        CollisionComp->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+        
+        UE_LOG(LogTemp, Warning, TEXT("Projectile collisions and physics activated"));
+        
+        // Vérifier la vélocité actuelle
+        if (ProjectileMovement)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Current projectile velocity: %s (magnitude: %.1f)"), 
+                *ProjectileMovement->Velocity.ToString(), 
+                ProjectileMovement->Velocity.Size());
+            
+            // Si la vélocité est trop faible, réappliquer une impulsion
+            if (ProjectileMovement->Velocity.Size() < 1000.0f)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("Velocity too low, reapplying!"));
+                ProjectileMovement->Velocity = InitialVelocity;
+                CollisionComp->AddImpulse(InitialVelocity, NAME_None, true);
+            }
+        }
+    }
+}
+
+void AWormProjectile::SetupIgnoredActors()
+{
+    // Ignorer l'instigateur (le tireur)
     if (GetInstigator())
     {
         CollisionComp->IgnoreActorWhenMoving(GetInstigator(), true);
@@ -133,7 +187,7 @@ void AWormProjectile::BeginPlay()
         }
     }
     
-    // Ignorer tous les Worms et leurs armes
+    // Ignorer tous les Worms et leurs armes pendant un court instant
     TArray<AActor*> AllWormCharacters;
     UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormCharacter::StaticClass(), AllWormCharacters);
     for (AActor* Actor : AllWormCharacters)
@@ -148,16 +202,23 @@ void AWormProjectile::BeginPlay()
         }
     }
     
-    // Log la position de départ et la vélocité
-    UE_LOG(LogTemp, Warning, TEXT("Projectile BeginPlay - Start Position: %s, Velocity: %s"),
-        *GetActorLocation().ToString(),
-        ProjectileMovement ? *ProjectileMovement->Velocity.ToString() : TEXT("No ProjectileMovement"));
-    
-    // Démarrer le timer pour l'explosion automatique
-    if (HasAuthority())
-    {
-        GetWorldTimerManager().SetTimer(DetonationTimerHandle, this, &AWormProjectile::Explode, DetonationDelay, false);
-    }
+    // Après un certain délai, ne plus ignorer les autres Worms (seulement le tireur)
+    FTimerHandle ResetIgnoreTimerHandle;
+    GetWorldTimerManager().SetTimer(
+        ResetIgnoreTimerHandle,
+        [this, AllWormCharacters]() {
+            // Ne plus ignorer les autres Worms sauf l'instigateur
+            for (AActor* Actor : AllWormCharacters)
+            {
+                if (Actor != GetInstigator())
+                {
+                    CollisionComp->IgnoreActorWhenMoving(Actor, false);
+                }
+            }
+        },
+        1.0f, // Après 1 seconde
+        false
+    );
 }
 
 void AWormProjectile::Tick(float DeltaTime)
@@ -178,11 +239,6 @@ void AWormProjectile::Tick(float DeltaTime)
             // Si le projectile a une vélocité très faible et est proche du sol, il est probablement bloqué
             if (ProjectileMovement->Velocity.Size() < 100.0f && GetActorLocation().Z < 100.0f)
             {
-                UE_LOG(LogTemp, Warning, TEXT("Projectile appears stuck - velocity: %s (magnitude: %.1f), position: %s"),
-                    *ProjectileMovement->Velocity.ToString(),
-                    ProjectileMovement->Velocity.Size(),
-                    *GetActorLocation().ToString());
-                
                 // Si bloqué, tenter de réappliquer une impulsion ou exploser
                 if (HasAuthority())
                 {
@@ -219,15 +275,11 @@ void AWormProjectile::Explode()
         // Position de l'explosion
         FVector ExplosionLocation = GetActorLocation();
         
-        // Créer un effet de débogage pour visualiser le point d'impact
-        DrawDebugSphere(GetWorld(), ExplosionLocation, 50.0f, 12, FColor::Red, false, 5.0f);
-        
-        // Chercher les Worms dans le rayon d'explosion en utilisant SphereOverlapActors
+        // Chercher les Worms dans le rayon d'explosion
         TArray<AActor*> OverlappingActors;
         TArray<AActor*> ActorsToIgnore;
         ActorsToIgnore.Add(this);
         
-        // Utiliser la fonction correcte pour trouver les acteurs dans une sphère
         UKismetSystemLibrary::SphereOverlapActors(
             GetWorld(),
             ExplosionLocation,
@@ -268,27 +320,13 @@ void AWormProjectile::Explode()
                 // Transformation pour convertir les coordonnées mondiales en coordonnées locales
                 FVector LocalExplosion = Terrain->GetActorTransform().InverseTransformPosition(ExplosionLocation);
                 
-                UE_LOG(LogTemp, Warning, TEXT("Explosion at world pos (%f, %f, %f), CONVERTED to local terrain pos (%f, %f, %f)"),
-                    ExplosionLocation.X, ExplosionLocation.Y, ExplosionLocation.Z,
-                    LocalExplosion.X, LocalExplosion.Y, LocalExplosion.Z);
-                
-                // CORRECTION: Utiliser les bonnes coordonnées pour le terrain 2D
-                // Dans ce cas, on utilise X et Z pour les coordonnées 2D du terrain
+                // Utiliser les coordonnées appropriées pour le terrain 2D
                 float SafeX = FMath::Clamp(LocalExplosion.X, ExplosionRadius, Terrain->TerrainWidth - ExplosionRadius);
                 float SafeZ = FMath::Clamp(LocalExplosion.Z, ExplosionRadius, Terrain->TerrainHeight - ExplosionRadius);
                 
                 // Créer la zone de destruction centrée sur l'explosion
                 FVector2D Position2D(SafeX - ExplosionRadius, SafeZ - ExplosionRadius);
                 FVector2D Size2D(ExplosionRadius * 2.0f, ExplosionRadius * 2.0f);
-                
-                // Dessiner un debug box pour visualiser la zone de destruction
-                FVector BoxCenter = Terrain->GetActorTransform().TransformPosition(
-                    FVector(SafeX, LocalExplosion.Y, SafeZ));
-                FVector BoxExtent = FVector(ExplosionRadius, ExplosionRadius, ExplosionRadius);
-                DrawDebugBox(GetWorld(), BoxCenter, BoxExtent, FColor::Green, false, 5.0f);
-                
-                UE_LOG(LogTemp, Warning, TEXT("Creating destruction zone at (%f, %f) with size (%f, %f)"),
-                    Position2D.X, Position2D.Y, Size2D.X, Size2D.Y);
                 
                 // Demander la destruction du terrain
                 Terrain->RequestDestroyTerrainAt(Position2D, Size2D);

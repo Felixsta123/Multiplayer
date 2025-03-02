@@ -13,15 +13,17 @@ class WORMS_3D_API AWormProjectile : public AActor
 public:
     AWormProjectile();
 
-    // Static variables declaration
-    static float InitialFirePower;
-    static FVector FiringDirection;
     // Tick function pour surveiller le mouvement
     virtual void Tick(float DeltaTime) override;
 
     // Rendre le composant de collision accessible en public
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     class USphereComponent* CollisionComp;
+    
+    // Initialiser le projectile avec une direction et une puissance
+    UFUNCTION(BlueprintCallable, Category = "Projectile")
+    void InitializeProjectile(FVector Direction, float Power);
+
 protected:
     virtual void BeginPlay() override;
     
@@ -55,7 +57,8 @@ protected:
     
     // Callback quand le projectile touche quelque chose
     UFUNCTION()
-    void OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit);
+    void OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, 
+               FVector NormalImpulse, const FHitResult& Hit);
     
     // Fonction pour l'explosion
     UFUNCTION(BlueprintCallable)
@@ -67,4 +70,23 @@ protected:
     // RPC pour l'explosion (Serveur -> Tous)
     UFUNCTION(NetMulticast, Reliable)
     void Multicast_Explode(FVector Location);
+    
+    // Vélocité initiale du projectile
+    UPROPERTY(Replicated)
+    FVector InitialVelocity;
+    
+    // Puissance de tir
+    UPROPERTY(Replicated)
+    float FirePower;
+    
+    // Délai avant l'activation des collisions
+    UPROPERTY(EditDefaultsOnly, Category = "Projectile")
+    float CollisionActivationDelay;
+    
+    // Fonction pour activer les collisions après un délai
+    UFUNCTION()
+    void EnableCollisions();
+    
+    // Fonction pour configurer les acteurs à ignorer
+    void SetupIgnoredActors();
 };

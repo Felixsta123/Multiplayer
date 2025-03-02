@@ -436,144 +436,41 @@ void AWormWeapon::Fire()
         // Obtenir la position et direction de tir
         FVector MuzzleLocation = WeaponMesh->GetSocketLocation(MuzzleSocketName);
         FRotator MuzzleRotation = WeaponMesh->GetSocketRotation(MuzzleSocketName);
-        
-        // Calculer des positions bien en avant de l'arme pour éviter tout problème de collision
         FVector LaunchDirection = MuzzleRotation.Vector();
-        FVector SpawnLocation = MuzzleLocation + (LaunchDirection * 200.0f); // 200 unités devant
+        
+        // Calculer une position de spawn en avant de l'arme pour éviter les collisions
+        FVector SpawnLocation = MuzzleLocation + (LaunchDirection * 100.0f);
         
         // Log de débogage
-        UE_LOG(LogTemp, Warning, TEXT("=== DIRECT FIRE DEBUG ==="));
+        UE_LOG(LogTemp, Warning, TEXT("=== FIRE DEBUG ==="));
         UE_LOG(LogTemp, Warning, TEXT("MuzzleLocation: %s"), *MuzzleLocation.ToString());
         UE_LOG(LogTemp, Warning, TEXT("SpawnLocation: %s"), *SpawnLocation.ToString());
         UE_LOG(LogTemp, Warning, TEXT("Direction: %s"), *LaunchDirection.ToString());
         UE_LOG(LogTemp, Warning, TEXT("FirePower: %.1f"), FirePower);
         
-        // Paramètres de spawn avec ignorance totale des collisions
+        // Paramètres de spawn avec ignorance des collisions
         FActorSpawnParameters SpawnParams;
         SpawnParams.Owner = GetOwner();
         SpawnParams.Instigator = Cast<APawn>(GetOwner());
         SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
         
-        // Avant de créer le projectile, vérifier la présence d'obstacles
-        FHitResult HitResult;
-        FCollisionQueryParams CollisionParams;
-        CollisionParams.AddIgnoredActor(this);
-        CollisionParams.AddIgnoredActor(GetOwner());
-        
-        bool bHit = GetWorld()->LineTraceSingleByChannel(
-            HitResult, 
-            MuzzleLocation, 
-            SpawnLocation + (LaunchDirection * 100.0f), 
-            ECC_Visibility, 
-            CollisionParams
-        );
-        
-        if (bHit)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Obstacle detected near weapon! Adjusting spawn location"));
-            // Reculer le point de spawn pour éviter l'obstacle
-            SpawnLocation = MuzzleLocation + (LaunchDirection * 50.0f); 
-        }
-        
         // Spawner le projectile
-        AActor* Projectile = GetWorld()->SpawnActor<AActor>(ProjectileClass, SpawnLocation, MuzzleRotation, SpawnParams);
+        AWormProjectile* Projectile = GetWorld()->SpawnActor<AWormProjectile>(
+            ProjectileClass,
+            SpawnLocation,
+            MuzzleRotation,
+            SpawnParams
+        );
         
         if (Projectile)
         {
             UE_LOG(LogTemp, Warning, TEXT("Projectile spawned successfully: %s"), *Projectile->GetName());
             
-            // SOLUTION DIRECTE: Remplacer le mouvement standard par un mouvement personnalisé
+            // Initialiser le projectile avec la direction et puissance de tir
+            Projectile->InitializeProjectile(LaunchDirection, FirePower);
             
-            // 1. Désactiver le ProjectileMovementComponent existant pour éviter les conflits
-            UProjectileMovementComponent* ExistingMovement = Cast<UProjectileMovementComponent>(
-                Projectile->GetComponentByClass(UProjectileMovementComponent::StaticClass())
-            );
-            
-            if (ExistingMovement)
-            {
-                // Ne pas détruire, mais désactiver pour éviter les interférences
-                ExistingMovement->Deactivate();
-                UE_LOG(LogTemp, Warning, TEXT("Existing movement component disabled"));
-            }
-            
-            // 2. Créer et configurer un nouveau composant de mouvement
-            UProjectileMovementComponent* NewMovement = NewObject<UProjectileMovementComponent>(Projectile);
-            NewMovement->RegisterComponent();
-            NewMovement->bAutoActivate = true;
-            
-            // Configurer le nouveau composant pour qu'il utilise le RootComponent du projectile
-            NewMovement->SetUpdatedComponent(Projectile->GetRootComponent());
-            
-            // Configuration du mouvement
-            NewMovement->InitialSpeed = FirePower;
-            NewMovement->MaxSpeed = FirePower * 1.5f;
-            NewMovement->bRotationFollowsVelocity = true;
-            NewMovement->bShouldBounce = true;
-            NewMovement->Bounciness = 0.3f;
-            NewMovement->ProjectileGravityScale = 1.0f;
-            
-            // Définir la vélocité initiale
-            NewMovement->Velocity = LaunchDirection * FirePower;
-            
-            UE_LOG(LogTemp, Warning, TEXT("Created new movement component with velocity: %s (magnitude: %.1f)"), 
-                  *NewMovement->Velocity.ToString(), NewMovement->Velocity.Size());
-            
-            // 3. Ajouter une impulsion supplémentaire pour assurer le mouvement
-            if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Projectile->GetRootComponent()))
-            {
-                PrimComp->AddImpulse(LaunchDirection * FirePower * 10.0f, NAME_None, true);
-                UE_LOG(LogTemp, Warning, TEXT("Applied additional impulse: %s"),
-                       *(LaunchDirection * FirePower * 10.0f).ToString());
-            }
-            
-            // 4. Configurer les collisions pour ignorer les acteurs pertinents
-            TArray<AActor*> ActorsToIgnore;
-            ActorsToIgnore.Add(this);
-            ActorsToIgnore.Add(GetOwner());
-            
-            // Ignorer tous les Worms et leurs armes
-            TArray<AActor*> AllWormCharacters;
-            UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormCharacter::StaticClass(), AllWormCharacters);
-            ActorsToIgnore.Append(AllWormCharacters);
-            
-            // Ignorer toutes les armes
-            TArray<AActor*> AllWeapons;
-            UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormWeapon::StaticClass(), AllWeapons);
-            ActorsToIgnore.Append(AllWeapons);
-            
-            // Configurer chaque composant de collision du projectile
-            TArray<UPrimitiveComponent*> CollisionComponents;
-            Projectile->GetComponents<UPrimitiveComponent>(CollisionComponents);
-            for (UPrimitiveComponent* Comp : CollisionComponents)
-            {
-                if (Comp)
-                {
-                    // Temporairement désactiver les collisions
-                    ECollisionEnabled::Type OriginalCollision = Comp->GetCollisionEnabled();
-                    Comp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-                    
-                    // Configurer pour ignorer les acteurs
-                    for (AActor* ActorToIgnore : ActorsToIgnore)
-                    {
-                        Comp->IgnoreActorWhenMoving(ActorToIgnore, true);
-                    }
-                    
-                    // Activer les collisions après un court délai
-                    FTimerHandle CollisionTimerHandle;
-                    GetWorld()->GetTimerManager().SetTimer(
-                        CollisionTimerHandle,
-                        [Comp, OriginalCollision]() {
-                            if (Comp && Comp->IsValidLowLevel())
-                            {
-                                Comp->SetCollisionEnabled(OriginalCollision);
-                                UE_LOG(LogTemp, Warning, TEXT("Projectile collisions re-enabled"));
-                            }
-                        },
-                        0.3f, // délai de 0.3 seconde
-                        false // ne pas répéter
-                    );
-                }
-            }
+            UE_LOG(LogTemp, Warning, TEXT("Projectile initialized with velocity: %s (Power: %.1f)"),
+                  *LaunchDirection.ToString(), FirePower);
         }
         else
         {
@@ -594,6 +491,7 @@ void AWormWeapon::Fire()
         }
     }
 }
+
 void AWormWeapon::Multicast_OnFire_Implementation()
 {
     // Jouer les effets visuels
