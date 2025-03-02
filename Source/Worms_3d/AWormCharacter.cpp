@@ -1,45 +1,56 @@
 #include "AWormCharacter.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "EnhancedInput/Public/EnhancedInputComponent.h"
 #include "Components/CapsuleComponent.h"
-#include "Components/SceneComponent.h"
 #include "Kismet/GameplayStatics.h"
-#include "EnhancedInputComponent.h"
-#include "WormGameMode.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Camera/CameraComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "EnhancedInputComponent.h"
+#include "WormGameMode.h"
 #include "WormWeapon.h"
 #include "Blueprint/UserWidget.h"
 #include "Components/ProgressBar.h"
 #include "Components/TextBlock.h"
+#include "Components/SceneComponent.h"
 
-
-// Conserve le constructeur existant sans modifications
+// Conserve le constructeur existant sans modifications mais améliore la lisibilité
 AWormCharacter::AWormCharacter()
 {
     PrimaryActorTick.bCanEverTick = true;
     
-    // Configurer la réplication
+    // Configuration réseau
     bReplicates = true;
     
-    // Définir les valeurs par défaut
+    // Valeurs par défaut - Propriétés générales
     Health = 100.0f;
     bIsMyTurn = false;
     CurrentWeaponIndex = 0;
     WeaponSocketName = "WeaponSocket";
+    bAutoEndTurnTimerActive = false;
+    HeadSocketName = "head";
+    
+    // Valeurs de mouvement et combat
     MaxMovementPoints = 100.0f;
     MovementPoints = MaxMovementPoints;
     WeaponCooldown = 0.5f;
     LastWeaponUseTime = 0.0f;
+    
+    // Initialiser la rotation par défaut de l'arme
+    DefaultWeaponRotation = FRotator::ZeroRotator;
 
-    // Configurer le Character Movement Component
+    // Configuration du Character Movement Component
     GetCharacterMovement()->GravityScale = 1.5f;
     GetCharacterMovement()->AirControl = 0.8f;
     GetCharacterMovement()->JumpZVelocity = 600.0f;
     GetCharacterMovement()->BrakingDecelerationWalking = 2000.0f;
-    bAutoEndTurnTimerActive = false;
-    //set up both the camera boom and the follow camera
+    
+    // Configuration du système de caméra
+    InitializeCameraSystem();
+}
+
+void AWormCharacter::InitializeCameraSystem()
+{
+    // Configuration du CameraBoom (spring arm)
     CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
     if (CameraBoom)
     {
@@ -52,6 +63,7 @@ AWormCharacter::AWormCharacter()
         CameraBoom->CameraRotationLagSpeed = 3.0f;
     }
 
+    // Configuration de la caméra TPS
     FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
     if (FollowCamera)
     {
@@ -59,8 +71,7 @@ AWormCharacter::AWormCharacter()
         FollowCamera->bUsePawnControlRotation = false;
     }
     
-    
-    HeadSocketName = "head";
+    // Configuration de la caméra FPS
     FPSCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FPSCamera"));
     if (FPSCamera && GetMesh())
     {
@@ -68,6 +79,7 @@ AWormCharacter::AWormCharacter()
         FPSCamera->bUsePawnControlRotation = true;
         FPSCamera->SetActive(false); // Désactivée par défaut
     }
+    
     // Valeurs par défaut pour la caméra
     bIsInFirstPersonMode = false;
     bUseFirstPersonViewWhenAiming = true;
@@ -77,65 +89,73 @@ void AWormCharacter::BeginPlay()
 {
     Super::BeginPlay();
     
-
-
-
-    // Reste du code BeginPlay existant...
+    // Initialisation des valeurs par défaut
     LastPosition = GetActorLocation();
     LastWeaponUseTime = UGameplayStatics::GetTimeSeconds(this) - (WeaponCooldown * 2);
     
+    // Initialiser la rotation par défaut de l'arme (alignée avec la direction du personnage)
+    // Utiliser une rotation qui pointe "vers l'avant" du personnage
+    DefaultWeaponRotation = GetActorRotation();
+    
+    // S'assurer que l'arme est parfaitement horizontale en mode TPS
+    DefaultWeaponRotation.Pitch = 0.0f;
+    DefaultWeaponRotation.Roll = 0.0f;
+    
+    // Configuration initiale de la caméra
     if (CameraBoom)
     {
         CurrentCameraDistance = DefaultCameraDistance;
         CameraBoom->TargetArmLength = CurrentCameraDistance;
     }
     
-    // Commencez en mode TPS (par défaut)
-    bIsInFirstPersonMode = false;
-    
-    // Configurer l'Enhanced Input pour le joueur local
+    // Configuration de l'input pour le joueur local
     if (IsLocallyControlled())
     {
+        // Setup Enhanced Input
         if (APlayerController* PC = Cast<APlayerController>(GetController()))
         {
             SetupEnhancedInput(PC);
         }
         
-        // Si c'est un client, on va programmer un diagnostic périodique
-        if (!HasAuthority())
-        {
-            FTimerHandle DiagnosticTimerHandle;
-            GetWorld()->GetTimerManager().SetTimer(
-                DiagnosticTimerHandle,
-                [this]() {
-                    static int32 DiagnosticCount = 0;
-                    if (DiagnosticCount < 5) // Limite à 5 diagnostics
-                    {
-                        DiagnoseWeapons();
-                        DiagnosticCount++;
-                        
-                        // Si on n'a toujours pas d'arme après 3 tentatives, forcer la création
-                        if (DiagnosticCount >= 3 && !CurrentWeapon && AvailableWeapons.Num() > 0)
-                        {
-                            UE_LOG(LogTemp, Warning, TEXT("Emergency weapon creation for client"));
-                            OnRep_CurrentWeaponIndex();
-                        }
-                    }
-                },
-                2.0f,  // Premier diagnostic après 2 secondes
-                true,  // Répéter
-                1.0f   // Puis toutes les secondes
-            );
-        }
+        // Diagnostic d'armes pour client
+        SetupWeaponDiagnostic();
     }
 }
 
-// Nouvelle fonction pour gérer quand un controller possède ce personnage
+void AWormCharacter::SetupWeaponDiagnostic()
+{
+    // Ne configurer que pour les clients
+    if (!HasAuthority())
+    {
+        FTimerHandle DiagnosticTimerHandle;
+        GetWorld()->GetTimerManager().SetTimer(
+            DiagnosticTimerHandle,
+            [this]() {
+                static int32 DiagnosticCount = 0;
+                if (DiagnosticCount < 5) // Limite à 5 diagnostics
+                {
+                    DiagnoseWeapons();
+                    DiagnosticCount++;
+                    
+                    // Force la création d'arme si nécessaire après 3 tentatives
+                    if (DiagnosticCount >= 3 && !CurrentWeapon && AvailableWeapons.Num() > 0)
+                    {
+                        OnRep_CurrentWeaponIndex();
+                    }
+                }
+            },
+            2.0f,  // Premier diagnostic après 2 secondes
+            true,  // Répéter
+            1.0f   // Puis toutes les secondes
+        );
+    }
+}
+
 void AWormCharacter::PossessedBy(AController* NewController)
 {
     Super::PossessedBy(NewController);
     
-    // Configure l'Enhanced Input si c'est un joueur qui contrôle ce personnage
+    // Configure l'Enhanced Input lors de la possession par un controlleur
     if (IsLocallyControlled())
     {
         if (APlayerController* PC = Cast<APlayerController>(NewController))
@@ -145,87 +165,67 @@ void AWormCharacter::PossessedBy(AController* NewController)
     }
 }
 
-// Fonction utilitaire pour configurer l'Enhanced Input
 void AWormCharacter::SetupEnhancedInput(APlayerController* PlayerController)
 {
     if (!PlayerController || !InputMappingContext)
     {
         return;
-    } 
-    // Get the local player subsystem
+    }
+    
     if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PlayerController->GetLocalPlayer()))
     {
         // Clear existing mappings and add our mapping context
         Subsystem->ClearAllMappings();
         Subsystem->AddMappingContext(InputMappingContext, 0);
-        UE_LOG(LogTemp, Log, TEXT("Enhanced Input setup for %s"), *GetName());
     }
 }
 
-// Remplace la fonction SetupPlayerInputComponent pour utiliser l'Enhanced Input
 void AWormCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
     Super::SetupPlayerInputComponent(PlayerInputComponent);
     
-    // Cast to Enhanced Input Component
     if (UEnhancedInputComponent* EnhancedInputComponent = CastChecked<UEnhancedInputComponent>(PlayerInputComponent))
     {
-        UE_LOG(LogTemp, Log, TEXT("Setting up Enhanced Input Component for %s"), *GetName());
-        // Binding for movement
+        // Binding pour le mouvement
         if (MoveAction)
-        {
             EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, this, &AWormCharacter::OnMoveAction);
-        }
-        if (TestCameraAction)
-        {
-           //    EnhancedInputComponent->BindAction(TestCameraAction, ETriggerEvent::Started, this, &AWormCharacter::OnTestCameraAction);
-        }
-
-        
-        // Binding for jumping
+            
+        // Binding pour le saut
         if (JumpAction)
         {
             EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Triggered, this, &AWormCharacter::OnJumpAction);
             EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this, &AWormCharacter::OnJumpActionReleased);
         }
-        if (ZoomAction)
-        {
-            EnhancedInputComponent->BindAction(ZoomAction, ETriggerEvent::Triggered, this, &AWormCharacter::OnZoomAction);
-        }
-        // Binding for firing
-        if (FireAction)
-        {
-            EnhancedInputComponent->BindAction(FireAction, ETriggerEvent::Triggered, this, &AWormCharacter::OnFireAction);
-        }
-        // Dans la méthode SetupPlayerInputComponent
-        if (PowerUpAction)
-        {
-            EnhancedInputComponent->BindAction(PowerUpAction, ETriggerEvent::Triggered, this, &AWormCharacter::OnPowerUpAction);
-        }
-
-        if (PowerDownAction)
-        {
-            EnhancedInputComponent->BindAction(PowerDownAction, ETriggerEvent::Triggered, this, &AWormCharacter::OnPowerDownAction);
-        }
-        // Binding for weapon switching
-        if (NextWeaponAction)
-        {
-            EnhancedInputComponent->BindAction(NextWeaponAction, ETriggerEvent::Triggered, this, &AWormCharacter::OnNextWeaponAction);
-        }
         
+        // Binding pour le zoom
+        if (ZoomAction)
+            EnhancedInputComponent->BindAction(ZoomAction, ETriggerEvent::Triggered, this, &AWormCharacter::OnZoomAction);
+            
+        // Binding pour le tir
+        if (FireAction)
+            EnhancedInputComponent->BindAction(FireAction, ETriggerEvent::Triggered, this, &AWormCharacter::OnFireAction);
+            
+        // Binding pour le système de puissance
+        if (PowerUpAction)
+            EnhancedInputComponent->BindAction(PowerUpAction, ETriggerEvent::Triggered, this, &AWormCharacter::OnPowerUpAction);
+            
+        if (PowerDownAction)
+            EnhancedInputComponent->BindAction(PowerDownAction, ETriggerEvent::Triggered, this, &AWormCharacter::OnPowerDownAction);
+            
+        // Binding pour changer d'arme
+        if (NextWeaponAction)
+            EnhancedInputComponent->BindAction(NextWeaponAction, ETriggerEvent::Triggered, this, &AWormCharacter::OnNextWeaponAction);
+            
         if (PrevWeaponAction)
-        {
             EnhancedInputComponent->BindAction(PrevWeaponAction, ETriggerEvent::Triggered, this, &AWormCharacter::OnPrevWeaponAction);
-        }
-        // Binding for looking
+            
+        // Binding pour la visée et l'orientation
         if (LookAction)
-        {
             EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &AWormCharacter::OnLookAction);
-        }
+            
         if (EndTurnAction)
-        {
             EnhancedInputComponent->BindAction(EndTurnAction, ETriggerEvent::Triggered, this, &AWormCharacter::OnEndTurnAction);
-        }
+            
         if (AimAction)
         {
             EnhancedInputComponent->BindAction(AimAction, ETriggerEvent::Started, this, &AWormCharacter::OnAimActionStarted);
@@ -234,34 +234,34 @@ void AWormCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
     }
     else
     {
-        UE_LOG(LogTemp, Error, TEXT("Failed to setup Enhanced Input Component for %s. Make sure to enable the Enhanced Input plugin!"), *GetName());
-        
-        // Fallback to legacy input system if Enhanced Input is not available
-        PlayerInputComponent->BindAxis("MoveForward", this, &AWormCharacter::MoveForward);
-        PlayerInputComponent->BindAxis("MoveRight", this, &AWormCharacter::MoveRight);
-        
-        PlayerInputComponent->BindAction("Jump", IE_Pressed, this, &ACharacter::Jump);
-        PlayerInputComponent->BindAction("Jump", IE_Released, this, &ACharacter::StopJumping);
-        
-        PlayerInputComponent->BindAction("Fire", IE_Pressed, this, &AWormCharacter::FireWeapon);
-        
-        PlayerInputComponent->BindAction("NextWeapon", IE_Pressed, this, &AWormCharacter::NextWeapon);
-        PlayerInputComponent->BindAction("PrevWeapon", IE_Pressed, this, &AWormCharacter::PrevWeapon);
-
-        PlayerInputComponent->BindAction("EndTurn", IE_Pressed, this, &AWormCharacter::EndTurn);
-
+        // Fallback à l'input legacy - moins de logs et simplification de la structure
+        SetupLegacyInputBindings(PlayerInputComponent);
     }
 }
 
-// Nouvelles fonctions de callback pour l'Enhanced Input
+void AWormCharacter::SetupLegacyInputBindings(UInputComponent* PlayerInputComponent)
+{
+    // Fallback au système d'input legacy
+    PlayerInputComponent->BindAxis("MoveForward", this, &AWormCharacter::MoveForward);
+    PlayerInputComponent->BindAxis("MoveRight", this, &AWormCharacter::MoveRight);
+    
+    PlayerInputComponent->BindAction("Jump", IE_Pressed, this, &ACharacter::Jump);
+    PlayerInputComponent->BindAction("Jump", IE_Released, this, &ACharacter::StopJumping);
+    
+    PlayerInputComponent->BindAction("Fire", IE_Pressed, this, &AWormCharacter::FireWeapon);
+    
+    PlayerInputComponent->BindAction("NextWeapon", IE_Pressed, this, &AWormCharacter::NextWeapon);
+    PlayerInputComponent->BindAction("PrevWeapon", IE_Pressed, this, &AWormCharacter::PrevWeapon);
 
+    PlayerInputComponent->BindAction("EndTurn", IE_Pressed, this, &AWormCharacter::EndTurn);
+}
+
+// Handlers d'inputs améliorés
 void AWormCharacter::OnMoveAction(const FInputActionValue& Value)
 {
     // Ne rien faire si ce n'est pas notre tour ou si on n'a plus de points de mouvement
-    UE_LOG(LogTemp, Log, TEXT("OnMoveAction"));
     if (!bIsMyTurn || MovementPoints <= 0 || !Controller)
     {
-        UE_LOG(LogTemp, Log, TEXT("Not my turn or no movement points : %f, %d"), MovementPoints, bIsMyTurn);
         return;
     }
     
@@ -292,7 +292,6 @@ void AWormCharacter::OnZoomAction(const FInputActionValue& Value)
     ZoomCamera(ZoomValue);
 }
 
-
 void AWormCharacter::ZoomCamera(float Amount)
 {
     if (CameraBoom && !bIsInFirstPersonMode) // Ne zoomer qu'en mode TPS
@@ -319,15 +318,14 @@ void AWormCharacter::OnLookAction(const FInputActionValue& Value)
         AddControllerPitchInput(LookAxisVector.Y);
     }
 }
+
 void AWormCharacter::OnJumpAction(const FInputActionValue& Value)
 {
     // Ne rien faire si ce n'est pas notre tour ou si on n'a plus de points de mouvement
-    if (!bIsMyTurn || MovementPoints <= 0)
+    if (bIsMyTurn && MovementPoints > 0)
     {
-        return;
+        Jump();
     }
-    
-    Jump();
 }
 
 void AWormCharacter::OnJumpActionReleased(const FInputActionValue& Value)
@@ -350,76 +348,115 @@ void AWormCharacter::OnPrevWeaponAction(const FInputActionValue& Value)
     PrevWeapon();
 }
 
+void AWormCharacter::OnEndTurnAction(const FInputActionValue& Value)
+{
+    EndTurn();
+}
+
 void AWormCharacter::Tick(float DeltaTime)
 {
-
     Super::Tick(DeltaTime);
 
-    // Mise à jour de l'arme seulement si on est contrôlé localement et qu'on a une arme
-    if (IsLocallyControlled() && WeaponPivotComponent && CurrentWeapon)
-    {
-        FRotator ControlRotation = GetControlRotation();
-        WeaponPivotComponent->SetWorldRotation(FRotator(0.0f, ControlRotation.Yaw, 0.0f));
+    // Mise à jour de la rotation de l'arme
+    UpdateWeaponRotation();
     
-        // Envoyer au serveur si c'est un client et que c'est notre tour
-        if (GetLocalRole() < ROLE_Authority && bIsMyTurn)
-        {
-            // Envoyer moins souvent pour réduire le trafic réseau (toutes les 5 frames)
-            static int32 FrameCounter = 0;
-            if (++FrameCounter >= 5)
-            {
-                Server_UpdateWeaponRotation(ControlRotation);
-                FrameCounter = 0;
-            }
-        }
-    }
-        
-    // Si c'est mon tour, consommer des points de mouvement basés sur la distance parcourue
+    // Gestion du mouvement et des points de mouvement
     if (bIsMyTurn && HasAuthority())
     {
-        FVector CurrentPosition = GetActorLocation();
-        float DistanceMoved = FVector::Dist2D(LastPosition, CurrentPosition);
-        
-        if (DistanceMoved > 0)
-        {
-            // Consommer les points de mouvement
-            float PointsToConsume = DistanceMoved * 0.1f;
-            float PreviousMovementPoints = MovementPoints;
-            MovementPoints = FMath::Max(0.0f, MovementPoints - PointsToConsume);
-            
-            // Limiter le mouvement si tous les points sont consommés
-            if (MovementPoints <= 0)
-            {
-                GetCharacterMovement()->MaxWalkSpeed = 0;
-                
-                // Vérifier si on vient juste d'épuiser les points de mouvement
-                if (PreviousMovementPoints > 0 && !bAutoEndTurnTimerActive)
-                {
-                    // Démarrer le timer de fin automatique de tour (3 secondes)
-                    GetWorldTimerManager().SetTimer(AutoEndTurnTimerHandle, this, &AWormCharacter::OnAutoEndTurnTimerExpired, 3.0f, false);
-                    bAutoEndTurnTimerActive = true;
-                    
-                    UE_LOG(LogTemp, Log, TEXT("Movement points depleted for %s. Auto-end turn in 3 seconds."), *GetName());
-                }
-            }
-        }
-        
-        LastPosition = CurrentPosition;
-        if (AimingWidget && CurrentWeapon)
-        {
-            UpdateAimingWidget();
-        }
+        UpdateMovementPoints();
+    }
+    
+    // Interface utilisateur de visée
+    if (AimingWidget && CurrentWeapon)
+    {
+        UpdateAimingWidget();
     }
     
     // Limiter le mouvement quand ce n'est pas le tour du personnage
     LimitMovementWhenNotMyTurn();
 }
 
+void AWormCharacter::UpdateWeaponRotation()
+{
+    // Mise à jour de l'arme seulement si on est contrôlé localement et qu'on a une arme
+    if (IsLocallyControlled() && WeaponPivotComponent && CurrentWeapon)
+    {
+        FRotator NewWeaponRotation;
+        
+        // En mode FPS: l'arme suit la rotation de la caméra
+        // En mode TPS: l'arme conserve une orientation fixe par rapport au personnage
+        if (bIsInFirstPersonMode)
+        {
+            // En mode FPS, permettre la rotation complète (y compris la hauteur)
+            FRotator ControlRotation = GetControlRotation();
+            NewWeaponRotation = FRotator(ControlRotation.Pitch, ControlRotation.Yaw, 0.0f);
+            
+            // Appliquer la nouvelle rotation
+            WeaponPivotComponent->SetWorldRotation(NewWeaponRotation);
+        
+            // Envoyer au serveur si c'est un client et que c'est notre tour
+            if (GetLocalRole() < ROLE_Authority && bIsMyTurn)
+            {
+                // Envoyer moins souvent pour réduire le trafic réseau
+                static int32 FrameCounter = 0;
+                if (++FrameCounter >= 5)
+                {
+                    // Envoyer la rotation calculée
+                    Server_UpdateWeaponRotation(NewWeaponRotation);
+                    FrameCounter = 0;
+                }
+            }
+        }
+        else
+        {
+            // En mode TPS, l'arme reste fixe par rapport au personnage
+            // On n'applique aucune mise à jour de rotation ici
+            // L'arme conserve sa rotation DefaultWeaponRotation définie à l'initialisation 
+            // ou lors du passage de FPS à TPS
+        }
+    }
+}
+
+void AWormCharacter::UpdateMovementPoints()
+{
+    FVector CurrentPosition = GetActorLocation();
+    float DistanceMoved = FVector::Dist2D(LastPosition, CurrentPosition);
+    
+    if (DistanceMoved > 0)
+    {
+        // Consommer les points de mouvement
+        float PointsToConsume = DistanceMoved * 0.1f;
+        float PreviousMovementPoints = MovementPoints;
+        MovementPoints = FMath::Max(0.0f, MovementPoints - PointsToConsume);
+        
+        // Limiter le mouvement si tous les points sont consommés
+        if (MovementPoints <= 0 && PreviousMovementPoints > 0)
+        {
+            GetCharacterMovement()->MaxWalkSpeed = 0;
+            
+            // Démarrer le timer de fin automatique de tour si les points sont épuisés
+            if (!bAutoEndTurnTimerActive)
+            {
+                GetWorldTimerManager().SetTimer(
+                    AutoEndTurnTimerHandle, 
+                    this, 
+                    &AWormCharacter::OnAutoEndTurnTimerExpired, 
+                    3.0f, 
+                    false
+                );
+                bAutoEndTurnTimerActive = true;
+            }
+        }
+    }
+    
+    LastPosition = CurrentPosition;
+}
+
 void AWormCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     
-    // Répliquer les variables
+    // Répliquer les variables essentielles
     DOREPLIFETIME(AWormCharacter, bIsMyTurn);
     DOREPLIFETIME(AWormCharacter, Health);
     DOREPLIFETIME(AWormCharacter, CurrentWeaponIndex);
@@ -428,6 +465,8 @@ void AWormCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
     DOREPLIFETIME(AWormCharacter, AvailableWeapons);
     DOREPLIFETIME(AWormCharacter, WeaponPivotComponent);
 }
+
+// Fonctions de mouvement legacy
 void AWormCharacter::MoveForward(float Value)
 {
     if ((Controller != nullptr) && (Value != 0.0f) && bIsMyTurn && MovementPoints > 0)
@@ -486,9 +525,9 @@ void AWormCharacter::LimitMovementWhenNotMyTurn()
 
 void AWormCharacter::FireWeapon()
 {
-
-
     float CurrentTime = UGameplayStatics::GetTimeSeconds(this);
+    
+    // Vérifier si les conditions sont réunies pour tirer
     if (bIsMyTurn && CurrentWeapon && (CurrentTime - LastWeaponUseTime >= WeaponCooldown))
     {
         // Cacher la trajectoire AVANT de tirer
@@ -499,43 +538,35 @@ void AWormCharacter::FireWeapon()
         
         // Mettre à jour le timestamp
         LastWeaponUseTime = CurrentTime;
-        UE_LOG(LogTemp, Warning, TEXT("FireWeapon called on %s (IsLocallyControlled: %s)"), 
-    *GetName(), IsLocallyControlled() ? TEXT("Yes") : TEXT("No"));
-        UE_LOG(LogTemp, Warning, TEXT("  - bIsMyTurn: %s"), bIsMyTurn ? TEXT("Yes") : TEXT("No"));
-        UE_LOG(LogTemp, Warning, TEXT("  - CurrentWeapon: %s"), CurrentWeapon ? *CurrentWeapon->GetName() : TEXT("NULL"));
-        UE_LOG(LogTemp, Warning, TEXT("  - AvailableWeapons.Num(): %d"), AvailableWeapons.Num());
-        UE_LOG(LogTemp, Warning, TEXT("  - CurrentWeaponIndex: %d"), CurrentWeaponIndex);
-        // Appeler le RPC serveur
+        
+        // Appeler le RPC serveur si on est sur un client
         if (GetLocalRole() < ROLE_Authority)
         {
             Server_FireWeapon();
-            UE_LOG(LogTemp, Log, TEXT("Firing weapon for %s on RPC"), *GetName());
         }
         else
         {
             // Sur le serveur, appeler directement
             CurrentWeapon->Fire();
-            UE_LOG(LogTemp, Log, TEXT("Firing weapon for %s"), *GetName());
-            UGameplayStatics::SpawnEmitterAtLocation(
-                  GetWorld(),
-                  FireEffect,
-                  GetActorLocation() + FVector(0, 0, 100),  // Au-dessus du personnage
-                  FRotator::ZeroRotator,
-                  FVector(3, 3, 3)  // Grande taille pour être visible
-              );
+            
+            // Effets visuels
+            if (FireEffect)
+            {
+                UGameplayStatics::SpawnEmitterAtLocation(
+                    GetWorld(),
+                    FireEffect,
+                    GetActorLocation() + FVector(0, 0, 100),
+                    FRotator::ZeroRotator,
+                    FVector(3, 3, 3)
+                );
+            }
+            
             // Jouer l'animation de tir
             if (FireMontage)
             {
                 PlayAnimMontage(FireMontage);
             }
         }
-    } else {
-        UE_LOG(LogTemp, Log, TEXT("Cannot fire weapon for %s"), *GetName());
-        //more logs
-        UE_LOG(LogTemp, Log, TEXT("bIsMyTurn: %d"), bIsMyTurn);
-        UE_LOG(LogTemp, Log, TEXT("CurrentWeapon: %s"), CurrentWeapon ? *CurrentWeapon->GetName() : TEXT("None"));
-        UE_LOG(LogTemp, Log, TEXT("CurrentTime: %f"), CurrentTime);
-        UE_LOG(LogTemp, Log, TEXT("LastWeaponUseTime: %f"), LastWeaponUseTime);
     }
 }
 
@@ -586,208 +617,35 @@ void AWormCharacter::Server_SwitchWeapon_Implementation(int32 WeaponIndex)
 
 void AWormCharacter::SpawnCurrentWeapon()
 {
-    UE_LOG(LogTemp, Warning, TEXT("SpawnCurrentWeapon called for %s (HasAuthority: %s)"), 
-        *GetName(), HasAuthority() ? TEXT("Yes") : TEXT("No"));
-    
+    // Cette fonction ne devrait s'exécuter que sur le serveur
     if (!HasAuthority())
     {
-        UE_LOG(LogTemp, Warning, TEXT("SpawnCurrentWeapon called on client - should not happen"));
-        return;
-    }
-    
-    if (!AvailableWeapons.IsValidIndex(CurrentWeaponIndex))
-    {
-        UE_LOG(LogTemp, Error, TEXT("Invalid weapon index %d (max: %d)"), 
-            CurrentWeaponIndex, AvailableWeapons.Num() - 1);
-        return;
-    }
-    
-    // Détruire l'ancienne arme si elle existe
-    if (CurrentWeapon)
-    {
-        CurrentWeapon->Destroy();
-        CurrentWeapon = nullptr;
-    }
-    
-    // Spawner la nouvelle arme
-    FTransform SpawnTransform;
-    if (GetMesh()->DoesSocketExist(WeaponSocketName))
-    {
-        // Obtenir la transformation du socket
-        SpawnTransform = GetMesh()->GetSocketTransform(WeaponSocketName);
-        
-        // Corriger la rotation pour qu'elle pointe toujours devant le personnage
-        FRotator ControlRotation = GetControlRotation();
-        // Garder seulement le Yaw (rotation horizontale) du controller
-        FRotator NewRotation(0.0f, ControlRotation.Yaw, 0.0f);
-        
-        // Optionnel: Ajouter un léger offset de pitch pour pointer légèrement vers le haut
-        NewRotation.Pitch = -10.0f; // Valeur négative pour pointer vers le haut
-        
-        // Appliquer la nouvelle rotation à la transformation de spawn
-        SpawnTransform.SetRotation(NewRotation.Quaternion());
-    }
-    else
-    {
-        SpawnTransform = GetActorTransform();
-        SpawnTransform.AddToTranslation(FVector(50.0f, 0.0f, 0.0f));
-    }
-    
-    FActorSpawnParameters SpawnParams;
-    SpawnParams.Owner = this;
-    SpawnParams.Instigator = GetInstigator();
-    
-    CurrentWeapon = GetWorld()->SpawnActor<AWormWeapon>(
-        AvailableWeapons[CurrentWeaponIndex], 
-        SpawnTransform, 
-        SpawnParams
-    );
-    
-    if (CurrentWeapon)
-    {
-        // Créer d'abord le composant pivot pour la rotation de l'arme
-        if (WeaponPivotComponent)
-        {
-            WeaponPivotComponent->DestroyComponent();
-        }
-        
-        WeaponPivotComponent = NewObject<USceneComponent>(this, TEXT("WeaponPivot"));
-        WeaponPivotComponent->RegisterComponent();
-        
-        if (GetMesh()->DoesSocketExist(WeaponSocketName))
-        {
-            WeaponPivotComponent->AttachToComponent(GetMesh(), 
-                FAttachmentTransformRules::SnapToTargetNotIncludingScale, 
-                WeaponSocketName);
-                
-            // Appliquer la rotation initiale au pivot
-            FRotator ControlRotation = GetControlRotation();
-            WeaponPivotComponent->SetWorldRotation(FRotator(0.0f, ControlRotation.Yaw, 0.0f));
-        }
-        else
-        {
-            WeaponPivotComponent->AttachToComponent(GetRootComponent(), 
-                FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-        }
-        
-        // Attacher l'arme au pivot
-        CurrentWeapon->AttachToComponent(WeaponPivotComponent, 
-            FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-        
-        CurrentWeapon->SetOwner(this);
-        UE_LOG(LogTemp, Warning, TEXT("Server created weapon: %s, attached to pivot: %p"),
-            *CurrentWeapon->GetName(), WeaponPivotComponent);
-            
-        // Forcer une mise à jour réseau
-        ForceNetUpdate();
-        
-        // Notifier les clients du changement d'arme
-        Multicast_WeaponChanged();
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("Failed to create weapon!"));
-    }
-}
-void AWormCharacter::Multicast_WeaponChanged_Implementation()
-{
-    // Cette fonction est appelée sur tous les clients, pas besoin de vérifier l'autorité
-    
-    // Si nous ne sommes pas le serveur et que nous avons des armes
-    if (!HasAuthority() && AvailableWeapons.Num() > 0)
-    {
-        // S'assurer que l'index est valide
-        if (AvailableWeapons.IsValidIndex(CurrentWeaponIndex))
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Client received weapon change notification"));
-            
-            // Détruire l'arme actuelle si elle existe
-            if (CurrentWeapon)
-            {
-                CurrentWeapon->Destroy();
-                CurrentWeapon = nullptr;
-            }
-            
-            // On réutilise SpawnCurrentWeapon, mais ça ne devrait pas créer d'armes sur le client
-            // C'est juste pour la visualisation
-            // Si cela cause des problèmes, il faudrait dupliquer la logique ici
-            SpawnCurrentWeapon();
-        }
-    }
-}
-
-void AWormCharacter::OnRep_Health()
-{
-    // Jouer l'animation de réaction aux dégâts
-    if (Health > 0 && HitReactMontage)
-    {
-        PlayAnimMontage(HitReactMontage);
-    }
-    else if (Health <= 0 && DeathMontage)
-    {
-        PlayAnimMontage(DeathMontage);
-    }
-}
-
-void AWormCharacter::OnRep_CurrentWeaponIndex()
-{
-    UE_LOG(LogTemp, Warning, TEXT("OnRep_CurrentWeaponIndex called on %s (IsLocallyControlled: %s)"), 
-        *GetName(), IsLocallyControlled() ? TEXT("Yes") : TEXT("No"));
-    
-    // Détruire l'arme actuelle si elle existe
-    if (CurrentWeapon)
-    {
-        CurrentWeapon->Destroy();
-        CurrentWeapon = nullptr;
-    }
-    
-    // Vérifier si nous avons des armes disponibles
-    if (AvailableWeapons.Num() <= 0)
-    {
-        UE_LOG(LogTemp, Error, TEXT("No available weapons for client %s"), *GetName());
         return;
     }
     
     // Vérifier que l'index est valide
     if (!AvailableWeapons.IsValidIndex(CurrentWeaponIndex))
     {
-        UE_LOG(LogTemp, Error, TEXT("Invalid weapon index %d (max: %d) for client %s"), 
-            CurrentWeaponIndex, AvailableWeapons.Num() - 1, *GetName());
         return;
     }
     
-    // Créer d'abord le composant pivot pour la rotation
-    if (WeaponPivotComponent)
+    // Nettoyage de l'arme existante
+    if (CurrentWeapon)
     {
-        WeaponPivotComponent->DestroyComponent();
+        CurrentWeapon->Destroy();
+        CurrentWeapon = nullptr;
     }
     
-    WeaponPivotComponent = NewObject<USceneComponent>(this, TEXT("WeaponPivot"));
-    WeaponPivotComponent->RegisterComponent();
+    // Créer le pivot de l'arme
+    CreateWeaponPivot();
     
-    if (GetMesh()->DoesSocketExist(WeaponSocketName))
-    {
-        WeaponPivotComponent->AttachToComponent(GetMesh(), 
-            FAttachmentTransformRules::SnapToTargetNotIncludingScale, 
-            WeaponSocketName);
-            
-        // Appliquer la rotation initiale au pivot
-        FRotator ControlRotation = GetControlRotation();
-        WeaponPivotComponent->SetWorldRotation(FRotator(0.0f, ControlRotation.Yaw, 0.0f));
-    }
-    else
-    {
-        WeaponPivotComponent->AttachToComponent(GetRootComponent(), 
-            FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-    }
+    // Calculer la transformation de spawn
+    FTransform SpawnTransform = CalculateWeaponSpawnTransform();
     
-    // Créer l'arme
+    // Paramètres de spawn
     FActorSpawnParameters SpawnParams;
     SpawnParams.Owner = this;
     SpawnParams.Instigator = GetInstigator();
-    
-    // Spawner au niveau du pivot
-    FTransform SpawnTransform = WeaponPivotComponent->GetComponentTransform();
     
     // Spawner l'arme
     CurrentWeapon = GetWorld()->SpawnActor<AWormWeapon>(
@@ -803,12 +661,6 @@ void AWormCharacter::OnRep_CurrentWeaponIndex()
             FAttachmentTransformRules::SnapToTargetNotIncludingScale);
         
         CurrentWeapon->SetOwner(this);
-        
-        UE_LOG(LogTemp, Warning, TEXT("Client successfully created weapon: %s"), *CurrentWeapon->GetName());
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("Client failed to create weapon!"));
     }
 }
 
@@ -853,15 +705,12 @@ void AWormCharacter::Multicast_ApplyImpulse_Implementation(FVector Direction, fl
         GetCharacterMovement()->AddImpulse(Direction * Strength, true);
     }
 }
+
 void AWormCharacter::SetIsMyTurn(bool bNewTurn)
 {
     // Cette fonction ne devrait être appelée que par le serveur
     if (HasAuthority())
     {
-        // Log pour déboguer (en utilisant bNewTurn, pas bIsMyTurn qui n'est pas encore mis à jour)
-        UE_LOG(LogTemp, Log, TEXT("Setting turn for %s to %s"), 
-            *GetName(), bNewTurn ? TEXT("true") : TEXT("false"));
-        
         // Stocker l'ancien état pour détecter les changements
         bool bOldTurn = bIsMyTurn;
         
@@ -892,27 +741,21 @@ void AWormCharacter::SetIsMyTurn(bool bNewTurn)
             GetCharacterMovement()->Velocity = FVector::ZeroVector;
             GetCharacterMovement()->MaxWalkSpeed = 0;
         }
+        
         // Appeler l'événement BlueprintNativeEvent seulement si l'état a changé
         if (bOldTurn != bIsMyTurn)
         {
             OnTurnChanged(bIsMyTurn);
         }
     }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Attempted to set turn state on client. This should only be called on server."));
-    }
 }
 
 void AWormCharacter::OnTurnChanged_Implementation(bool bIsTurn)
 {
     // Cette fonction peut être surchargée en Blueprint
-    // Si vous voulez ajouter du comportement par défaut en C++, faites-le ici
-    
-    // Par exemple: Activer/désactiver une indication visuelle du tour actif
-    UE_LOG(LogTemp, Log, TEXT("Turn changed for %s: %s"), 
-        *GetName(), bIsTurn ? TEXT("It's my turn") : TEXT("Turn ended"));
+    // Le code C++ par défaut est minimal
 }
+
 bool AWormCharacter::IsPendingKill() const
 {
     return IsPendingKillPending();
@@ -923,8 +766,6 @@ void AWormCharacter::OnAutoEndTurnTimerExpired()
     // Cette fonction est appelée après le délai de 3 secondes
     if (HasAuthority() && bIsMyTurn)
     {
-        UE_LOG(LogTemp, Log, TEXT("Auto-ending turn for %s after movement points depletion"), *GetName());
-        
         // Trouver le GameMode pour terminer le tour
         AGameModeBase* GameMode = GetWorld()->GetAuthGameMode();
         AWormGameMode* WormGameMode = Cast<AWormGameMode>(GameMode);
@@ -937,18 +778,12 @@ void AWormCharacter::OnAutoEndTurnTimerExpired()
     
     bAutoEndTurnTimerActive = false;
 }
-void AWormCharacter::OnEndTurnAction(const FInputActionValue& Value)
-{
-    EndTurn();
-}
 
 void AWormCharacter::EndTurn()
 {
     // Vérifier si c'est notre tour
     if (bIsMyTurn)
     {
-        UE_LOG(LogTemp, Log, TEXT("Player %s manually ending turn"), *GetName());
-        
         // Appeler le RPC serveur si on est sur un client
         if (GetLocalRole() < ROLE_Authority)
         {
@@ -956,7 +791,7 @@ void AWormCharacter::EndTurn()
         }
         else
         {
-            // Sur le serveur, terminer le tour directement
+            // Sur le serveur, terminer le tour directement via le GameMode
             AGameModeBase* GameMode = GetWorld()->GetAuthGameMode();
             AWormGameMode* WormGameMode = Cast<AWormGameMode>(GameMode);
             
@@ -982,13 +817,8 @@ void AWormCharacter::Server_EndTurn_Implementation()
     }
 }
 
-
 void AWormCharacter::SetAvailableWeapons_Implementation(const TArray<TSubclassOf<AWormWeapon>>& WeaponTypes)
 {
-    // Journaliser pour déboguer
-    UE_LOG(LogTemp, Warning, TEXT("[%s] SetAvailableWeapons called, HasAuthority: %s, Received %d weapon types"), 
-        *GetName(), HasAuthority() ? TEXT("Yes") : TEXT("No"), WeaponTypes.Num());
-    
     // Stocker les armes disponibles
     AvailableWeapons = WeaponTypes;
     
@@ -1023,7 +853,6 @@ void AWormCharacter::SetAvailableWeapons_Implementation(const TArray<TSubclassOf
             [this]() {
                 if (!CurrentWeapon)
                 {
-                    UE_LOG(LogTemp, Warning, TEXT("Client triggering weapon creation manually"));
                     OnRep_CurrentWeaponIndex();
                 }
             },
@@ -1035,52 +864,12 @@ void AWormCharacter::SetAvailableWeapons_Implementation(const TArray<TSubclassOf
 
 void AWormCharacter::DiagnoseWeapons()
 {
-    UE_LOG(LogTemp, Warning, TEXT("===== WEAPON DIAGNOSTIC for %s ====="), *GetName());
-    UE_LOG(LogTemp, Warning, TEXT("HasAuthority: %s"), HasAuthority() ? TEXT("Yes") : TEXT("No"));
-    UE_LOG(LogTemp, Warning, TEXT("IsLocallyControlled: %s"), IsLocallyControlled() ? TEXT("Yes") : TEXT("No"));
-    UE_LOG(LogTemp, Warning, TEXT("AvailableWeapons.Num(): %d"), AvailableWeapons.Num());
-    UE_LOG(LogTemp, Warning, TEXT("CurrentWeaponIndex: %d"), CurrentWeaponIndex);
-    UE_LOG(LogTemp, Warning, TEXT("CurrentWeapon: %s"), CurrentWeapon ? *CurrentWeapon->GetName() : TEXT("NULL"));
-    if (!HasAuthority() && IsLocallyControlled())
+    // Diagnostic minimal avec les informations essentielles uniquement
+    if (!HasAuthority() && IsLocallyControlled() && !CurrentWeapon && AvailableWeapons.Num() > 0)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Client-specific weapon diagnosis:"));
-        UE_LOG(LogTemp, Warning, TEXT("  - Control Rotation: %s"), *GetControlRotation().ToString());
-        if (WeaponPivotComponent)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("  - Weapon Pivot Rotation: %s"), *WeaponPivotComponent->GetComponentRotation().ToString());
-        }
-        else
-        {
-            UE_LOG(LogTemp, Warning, TEXT("  - Weapon Pivot Component is NULL"));
-        }
+        OnRep_CurrentWeaponIndex();
     }
-    if (GetMesh())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Socket '%s' exists: %s"), 
-            *WeaponSocketName.ToString(), 
-            GetMesh()->DoesSocketExist(WeaponSocketName) ? TEXT("Yes") : TEXT("No"));
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("Character has no mesh!"));
-    }
-    
-    // Essayer de forcer la création de l'arme
-    if (!CurrentWeapon && AvailableWeapons.Num() > 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Trying to force weapon creation..."));
-        if (HasAuthority())
-        {
-            SpawnCurrentWeapon();
-        }
-        else
-        {
-            OnRep_CurrentWeaponIndex();
-        }
-    }
-    UE_LOG(LogTemp, Warning, TEXT("====================================="));
 }
-
 
 void AWormCharacter::SetAiming(bool bIsAiming)
 {
@@ -1089,7 +878,6 @@ void AWormCharacter::SetAiming(bool bIsAiming)
     {
         CurrentWeapon->ShowTrajectory(bIsAiming);
     }
-    
     
     // Widget de visée
     if (bIsAiming)
@@ -1199,23 +987,25 @@ void AWormCharacter::Server_UpdateWeaponRotation_Implementation(FRotator NewRota
 {
     if (WeaponPivotComponent)
     {
-        WeaponPivotComponent->SetWorldRotation(FRotator(0.0f, NewRotation.Yaw, 0.0f));
+        // Appliquer la rotation reçue - on respecte également le mode de caméra
+        // Utiliser directement la rotation envoyée par le client (qui a déjà géré le mode)
+        WeaponPivotComponent->SetWorldRotation(NewRotation);
         
-        // Propager aux clients via Multicast si nécessaire
+        // Propager aux clients via Multicast
         Multicast_UpdateWeaponRotation(NewRotation);
     }
 }
-
 
 void AWormCharacter::Multicast_UpdateWeaponRotation_Implementation(FRotator NewRotation)
 {
     // Ne pas exécuter sur le client qui a envoyé la rotation (pour éviter les doublons)
     if (!IsLocallyControlled() && WeaponPivotComponent)
     {
-        WeaponPivotComponent->SetWorldRotation(FRotator(0.0f, NewRotation.Yaw, 0.0f));
+        // Appliquer la rotation telle qu'elle est reçue, sans modifier le pitch
+        // ce qui permet de conserver l'orientation en mode FPS
+        WeaponPivotComponent->SetWorldRotation(NewRotation);
     }
 }
-
 
 void AWormCharacter::ToggleCameraMode(bool bUseFPSCamera)
 {
@@ -1223,24 +1013,222 @@ void AWormCharacter::ToggleCameraMode(bool bUseFPSCamera)
     {
         FollowCamera->SetActive(!bUseFPSCamera);
         FPSCamera->SetActive(bUseFPSCamera);
-            bIsInFirstPersonMode = bUseFPSCamera;
         
-        // Cacher le mesh du personnage en FPS si nécessaire
+        // Mettre à jour l'indicateur de mode caméra
+        bool bPreviousMode = bIsInFirstPersonMode;
+        bIsInFirstPersonMode = bUseFPSCamera;
+        
+        // Gestion de la position de caméra
         if (bUseFPSCamera)
         {
             // Sauvegarder la position actuelle du CameraBoom
             SavedCameraDistance = CameraBoom->TargetArmLength;
-            UE_LOG(LogTemp, Log, TEXT("Saved camera distance: %f"), SavedCameraDistance);   
-            // Option: Rendre invisible certaines parties du mesh
-            // GetMesh()->SetOwnerNoSee(true);
+            
+            // Si on passe du mode TPS au mode FPS, on applique la rotation actuelle de la caméra
+            if (WeaponPivotComponent)
+            {
+                FRotator ControlRotation = GetControlRotation();
+                WeaponPivotComponent->SetWorldRotation(FRotator(ControlRotation.Pitch, ControlRotation.Yaw, 0.0f));
+            }
         }
         else
         {
             // Restaurer la position du CameraBoom
             CameraBoom->TargetArmLength = SavedCameraDistance;
-            UE_LOG(LogTemp, Log, TEXT("Restored camera distance: %f"), SavedCameraDistance);
-            // Option: Rendre visible le mesh complet
-            // GetMesh()->SetOwnerNoSee(false);
+            
+            // Si on retourne en mode TPS, remettre l'arme dans la rotation par défaut
+            if (WeaponPivotComponent)
+            {
+                WeaponPivotComponent->SetWorldRotation(DefaultWeaponRotation);
+            }
+        }
+    }
+}
+  
+void AWormCharacter::CreateWeaponPivot()
+{
+    // Nettoyage du pivot existant
+    if (WeaponPivotComponent)
+    {
+        WeaponPivotComponent->DestroyComponent();
+    }
+    
+    // Créer le nouveau pivot
+    WeaponPivotComponent = NewObject<USceneComponent>(this, TEXT("WeaponPivot"));
+    WeaponPivotComponent->RegisterComponent();
+    
+    // Attacher au bon socket si disponible, sinon au root
+    if (GetMesh()->DoesSocketExist(WeaponSocketName))
+    {
+        WeaponPivotComponent->AttachToComponent(GetMesh(), 
+            FAttachmentTransformRules::SnapToTargetNotIncludingScale, 
+            WeaponSocketName);
+            
+        // En mode TPS, appliquer la rotation fixe par défaut,
+        // sinon utiliser la rotation de contrôle en mode FPS
+        if (!bIsInFirstPersonMode)
+        {
+            WeaponPivotComponent->SetWorldRotation(DefaultWeaponRotation);
+        }
+        else
+        {
+            FRotator ControlRotation = GetControlRotation();
+            WeaponPivotComponent->SetWorldRotation(FRotator(ControlRotation.Pitch, ControlRotation.Yaw, 0.0f));
+        }
+    }
+    else
+    {
+        WeaponPivotComponent->AttachToComponent(GetRootComponent(), 
+            FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+        
+        // Appliquer également la rotation appropriée
+        if (!bIsInFirstPersonMode)
+        {
+            WeaponPivotComponent->SetWorldRotation(DefaultWeaponRotation);
+        }
+    }
+}
+
+FTransform AWormCharacter::CalculateWeaponSpawnTransform()
+{
+    FTransform SpawnTransform;
+    
+    // Obtenir la transformation depuis le socket si disponible
+    if (GetMesh()->DoesSocketExist(WeaponSocketName))
+    {
+        SpawnTransform = GetMesh()->GetSocketTransform(WeaponSocketName);
+        
+        // Ajuster la rotation selon le mode de caméra
+        if (bIsInFirstPersonMode)
+        {
+            // En FPS, suivre la rotation de la caméra
+            FRotator ControlRotation = GetControlRotation();
+            FRotator NewRotation(ControlRotation.Pitch, ControlRotation.Yaw, 0.0f);
+            SpawnTransform.SetRotation(NewRotation.Quaternion());
+        }
+        else
+        {
+            // En TPS, utiliser la rotation fixe par défaut
+            SpawnTransform.SetRotation(DefaultWeaponRotation.Quaternion());
+        }
+    }
+    else
+    {
+        // Fallback à la transformation de l'acteur avec un offset
+        SpawnTransform = GetActorTransform();
+        SpawnTransform.AddToTranslation(FVector(50.0f, 0.0f, 0.0f));
+        
+        // Utiliser également la rotation appropriée
+        if (!bIsInFirstPersonMode)
+        {
+            SpawnTransform.SetRotation(DefaultWeaponRotation.Quaternion());
+        }
+    }
+    
+    return SpawnTransform;
+}
+
+void AWormCharacter::Multicast_WeaponChanged_Implementation()
+{
+    // Ne pas exécuter cette logique sur le serveur
+    if (HasAuthority())
+    {
+        return;
+    }
+    
+    // S'assurer que l'index est valide avant de continuer
+    if (AvailableWeapons.Num() > 0 && AvailableWeapons.IsValidIndex(CurrentWeaponIndex))
+    {
+        // Détruire l'arme actuelle si elle existe
+        if (CurrentWeapon)
+        {
+            CurrentWeapon->Destroy();
+            CurrentWeapon = nullptr;
+        }
+        
+        // Créer la nouvelle arme (uniquement visuel)
+        OnRep_CurrentWeaponIndex();
+    }
+}
+
+void AWormCharacter::OnRep_Health()
+{
+    // Jouer l'animation de réaction aux dégâts
+    if (Health > 0 && HitReactMontage)
+    {
+        PlayAnimMontage(HitReactMontage);
+    }
+    else if (Health <= 0 && DeathMontage)
+    {
+        PlayAnimMontage(DeathMontage);
+    }
+}
+
+void AWormCharacter::OnRep_CurrentWeaponIndex()
+{
+    // Fonction optimisée d'initialisation d'armes côté client
+    if (AvailableWeapons.Num() <= 0 || !AvailableWeapons.IsValidIndex(CurrentWeaponIndex))
+    {
+        return;
+    }
+    
+    // Nettoyage de l'arme existante
+    if (CurrentWeapon)
+    {
+        CurrentWeapon->Destroy();
+        CurrentWeapon = nullptr;
+    }
+    
+    // Créer le pivot pour l'arme
+    CreateWeaponPivot();
+    
+    // Créer l'arme
+    FActorSpawnParameters SpawnParams;
+    SpawnParams.Owner = this;
+    SpawnParams.Instigator = GetInstigator();
+    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    
+    // Utiliser la transformation du pivot pour le spawn
+    FTransform SpawnTransform = WeaponPivotComponent->GetComponentTransform();
+    
+    // Spawner l'arme
+    CurrentWeapon = GetWorld()->SpawnActor<AWormWeapon>(
+        AvailableWeapons[CurrentWeaponIndex], 
+        SpawnTransform, 
+        SpawnParams
+    );
+    
+    if (CurrentWeapon)
+    {
+        // Attacher l'arme au pivot
+        CurrentWeapon->AttachToComponent(WeaponPivotComponent, 
+            FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+        
+        CurrentWeapon->SetOwner(this);
+        
+        // IMPORTANT: Désactiver les collisions avec l'arme
+        if (CurrentWeapon->GetRootComponent())
+        {
+            // Désactiver les collisions pour tous les composants de l'arme
+            TArray<UPrimitiveComponent*> Components;
+            CurrentWeapon->GetComponents<UPrimitiveComponent>(Components);
+            for (UPrimitiveComponent* Component : Components)
+            {
+                if (Component)
+                {
+                    Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+                    Component->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+                    Component->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Ignore);
+                    Component->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Ignore);
+                }
+            }
+            
+            // Si le composant principal est un SkeletalMeshComponent ou StaticMeshComponent
+            if (UMeshComponent* MeshComponent = Cast<UMeshComponent>(CurrentWeapon->GetRootComponent()))
+            {
+                MeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+                MeshComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
+            }
         }
     }
 }

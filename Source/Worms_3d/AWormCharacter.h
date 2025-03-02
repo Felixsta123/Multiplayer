@@ -19,53 +19,49 @@ class WORMS_3D_API AWormCharacter : public ACharacter
 public:
     AWormCharacter();
 
-    // === SYSTÈME DE CAMÉRA SIMPLIFIÉ ===
-
-    // Paramètres généraux de caméra
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
-    float DefaultCameraDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
-    float MinCameraDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
-    float MaxCameraDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
-    float CameraZoomSpeed;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Camera")
-    float CurrentCameraDistance;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
-    bool bUseFirstPersonViewWhenAiming;
-    
-    // Composants de caméra
+    // === COMPOSANTS DE CAMÉRA ===
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     class USpringArmComponent* CameraBoom;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     class UCameraComponent* FollowCamera;
+    
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     class UCameraComponent* FPSCamera;
 
-    //SavedCameraDistance
-    float SavedCameraDistance;
+    // === SYSTÈME DE CAMÉRA ===
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
+    float DefaultCameraDistance = 400.0f;
 
-    //void AWormCharacter::ToggleCameraMode(bool bUseFPSCamera)
-    UFUNCTION(BlueprintCallable, Category = "Camera")
-    void ToggleCameraMode(bool bUseFPSCamera);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
+    float MinCameraDistance = 200.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
+    float MaxCameraDistance = 800.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
+    float CameraZoomSpeed = 20.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Camera")
+    float CurrentCameraDistance;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
+    bool bUseFirstPersonViewWhenAiming = true;
+    
+    // Position sauvegardée de la caméra
+    float SavedCameraDistance;
     
     UPROPERTY(EditDefaultsOnly, Category = "Camera")
     FName HeadSocketName;
-    UPROPERTY()
-    float DefaultArmLength;
     
-    // Fonction pour le zoom
+    // Fonctions de caméra
+    UFUNCTION(BlueprintCallable, Category = "Camera")
+    void ToggleCameraMode(bool bUseFPSCamera);
+    
     UFUNCTION(BlueprintCallable, Category = "Camera")
     void ZoomCamera(float Amount);
 
-    // === SYSTÈME D'INTERFACE UTILISATEUR ===
+    // === INTERFACE UTILISATEUR ===
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI")
     TSubclassOf<UUserWidget> AimingWidgetClass;
 
@@ -73,27 +69,37 @@ public:
     UUserWidget* AimingWidget;
 
     // === FONCTIONS DE JEU PRINCIPALES ===
+    
+    // Armes
     UFUNCTION(BlueprintCallable, Category = "Worm")
     void FireWeapon();
     
     UFUNCTION(BlueprintCallable, Category = "Worm")
     void SwitchWeapon(int32 WeaponIndex);
+
+    // Rotation de l'arme par défaut en mode TPS
+    UPROPERTY()
+    FRotator DefaultWeaponRotation;
     
+    // Système de tours
     UFUNCTION(BlueprintCallable, Category = "Worm")
     void SetIsMyTurn(bool bNewTurn);
     
     UFUNCTION(BlueprintPure, Category = "Worm")
     bool IsMyTurn() const { return bIsMyTurn; }
     
+    // État du personnage
     UFUNCTION(BlueprintPure, Category = "Worm")
     float GetHealth() const { return Health; }
     
+    // Gestion des dégâts et impulsions
     UFUNCTION(BlueprintCallable, Category = "Worm")
     void ApplyDamageToWorm(float DamageAmount, FVector ImpactDirection);
         
     UFUNCTION(BlueprintCallable, Category = "Worm")
     void ApplyMovementImpulse(FVector Direction, float Strength);
 
+    // Système de visée
     UFUNCTION(BlueprintCallable, Category = "Worm")
     void SetAiming(bool bIsAiming);
 
@@ -137,7 +143,6 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Debug")
     void DiagnoseWeapons();
     
-
 protected:
     // === ÉTAT DU PERSONNAGE ===
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Worm")
@@ -177,7 +182,7 @@ protected:
     UFUNCTION()
     void OnAutoEndTurnTimerExpired();
 
-    // === ANIMATIONS ===
+    // === ANIMATIONS ET EFFETS ===
     UPROPERTY(EditDefaultsOnly, Category = "Effects")
     UParticleSystem* FireEffect;
     
@@ -230,7 +235,7 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input")
     class UInputAction* ZoomAction;
 
-    // === CALLBACK DES ACTIONS D'ENTRÉE ===
+    // === HANDLERS D'ENTRÉE ===
     void OnMoveAction(const FInputActionValue& Value);
     void OnJumpAction(const FInputActionValue& Value);
     void OnJumpActionReleased(const FInputActionValue& Value);
@@ -244,7 +249,6 @@ protected:
     void OnZoomAction(const FInputActionValue& Value);
     void OnAimActionStarted(const FInputActionValue& Value);
     void OnAimActionEnded(const FInputActionValue& Value);
-    void OnTestCameraAction(const FInputActionValue& Value);
 
     // === FONCTIONS DE MOUVEMENT ===
     void MoveForward(float Value);
@@ -257,13 +261,14 @@ protected:
     void SpawnCurrentWeapon();
     void UpdateAimingWidget();
     
-    // === FONCTIONS RPC ===
+    // === CALLBACKS DE RÉPLICATION ===
     UFUNCTION()
     void OnRep_CurrentWeaponIndex();
     
     UFUNCTION()
     void OnRep_Health();
     
+    // === FONCTIONS RPC ===
     UFUNCTION(Server, Reliable, WithValidation)
     void Server_FireWeapon();
     
@@ -281,5 +286,12 @@ protected:
 
     // === FONCTIONS UTILITAIRES ===
     void SetupEnhancedInput(APlayerController* PlayerController);
+    void SetupLegacyInputBindings(UInputComponent* PlayerInputComponent);
     void EndTurn();
+    void CreateWeaponPivot();
+    FTransform CalculateWeaponSpawnTransform();
+    void InitializeCameraSystem();
+    void SetupWeaponDiagnostic();
+    void UpdateWeaponRotation();
+    void UpdateMovementPoints();
 };

@@ -13,12 +13,17 @@ class WORMS_3D_API AWormProjectile : public AActor
 public:
     AWormProjectile();
 
-protected:
-    virtual void BeginPlay() override;
-    
-    // Composant pour la collision et le mouvement
+    // Static variables declaration
+    static float InitialFirePower;
+    static FVector FiringDirection;
+    // Tick function pour surveiller le mouvement
+    virtual void Tick(float DeltaTime) override;
+
+    // Rendre le composant de collision accessible en public
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     class USphereComponent* CollisionComp;
+protected:
+    virtual void BeginPlay() override;
     
     // Composant de mouvement projectile
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
