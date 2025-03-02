@@ -2,10 +2,11 @@
 #include "MaterialDomain.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
+#include "Kismet/GameplayStatics.h"
 
 ADestructibleTerrain::ADestructibleTerrain()
 {
-    PrimaryActorTick.bCanEverTick = false;
+    PrimaryActorTick.bCanEverTick = true; // Modifié à true pour supporter le LOD
     
     // Création du mesh procédural
     TerrainMesh = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("TerrainMesh"));
@@ -28,8 +29,8 @@ ADestructibleTerrain::ADestructibleTerrain()
     TerrainWidth = 2000.0f;
     TerrainHeight = 2000.0f;
     TerrainDepth = 1000.0f;
-    HorizontalResolution = 15; // 50 subdivisions en largeur
-    VerticalResolution = 15; // 50 subdivisions en hauteur
+    HorizontalResolution = 15; // 15 subdivisions en largeur
+    VerticalResolution = 15; // 15 subdivisions en hauteur
     bIsInitialized = false;
     bModificationsApplied = false;
     
@@ -41,11 +42,36 @@ ADestructibleTerrain::ADestructibleTerrain()
     TerrainMesh->SetVisibility(true);
     TerrainMesh->SetCastShadow(true);
     TerrainMesh->bCastDynamicShadow = true;
+    
+    // Initialisation de la structure interne
+    bGenerateInternalStructure = true;
+    InternalLayerCount = 3;
+    InternalLayerThickness = 50.0f;
+
+    // Couleurs des couches internes par défaut
+    InternalLayerColors.Add(FLinearColor(0.5f, 0.3f, 0.1f, 1.0f));  // Terre
+    InternalLayerColors.Add(FLinearColor(0.6f, 0.6f, 0.6f, 1.0f));  // Pierre
+    InternalLayerColors.Add(FLinearColor(0.3f, 0.2f, 0.1f, 1.0f));  // Roche sombre
+    
+    // Initialisation de l'optimisation par sections
+    bUseTerrainSections = true;
+    SectionSizeX = 500.0f;
+    SectionSizeY = 500.0f;
+    
+    // Initialisation du système de LOD
+    bUseLOD = true;
+    LODDistanceThreshold = 3000.0f;
+    LODHorizontalResolution = 8;
+    LODVerticalResolution = 8;
+    bIsUsingLOD = false;
 }
 
 void ADestructibleTerrain::BeginPlay()
 {
     Super::BeginPlay();
+    
+    // Configurer les matériaux
+    SetupMaterials();
     
     // Générer le terrain initial après un court délai
     if (HasAuthority())
@@ -63,6 +89,21 @@ void ADestructibleTerrain::BeginPlay()
             0.5f, 
             false
         );
+    }
+}
+
+void ADestructibleTerrain::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    
+    // Mettre à jour le système de LOD (à intervalle réduit pour optimiser)
+    static float LODUpdateTimer = 0.0f;
+    LODUpdateTimer += DeltaTime;
+    
+    if (LODUpdateTimer >= 1.0f) // Vérifier une fois par seconde
+    {
+        UpdateLOD();
+        LODUpdateTimer = 0.0f;
     }
 }
 
@@ -119,11 +160,113 @@ void ADestructibleTerrain::InitializeTerrain(float Width, float Height, float De
     // Marquer comme initialisé
     bIsInitialized = true;
     
+    // Initialiser les sections si activées
+    if (bUseTerrainSections)
+    {
+        InitializeSections();
+    }
+    
     // Générer le terrain
     GenerateTerrain();
     
     // Informer tous les clients
     Multicast_NotifyInitialized(Width, Height, Depth);
+}
+
+void ADestructibleTerrain::SetupMaterials()
+{
+    // Vérifier si nous avons déjà des matériaux assignés
+    if (TerrainMaterial)
+    {
+        // Créer une instance dynamique du matériau principal si ce n'est pas déjà fait
+        if (!TerrainMaterialInstance)
+        {
+            TerrainMaterialInstance = UMaterialInstanceDynamic::Create(TerrainMaterial, this);
+            
+            if (TerrainMaterialInstance)
+            {
+                // Appliquer l'instance de matériau au mesh
+                TerrainMesh->SetMaterial(0, TerrainMaterialInstance);
+                
+                // Mettre à jour les paramètres du matériau
+                UpdateMaterialParameters();
+                
+                UE_LOG(LogTemp, Log, TEXT("Material instance created and applied successfully"));
+            }
+            else
+            {
+                UE_LOG(LogTemp, Error, TEXT("Failed to create dynamic material instance"));
+            }
+        }
+    }
+    else
+    {
+        // Si aucun matériau n'est défini, utiliser un matériau par défaut
+        TerrainMaterial = UMaterial::GetDefaultMaterial(MD_Surface);
+        TerrainMesh->SetMaterial(0, TerrainMaterial);
+        
+        UE_LOG(LogTemp, Warning, TEXT("No terrain material assigned, using default material"));
+    }
+}
+
+void ADestructibleTerrain::UpdateMaterialParameters()
+{
+    if (TerrainMaterialInstance)
+    {
+        // Passer les dimensions du terrain au matériau
+        TerrainMaterialInstance->SetScalarParameterValue(TEXT("TerrainWidth"), TerrainWidth);
+        TerrainMaterialInstance->SetScalarParameterValue(TEXT("TerrainHeight"), TerrainHeight);
+        TerrainMaterialInstance->SetScalarParameterValue(TEXT("TerrainDepth"), TerrainDepth);
+        
+        // Passer les informations sur les couches internes
+        if (bGenerateInternalStructure && InternalLayerCount > 0)
+        {
+            TerrainMaterialInstance->SetScalarParameterValue(TEXT("InternalLayerCount"), InternalLayerCount);
+            
+            // Passer les couleurs des couches internes (jusqu'à 4 couches max)
+            for (int32 i = 0; i < FMath::Min(InternalLayerColors.Num(), 4); ++i)
+            {
+                FString ParamName = FString::Printf(TEXT("InternalLayerColor%d"), i);
+                TerrainMaterialInstance->SetVectorParameterValue(FName(*ParamName), InternalLayerColors[i]);
+            }
+        }
+        
+        // Ajouter un effet de bord au matériau pour les cratères
+        TerrainMaterialInstance->SetScalarParameterValue(TEXT("CraterEdgeThickness"), 2.0f);
+        TerrainMaterialInstance->SetVectorParameterValue(TEXT("CraterEdgeColor"), FLinearColor(0.2f, 0.2f, 0.2f, 1.0f));
+        
+        // Ajouter une texture de noise pour la variation
+        TerrainMaterialInstance->SetScalarParameterValue(TEXT("NoiseIntensity"), 0.1f);
+        
+        UE_LOG(LogTemp, Verbose, TEXT("Material parameters updated"));
+    }
+}
+
+void ADestructibleTerrain::InitializeSections()
+{
+    if (!bUseTerrainSections)
+    {
+        return;
+    }
+
+    // Vider la map de sections existante
+    SectionModifications.Empty();
+    
+    // Calculer combien de sections nous avons en X et Y
+    int32 SectionsX = FMath::CeilToInt(TerrainWidth / SectionSizeX);
+    int32 SectionsY = FMath::CeilToInt(TerrainHeight / SectionSizeY);
+    
+    // Initialiser chaque section avec une liste vide de modifications
+    for (int32 y = 0; y < SectionsY; ++y)
+    {
+        for (int32 x = 0; x < SectionsX; ++x)
+        {
+            FIntPoint SectionCoord(x, y);
+            SectionModifications.Add(SectionCoord, FTerrainModificationArray());
+        }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Initialized %d x %d terrain sections"), SectionsX, SectionsY);
 }
 
 void ADestructibleTerrain::Multicast_NotifyInitialized_Implementation(float Width, float Height, float Depth)
@@ -150,6 +293,140 @@ void ADestructibleTerrain::Multicast_NotifyInitialized_Implementation(float Widt
     
     // Marquer comme initialisé
     bIsInitialized = true;
+}
+
+void ADestructibleTerrain::GenerateInternalStructure()
+{
+    if (!bGenerateInternalStructure || InternalLayerCount <= 0)
+    {
+        return;
+    }
+
+    // Vider les tableaux existants
+    InternalVertices.Empty();
+    InternalTriangles.Empty();
+    InternalUVs.Empty();
+    InternalNormals.Empty();
+    InternalVertexColors.Empty();
+
+    // Calculer le pas entre chaque point comme dans la génération de terrain standard
+    float HStep = TerrainWidth / (HorizontalResolution - 1);
+    float VStep = TerrainHeight / (VerticalResolution - 1);
+
+    // Calculer l'épaisseur de chaque couche interne
+    float TotalDepth = TerrainDepth - (2 * InternalLayerThickness); // Soustraire l'épaisseur des parois avant/arrière
+    float LayerDepth = TotalDepth / InternalLayerCount;
+
+    // Nous allons créer des couches internes parallèles à la face avant/arrière
+    for (int32 layerIndex = 0; layerIndex < InternalLayerCount; ++layerIndex)
+    {
+        // Position Y de cette couche interne à partir de la face avant
+        float LayerPosition = InternalLayerThickness + (layerIndex * LayerDepth);
+        
+        // Index de départ pour les vertices de cette couche
+        int32 LayerVertexStartIndex = InternalVertices.Num();
+        
+        // Générer un plan interne similaire à la face avant/arrière
+        for (int32 y = 0; y < VerticalResolution; ++y)
+        {
+            for (int32 x = 0; x < HorizontalResolution; ++x)
+            {
+                // Calculer la position de ce vertex
+                float PosX = x * HStep;
+                float PosZ = y * VStep;
+                
+                // Ajouter le vertex avec une composante Y correspondant à la profondeur de la couche
+                InternalVertices.Add(FVector(PosX, LayerPosition, PosZ));
+                
+                // Ajouter les UV correspondants (normalisés de 0 à 1)
+                InternalUVs.Add(FVector2D(
+                    static_cast<float>(x) / (HorizontalResolution - 1), 
+                    static_cast<float>(y) / (VerticalResolution - 1)
+                ));
+                
+                // Sélectionner la couleur de cette couche interne
+                FLinearColor LayerColor;
+                if (InternalLayerColors.IsValidIndex(layerIndex))
+                {
+                    LayerColor = InternalLayerColors[layerIndex];
+                }
+                else if (InternalLayerColors.Num() > 0)
+                {
+                    // Fallback à la première couleur si l'index n'est pas valide
+                    LayerColor = InternalLayerColors[0];
+                }
+                else
+                {
+                    // Fallback à une couleur marron si aucune couleur n'est définie
+                    LayerColor = FLinearColor(0.5f, 0.25f, 0.0f, 1.0f);
+                }
+                
+                // Ajouter une variation aléatoire subtile à la couleur
+                float ColorVariation = FMath::RandRange(-0.1f, 0.1f);
+                LayerColor.R = FMath::Clamp(LayerColor.R + ColorVariation, 0.0f, 1.0f);
+                LayerColor.G = FMath::Clamp(LayerColor.G + ColorVariation, 0.0f, 1.0f);
+                LayerColor.B = FMath::Clamp(LayerColor.B + ColorVariation, 0.0f, 1.0f);
+                
+                // Convertir en FColor
+                InternalVertexColors.Add(LayerColor.ToFColor(true));
+            }
+        }
+        
+        // Créer les triangles pour cette couche interne
+        for (int32 y = 0; y < VerticalResolution - 1; ++y)
+        {
+            for (int32 x = 0; x < HorizontalResolution - 1; ++x)
+            {
+                int32 Current = LayerVertexStartIndex + y * HorizontalResolution + x;
+                int32 Next = Current + 1;
+                int32 Bottom = Current + HorizontalResolution;
+                int32 BottomNext = Bottom + 1;
+                
+                // Premier triangle (avec orientation correcte)
+                InternalTriangles.Add(Current);
+                InternalTriangles.Add(Next);
+                InternalTriangles.Add(Bottom);
+                
+                // Second triangle (avec orientation correcte)
+                InternalTriangles.Add(Next);
+                InternalTriangles.Add(BottomNext);
+                InternalTriangles.Add(Bottom);
+            }
+        }
+    }
+    
+    // Initialiser les normales pour toutes les couches
+    InternalNormals.Init(FVector::ZeroVector, InternalVertices.Num());
+    
+    // Calculer les normales pour chaque triangle et les ajouter aux normales des vertices
+    for (int32 i = 0; i < InternalTriangles.Num(); i += 3)
+    {
+        // Obtenir les indices des vertices du triangle
+        int32 Index0 = InternalTriangles[i];
+        int32 Index1 = InternalTriangles[i + 1];
+        int32 Index2 = InternalTriangles[i + 2];
+        
+        // Calculer les vecteurs des côtés du triangle
+        FVector Side1 = InternalVertices[Index1] - InternalVertices[Index0];
+        FVector Side2 = InternalVertices[Index2] - InternalVertices[Index0];
+        
+        // Calculer la normale du triangle (produit vectoriel)
+        FVector Normal = FVector::CrossProduct(Side1, Side2).GetSafeNormal();
+        
+        // Ajouter la normale à chaque vertex du triangle
+        InternalNormals[Index0] += Normal;
+        InternalNormals[Index1] += Normal;
+        InternalNormals[Index2] += Normal;
+    }
+    
+    // Normaliser toutes les normales
+    for (int32 i = 0; i < InternalNormals.Num(); i++)
+    {
+        InternalNormals[i] = InternalNormals[i].GetSafeNormal();
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Generated internal structure with %d vertices and %d triangles"), 
+        InternalVertices.Num(), InternalTriangles.Num() / 3);
 }
 
 void ADestructibleTerrain::GenerateTerrain()
@@ -377,6 +654,33 @@ void ADestructibleTerrain::GenerateTerrain()
         }
     }
     
+    // 6. Générer la structure interne si activée
+    if (bGenerateInternalStructure)
+    {
+        GenerateInternalStructure();
+        
+        // Ajouter la structure interne aux données du mesh principal
+        
+        // Sauvegarder les indices de départ pour les références
+        int32 VertexStartIndex = MeshData.Vertices.Num();
+        
+        // Ajouter les vertices internes
+        MeshData.Vertices.Append(InternalVertices);
+        MeshData.UVs.Append(InternalUVs);
+        MeshData.VertexColors.Append(InternalVertexColors);
+        MeshData.Normals.Append(InternalNormals);
+        
+        // Ajouter les triangles internes (en ajustant les indices)
+        for (int32 i = 0; i < InternalTriangles.Num(); ++i)
+        {
+            MeshData.Triangles.Add(InternalTriangles[i] + VertexStartIndex);
+        }
+        
+        // Log pour débogage
+        UE_LOG(LogTemp, Log, TEXT("Added internal structure: total mesh now has %d vertices and %d triangles"), 
+            MeshData.Vertices.Num(), MeshData.Triangles.Num() / 3);
+    }
+    
     // Marquer les données comme valides
     MeshData.bIsValid = true;
     
@@ -455,7 +759,11 @@ void ADestructibleTerrain::CreateMeshFromData(const FTerrainMeshData& InMeshData
     }
     
     // Forcer l'application du matériau
-    if (TerrainMaterial)
+    if (TerrainMaterialInstance)
+    {
+        TerrainMesh->SetMaterial(0, TerrainMaterialInstance);
+    }
+    else if (TerrainMaterial)
     {
         TerrainMesh->SetMaterial(0, TerrainMaterial);
     }
@@ -544,15 +852,130 @@ void ADestructibleTerrain::Server_DestroyTerrainAt_Implementation(FVector2D Posi
     // Créer une nouvelle modification
     FTerrainModification NewMod(Position, Size);
     
-    // Ajouter à la liste des modifications
+    // Ajouter à la liste globale des modifications
     TerrainModifications.Add(NewMod);
     
     // Afficher le nombre total de modifications
     UE_LOG(LogTemp, Warning, TEXT("Total modifications: %d"), TerrainModifications.Num());
     
-    // Appliquer les modifications sur le serveur
+    if (bUseTerrainSections)
+    {
+        // Assigner cette modification aux sections appropriées et les mettre à jour
+        AssignModificationToSections(NewMod);
+    }
+    else
+    {
+        // Approche classique : appliquer toutes les modifications sur le mesh entier
+        ApplyTerrainModifications();
+    }
+}
+
+void ADestructibleTerrain::AssignModificationToSections(const FTerrainModification& Modification)
+{
+    if (!bUseTerrainSections)
+    {
+        return;
+    }
+    
+    // Déterminer quelles sections sont affectées par cette modification
+    TArray<FIntPoint> AffectedSections = GetAffectedSections(Modification);
+    
+    // Ajouter la modification à chaque section affectée
+    for (const FIntPoint& SectionCoord : AffectedSections)
+    {
+        if (SectionModifications.Contains(SectionCoord))
+        {
+            SectionModifications[SectionCoord].Modifications.Add(Modification);
+            UE_LOG(LogTemp, Verbose, TEXT("Added modification to section (%d, %d)"), SectionCoord.X, SectionCoord.Y);
+        }
+    }
+    
+    // Reconstruire uniquement les sections affectées
+    RegenerateSections(AffectedSections);
+}
+
+TArray<FIntPoint> ADestructibleTerrain::GetAffectedSections(const FTerrainModification& Modification)
+{
+    TArray<FIntPoint> AffectedSections;
+    
+    if (!bUseTerrainSections)
+    {
+        return AffectedSections;
+    }
+    
+    // Convertir les coordonnées de la modification en coordonnées de sections
+    float ModStartX = Modification.Position.X;
+    float ModStartY = Modification.Position.Y;
+    float ModEndX = ModStartX + Modification.Size.X;
+    float ModEndY = ModStartY + Modification.Size.Y;
+    
+    // Déterminer les indices de section de début et de fin
+    int32 StartSectionX = FMath::Max(0, FMath::FloorToInt(ModStartX / SectionSizeX));
+    int32 StartSectionY = FMath::Max(0, FMath::FloorToInt(ModStartY / SectionSizeY));
+    int32 EndSectionX = FMath::Min(FMath::CeilToInt(TerrainWidth / SectionSizeX) - 1, FMath::CeilToInt(ModEndX / SectionSizeX));
+    int32 EndSectionY = FMath::Min(FMath::CeilToInt(TerrainHeight / SectionSizeY) - 1, FMath::CeilToInt(ModEndY / SectionSizeY));
+    
+    // Ajouter toutes les sections entre les indices de début et de fin
+    for (int32 y = StartSectionY; y <= EndSectionY; ++y)
+    {
+        for (int32 x = StartSectionX; x <= EndSectionX; ++x)
+        {
+            AffectedSections.Add(FIntPoint(x, y));
+        }
+    }
+    
+    UE_LOG(LogTemp, Verbose, TEXT("Modification affects %d sections"), AffectedSections.Num());
+    return AffectedSections;
+}
+
+void ADestructibleTerrain::RegenerateSections(const TArray<FIntPoint>& SectionCoords)
+{
+    if (!bUseTerrainSections || SectionCoords.Num() == 0)
+    {
+        return;
+    }
+    
+    // Pour chaque section affectée, nous allons reconstruire son mesh
+    for (const FIntPoint& SectionCoord : SectionCoords)
+    {
+        // Obtenir les modifications pour cette section
+        FTerrainModificationArray* SectionMods = SectionModifications.Find(SectionCoord);
+        if (SectionMods)
+        {
+            // Calculer les limites de cette section
+            float SectionStartX = SectionCoord.X * SectionSizeX;
+            float SectionStartY = SectionCoord.Y * SectionSizeY;
+            float SectionEndX = FMath::Min(SectionStartX + SectionSizeX, TerrainWidth);
+            float SectionEndY = FMath::Min(SectionStartY + SectionSizeY, TerrainHeight);
+            
+            UE_LOG(LogTemp, Verbose, TEXT("Regenerating section (%d, %d) with %d modifications"), 
+                SectionCoord.X, SectionCoord.Y, SectionMods->Modifications.Num());
+        }
+    }
+    
+    // Pour l'instant, comme solution simplifiée, reconstruisons le mesh entier
+    // en appliquant toutes les modifications
     ApplyTerrainModifications();
 }
+
+bool ADestructibleTerrain::IsVertexInSection(const FVector& Vertex, const FIntPoint& SectionCoord)
+{
+    if (!bUseTerrainSections)
+    {
+        return false;
+    }
+    
+    // Calculer les limites de cette section
+    float SectionStartX = SectionCoord.X * SectionSizeX;
+    float SectionStartY = SectionCoord.Y * SectionSizeY;
+    float SectionEndX = FMath::Min(SectionStartX + SectionSizeX, TerrainWidth);
+    float SectionEndY = FMath::Min(SectionStartY + SectionSizeY, TerrainHeight);
+    
+    // Vérifier si le vertex est dans cette section
+    return (Vertex.X >= SectionStartX && Vertex.X < SectionEndX && 
+            Vertex.Z >= SectionStartY && Vertex.Z < SectionEndY);
+}
+
 void ADestructibleTerrain::OnRep_TerrainModifications()
 {
     // Appelé sur les clients quand TerrainModifications est répliqué
@@ -579,7 +1002,7 @@ bool ADestructibleTerrain::IsVertexInModification(const FVector& Vertex, const F
     
     if (isInside)
     {
-        UE_LOG(LogTemp, Log, TEXT("Vertex is inside modification area!"));
+        UE_LOG(LogTemp, Verbose, TEXT("Vertex is inside modification area!"));
     }
     
     return isInside;
@@ -620,7 +1043,7 @@ void ADestructibleTerrain::ApplyTerrainModifications()
     TArray<bool> TriangleToKeep;
     TriangleToKeep.Init(true, MeshData.Triangles.Num() / 3);
     
-    // 1. Première passe: identifier les triangles touchés par les modifications
+// 1. Première passe: identifier les triangles touchés par les modifications
     for (int32 TriIdx = 0; TriIdx < MeshData.Triangles.Num() / 3; TriIdx++)
     {
         int32 Index1 = MeshData.Triangles[TriIdx * 3];
@@ -730,4 +1153,95 @@ void ADestructibleTerrain::Multicast_ForceVisualUpdate_Implementation()
         // Si les données ne sont pas valides mais que le terrain est initialisé, régénérer
         GenerateTerrain();
     }
+}
+
+void ADestructibleTerrain::UpdateLOD()
+{
+    if (!bUseLOD || !bIsInitialized)
+    {
+        return;
+    }
+    
+    // Calculer la distance au joueur le plus proche
+    float DistanceToPlayer = GetDistanceToNearestPlayer();
+    
+    // Déterminer si nous devons utiliser le niveau de détail bas
+    bool bShouldUseLOD = (DistanceToPlayer > LODDistanceThreshold);
+    
+    // Si l'état du LOD a changé, mettre à jour le mesh
+    if (bShouldUseLOD != bIsUsingLOD)
+    {
+        UE_LOG(LogTemp, Verbose, TEXT("LOD state changed: distance = %.1f, using LOD = %s"), 
+            DistanceToPlayer, bShouldUseLOD ? TEXT("true") : TEXT("false"));
+        
+        // Basculer la résolution
+        SwitchResolution(bShouldUseLOD);
+        
+        // Mémoriser le nouvel état
+        bIsUsingLOD = bShouldUseLOD;
+    }
+}
+
+float ADestructibleTerrain::GetDistanceToNearestPlayer()
+{
+    // Obtenir tous les joueurs
+    TArray<AActor*> PlayerPawns;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), APawn::StaticClass(), PlayerPawns);
+    
+    if (PlayerPawns.Num() == 0)
+    {
+        return TNumericLimits<float>::Max(); // Aucun joueur trouvé
+    }
+    
+    // Calculer la distance au joueur le plus proche
+    float MinDistance = TNumericLimits<float>::Max();
+    
+    for (AActor* PlayerActor : PlayerPawns)
+    {
+        float Distance = FVector::Distance(GetActorLocation(), PlayerActor->GetActorLocation());
+        MinDistance = FMath::Min(MinDistance, Distance);
+    }
+    
+    return MinDistance;
+}
+
+void ADestructibleTerrain::SwitchResolution(bool bUseLowResolution)
+{
+    if (!HasAuthority() || !bUseLOD)
+    {
+        // Ne changer la résolution que sur le serveur
+        return;
+    }
+    
+    // Sauvegarder les résolutions actuelles
+    static int32 HighHorizontalResolution = HorizontalResolution;
+    static int32 HighVerticalResolution = VerticalResolution;
+    
+    if (bUseLowResolution)
+    {
+        // Sauvegarder la haute résolution si ce n'est pas déjà fait
+        if (HorizontalResolution > LODHorizontalResolution)
+        {
+            HighHorizontalResolution = HorizontalResolution;
+            HighVerticalResolution = VerticalResolution;
+        }
+        
+        // Passer à la basse résolution
+        HorizontalResolution = LODHorizontalResolution;
+        VerticalResolution = LODVerticalResolution;
+    }
+    else
+    {
+        // Restaurer la résolution normale
+        HorizontalResolution = HighHorizontalResolution;
+        VerticalResolution = HighVerticalResolution;
+    }
+    
+    // Réappliquer toutes les modifications avec la nouvelle résolution
+    GenerateTerrain();
+    
+    // Log pour le débogage
+    UE_LOG(LogTemp, Log, TEXT("Switched terrain resolution to %s (%d x %d)"), 
+        bUseLowResolution ? TEXT("LOD") : TEXT("normal"),
+        HorizontalResolution, VerticalResolution);
 }

@@ -67,6 +67,16 @@ struct FTerrainModification
     }
 };
 
+
+USTRUCT(BlueprintType)
+struct FTerrainModificationArray
+{
+    GENERATED_BODY()
+    
+    UPROPERTY()
+    TArray<FTerrainModification> Modifications;
+};
+
 // Structure pour stocker les données du mesh nécessaires à la réplication
 USTRUCT(BlueprintType)
 struct FTerrainMeshData
@@ -141,6 +151,7 @@ public:
     
     // Fonction helper pour passer des FColor aux FLinearColor
     TArray<FLinearColor> ConvertColorsToLinear(const TArray<FColor>& Colors);
+    
     // Hauteur du terrain
     UPROPERTY(Replicated, EditAnywhere, BlueprintReadWrite, Category = "Terrain")
     float TerrainWidth;
@@ -153,7 +164,6 @@ public:
     UPROPERTY(Replicated, EditAnywhere, BlueprintReadWrite, Category = "Terrain")
     float TerrainDepth;
 
-
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
     int32 HorizontalResolution;
 
@@ -164,6 +174,46 @@ public:
     // Pour garder une trace des modifications déjà appliquées
     UPROPERTY()
     TArray<FTerrainModification> AppliedModifications;
+    
+    // Configuration de la structure interne
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Internal")
+    bool bGenerateInternalStructure;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Internal", meta = (EditCondition = "bGenerateInternalStructure"))
+    int32 InternalLayerCount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Internal", meta = (EditCondition = "bGenerateInternalStructure"))
+    float InternalLayerThickness;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Internal", meta = (EditCondition = "bGenerateInternalStructure"))
+    TArray<FLinearColor> InternalLayerColors;
+
+    // Matériaux avancés pour différentes parties du terrain
+    UPROPERTY(EditDefaultsOnly, Category = "Terrain|Materials")
+    UMaterialInterface* SurfaceMaterial;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Terrain|Materials")
+    UMaterialInterface* InternalMaterial;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Terrain|Materials")
+    UMaterialInterface* EdgeMaterial;
+
+    // Instance de matériau dynamique pour recevoir des paramètres
+    UPROPERTY()
+    UMaterialInstanceDynamic* TerrainMaterialInstance;
+
+    // Méthode pour configurer les matériaux
+    void SetupMaterials();
+
+    // Méthode pour mettre à jour les paramètres du matériau
+    void UpdateMaterialParameters();
+    
+    // Méthode pour générer la structure interne
+    void GenerateInternalStructure();
+    
+    // Fonction Tick pour les mises à jour périodiques
+    virtual void Tick(float DeltaTime) override;
+
 protected:
     virtual void BeginPlay() override;
     virtual void OnConstruction(const FTransform& Transform) override;
@@ -184,8 +234,6 @@ protected:
     // Liste des modifications apportées au terrain
     UPROPERTY(ReplicatedUsing = OnRep_TerrainModifications)
     TArray<FTerrainModification> TerrainModifications;
-    
-
     
     // Fonction appelée quand TerrainModifications est répliqué
     UFUNCTION()
@@ -208,4 +256,67 @@ protected:
     // Flag pour indiquer que les modifications de terrain ont été appliquées
     UPROPERTY(Replicated)
     bool bModificationsApplied;
+
+    // Données supplémentaires pour la structure interne
+    UPROPERTY()
+    TArray<FVector> InternalVertices;
+
+    UPROPERTY()
+    TArray<int32> InternalTriangles;
+
+    UPROPERTY()
+    TArray<FVector2D> InternalUVs;
+
+    UPROPERTY()
+    TArray<FVector> InternalNormals;
+
+    UPROPERTY()
+    TArray<FColor> InternalVertexColors;
+    
+    // Subdivision du terrain en sections pour optimisation
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Terrain|Optimization")
+    bool bUseTerrainSections;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Terrain|Optimization", meta = (EditCondition = "bUseTerrainSections"))
+    float SectionSizeX;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Terrain|Optimization", meta = (EditCondition = "bUseTerrainSections"))
+    float SectionSizeY;
+
+    // Array pour stocker les modifications par section
+    UPROPERTY()
+    TMap<FIntPoint, FTerrainModificationArray> SectionModifications;
+    
+    // Méthodes pour la gestion des sections
+    void InitializeSections();
+    void AssignModificationToSections(const FTerrainModification& Modification);
+    TArray<FIntPoint> GetAffectedSections(const FTerrainModification& Modification);
+    void RegenerateSections(const TArray<FIntPoint>& SectionCoords);
+    bool IsVertexInSection(const FVector& Vertex, const FIntPoint& SectionCoord);
+    
+    // Configuration du LOD
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Terrain|LOD")
+    bool bUseLOD;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Terrain|LOD", meta = (EditCondition = "bUseLOD"))
+    float LODDistanceThreshold;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Terrain|LOD", meta = (EditCondition = "bUseLOD"))
+    int32 LODHorizontalResolution;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Terrain|LOD", meta = (EditCondition = "bUseLOD"))
+    int32 LODVerticalResolution;
+
+    // Méthodes pour la gestion du LOD
+    UFUNCTION()
+    void UpdateLOD();
+
+    UFUNCTION()
+    float GetDistanceToNearestPlayer();
+
+    UPROPERTY()
+    bool bIsUsingLOD;
+
+    // Méthode pour basculer entre les résolutions
+    void SwitchResolution(bool bUseLowResolution);
 };
