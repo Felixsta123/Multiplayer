@@ -1,0 +1,143 @@
+﻿#include "TestWormGameMode.h"
+#include "AWormCharacter.h"
+#include "Kismet/GameplayStatics.h"
+#include "TestWormPlayerController.h"
+
+ATestWormGameMode::ATestWormGameMode()
+{
+    // Définir le PlayerController par défaut pour le mode test
+    PlayerControllerClass = ATestWormPlayerController::StaticClass();
+    
+    // Valeurs par défaut
+    TurnDuration = 60.0f;
+    RemainingTurnTime = TurnDuration;
+    
+    // Activer le Tick pour surveiller le temps
+    PrimaryActorTick.bCanEverTick = true;
+}
+
+void ATestWormGameMode::BeginPlay()
+{
+    Super::BeginPlay();
+
+    // Créer un terrain de test
+    SpawnDestructibleTerrain();
+    
+    // Initialiser les armes pour le joueur
+    GetWorldTimerManager().SetTimer(WeaponSpawnTimerHandle, this, &ATestWormGameMode::InitializeWeaponsForPlayer, 1.0f, false);
+}
+
+void ATestWormGameMode::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    
+    // Mettre à jour le temps restant pour le tour
+    if (RemainingTurnTime > 0)
+    {
+        RemainingTurnTime -= DeltaTime;
+        
+        // Si le temps est écoulé, terminer le tour
+        if (RemainingTurnTime <= 0)
+        {
+            RemainingTurnTime = 0;
+            // Dans un mode solo, on pourrait ici réinitialiser le tour
+            ResetTurn();
+        }
+    }
+}
+
+void ATestWormGameMode::SpawnDestructibleTerrain()
+{
+    // Vérifier s'il existe déjà un terrain
+    if (DestructibleTerrain)
+    {
+        DestructibleTerrain->Destroy();
+        DestructibleTerrain = nullptr;
+    }
+    
+    // Paramètres de spawn
+    FVector Location = FVector(-1000.0f, -100.0f, -2250.0f);
+    FRotator Rotation = FRotator::ZeroRotator;
+    
+    FActorSpawnParameters SpawnParams;
+    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+    // Spawner le terrain destructible
+    DestructibleTerrain = GetWorld()->SpawnActor<ADestructibleTerrain>(
+        ADestructibleTerrain::StaticClass(), 
+        Location, 
+        Rotation, 
+        SpawnParams
+    );
+    
+    if (DestructibleTerrain)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Terrain destructible généré avec succès"));
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("Échec de la génération du terrain destructible"));
+    }
+}
+
+void ATestWormGameMode::ResetTurn()
+{
+    // Réinitialiser le temps du tour
+    RemainingTurnTime = TurnDuration;
+    
+    // Ici, on pourrait ajouter d'autres mécaniques de réinitialisation si nécessaire
+    // Par exemple, recharger les armes, réinitialiser les points de mouvement, etc.
+
+    //reset de point de mouvement
+    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+    if (!PC)
+    {
+        UE_LOG(LogTemp, Error, TEXT("❌ Cannot find PlayerController!"));
+        return;
+    }
+    APawn* Pawn = PC->GetPawn();
+    AWormCharacter* WormCharacter = Cast<AWormCharacter>(Pawn);
+
+    
+    UE_LOG(LogTemp, Warning, TEXT("Tour réinitialisé - Temps restant: %f"), RemainingTurnTime);
+}
+
+void ATestWormGameMode::InitializeWeaponsForPlayer()
+{
+    // Vérifier qu'on a des armes définies
+    if (AvailableWeaponTypes.Num() == 0)
+    {
+        UE_LOG(LogTemp, Error, TEXT("❌ No weapon types defined in TestGameMode!"));
+        return;
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("✅ Initializing weapons for player (%d weapon types available)"), 
+        AvailableWeaponTypes.Num());
+
+    // Obtenir le PlayerController
+    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+    if (!PC)
+    {
+        UE_LOG(LogTemp, Error, TEXT("❌ Cannot find PlayerController!"));
+        return;
+    }
+
+    // Obtenir le Pawn contrôlé
+    APawn* Pawn = PC->GetPawn();
+    AWormCharacter* WormCharacter = Cast<AWormCharacter>(Pawn);
+    
+    if (WormCharacter)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Assigning weapons to player: %s"), *WormCharacter->GetName());
+        
+        // Assigner les armes
+        WormCharacter->SetAvailableWeapons(AvailableWeaponTypes);
+        
+        // Activer le tour pour ce personnage
+        WormCharacter->SetIsMyTurn(true);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("❌ Cannot find valid WormCharacter for player!"));
+    }
+}
