@@ -297,7 +297,7 @@ void ADestructibleTerrain::Multicast_NotifyInitialized_Implementation(float Widt
 
 void ADestructibleTerrain::GenerateInternalStructure()
 {
-    if (!bGenerateInternalStructure || InternalLayerCount <= 0)
+    if (!bGenerateInternalStructure)
     {
         return;
     }
@@ -308,94 +308,287 @@ void ADestructibleTerrain::GenerateInternalStructure()
     InternalUVs.Empty();
     InternalNormals.Empty();
     InternalVertexColors.Empty();
+    TerrainCells.Empty();
 
-    // Calculer le pas entre chaque point comme dans la génération de terrain standard
-    float HStep = TerrainWidth / (HorizontalResolution - 1);
-    float VStep = TerrainHeight / (VerticalResolution - 1);
+    // Calculer combien de cellules nous pouvons avoir dans chaque dimension
+    CellCountX = FMath::Max(1, FMath::FloorToInt(TerrainWidth / CellSizeX));
+    CellCountY = FMath::Max(1, FMath::FloorToInt(TerrainDepth / CellSizeY));
+    CellCountZ = FMath::Max(1, FMath::FloorToInt(TerrainHeight / CellSizeZ));
 
-    // Calculer l'épaisseur de chaque couche interne
-    float TotalDepth = TerrainDepth - (2 * InternalLayerThickness); // Soustraire l'épaisseur des parois avant/arrière
-    float LayerDepth = TotalDepth / InternalLayerCount;
+    // Ajuster les tailles de cellules pour qu'elles couvrent exactement le terrain
+    float AdjustedCellSizeX = TerrainWidth / CellCountX;
+    float AdjustedCellSizeY = TerrainDepth / CellCountY;
+    float AdjustedCellSizeZ = TerrainHeight / CellCountZ;
 
-    // Nous allons créer des couches internes parallèles à la face avant/arrière
-    for (int32 layerIndex = 0; layerIndex < InternalLayerCount; ++layerIndex)
+    UE_LOG(LogTemp, Log, TEXT("Generating internal grid structure: %d x %d x %d cells"), 
+        CellCountX, CellCountY, CellCountZ);
+
+    // Créer un générateur de nombres aléatoires pour la variation
+    FRandomStream Random(FMath::Rand());
+
+    // Création des cellules et stockage dans le tableau
+    for (int32 z = 0; z < CellCountZ; ++z)
     {
-        // Position Y de cette couche interne à partir de la face avant
-        float LayerPosition = InternalLayerThickness + (layerIndex * LayerDepth);
-        
-        // Index de départ pour les vertices de cette couche
-        int32 LayerVertexStartIndex = InternalVertices.Num();
-        
-        // Générer un plan interne similaire à la face avant/arrière
-        for (int32 y = 0; y < VerticalResolution; ++y)
+        for (int32 y = 0; y < CellCountY; ++y)
         {
-            for (int32 x = 0; x < HorizontalResolution; ++x)
+            for (int32 x = 0; x < CellCountX; ++x)
             {
-                // Calculer la position de ce vertex
-                float PosX = x * HStep;
-                float PosZ = y * VStep;
+                // Position de base de cette cellule
+                float MinX = x * AdjustedCellSizeX;
+                float MinY = y * AdjustedCellSizeY;
+                float MinZ = z * AdjustedCellSizeZ;
                 
-                // Ajouter le vertex avec une composante Y correspondant à la profondeur de la couche
-                InternalVertices.Add(FVector(PosX, LayerPosition, PosZ));
+                // Position max de cette cellule
+                float MaxX = (x + 1) * AdjustedCellSizeX;
+                float MaxY = (y + 1) * AdjustedCellSizeY;
+                float MaxZ = (z + 1) * AdjustedCellSizeZ;
                 
-                // Ajouter les UV correspondants (normalisés de 0 à 1)
-                InternalUVs.Add(FVector2D(
-                    static_cast<float>(x) / (HorizontalResolution - 1), 
-                    static_cast<float>(y) / (VerticalResolution - 1)
-                ));
+                // Créer la cellule
+                FTerrainCell Cell(
+                    FVector(MinX, MinY, MinZ),
+                    FVector(MaxX, MaxY, MaxZ),
+                    x, y, z
+                );
                 
-                // Sélectionner la couleur de cette couche interne
-                FLinearColor LayerColor;
-                if (InternalLayerColors.IsValidIndex(layerIndex))
-                {
-                    LayerColor = InternalLayerColors[layerIndex];
-                }
-                else if (InternalLayerColors.Num() > 0)
-                {
-                    // Fallback à la première couleur si l'index n'est pas valide
-                    LayerColor = InternalLayerColors[0];
-                }
-                else
-                {
-                    // Fallback à une couleur marron si aucune couleur n'est définie
-                    LayerColor = FLinearColor(0.5f, 0.25f, 0.0f, 1.0f);
-                }
+                // Ajouter au tableau
+                TerrainCells.Add(Cell);
                 
-                // Ajouter une variation aléatoire subtile à la couleur
-                float ColorVariation = FMath::RandRange(-0.1f, 0.1f);
-                LayerColor.R = FMath::Clamp(LayerColor.R + ColorVariation, 0.0f, 1.0f);
-                LayerColor.G = FMath::Clamp(LayerColor.G + ColorVariation, 0.0f, 1.0f);
-                LayerColor.B = FMath::Clamp(LayerColor.B + ColorVariation, 0.0f, 1.0f);
-                
-                // Convertir en FColor
-                InternalVertexColors.Add(LayerColor.ToFColor(true));
-            }
-        }
-        
-        // Créer les triangles pour cette couche interne
-        for (int32 y = 0; y < VerticalResolution - 1; ++y)
-        {
-            for (int32 x = 0; x < HorizontalResolution - 1; ++x)
-            {
-                int32 Current = LayerVertexStartIndex + y * HorizontalResolution + x;
-                int32 Next = Current + 1;
-                int32 Bottom = Current + HorizontalResolution;
-                int32 BottomNext = Bottom + 1;
-                
-                // Premier triangle (avec orientation correcte)
-                InternalTriangles.Add(Current);
-                InternalTriangles.Add(Next);
-                InternalTriangles.Add(Bottom);
-                
-                // Second triangle (avec orientation correcte)
-                InternalTriangles.Add(Next);
-                InternalTriangles.Add(BottomNext);
-                InternalTriangles.Add(Bottom);
+                // Génération des parois de la cellule
+                GenerateCellWalls(Cell, Random);
             }
         }
     }
+
+    // Initialiser les normales pour toutes les faces
+    CalculateInternalNormals();
+
+    UE_LOG(LogTemp, Log, TEXT("Generated internal structure with %d vertices, %d triangles, and %d cells"), 
+        InternalVertices.Num(), InternalTriangles.Num() / 3, TerrainCells.Num());
+}
+
+// Nouvelle fonction pour générer les parois d'une cellule spécifique
+void ADestructibleTerrain::GenerateCellWalls(const FTerrainCell& Cell, FRandomStream& Random)
+{
+    // Extraction des coordonnées pour lisibilité
+    float MinX = Cell.Min.X;
+    float MinY = Cell.Min.Y;
+    float MinZ = Cell.Min.Z;
+    float MaxX = Cell.Max.X;
+    float MaxY = Cell.Max.Y;
+    float MaxZ = Cell.Max.Z;
     
-    // Initialiser les normales pour toutes les couches
+    // Calculer l'épaisseur des parois en fonction de la taille des cellules
+    float WallThicknessX = FMath::Min(WallThickness, (MaxX - MinX) * 0.25f);
+    float WallThicknessY = FMath::Min(WallThickness, (MaxY - MinY) * 0.25f);
+    float WallThicknessZ = FMath::Min(WallThickness, (MaxZ - MinZ) * 0.25f);
+    
+    // Couleur de cette cellule (varier par couche Z)
+    FLinearColor CellColor = GetInternalLayerColor(Cell.GridZ % InternalLayerColors.Num());
+    
+    // Ajouter un peu de variation à la couleur selon la position X et Y
+    if (bAddNoiseToStructure)
+    {
+        float ColorVariation = Random.FRandRange(-0.1f, 0.1f);
+        CellColor.R = FMath::Clamp(CellColor.R + ColorVariation, 0.0f, 1.0f);
+        CellColor.G = FMath::Clamp(CellColor.G + ColorVariation, 0.0f, 1.0f);
+        CellColor.B = FMath::Clamp(CellColor.B + ColorVariation, 0.0f, 1.0f);
+    }
+    
+    // Six faces pour la cellule (négatif et positif selon X, Y, Z)
+    
+    // Face X- (gauche)
+    GenerateInternalWall(
+        FVector(MinX, MinY, MinZ),
+        FVector(MinX, MaxY, MinZ),
+        FVector(MinX, MinY, MaxZ),
+        FVector(MinX, MaxY, MaxZ),
+        WallThicknessX,
+        CellColor,
+        Random
+    );
+    
+    // Face X+ (droite)
+    GenerateInternalWall(
+        FVector(MaxX, MinY, MinZ),
+        FVector(MaxX, MaxY, MinZ),
+        FVector(MaxX, MinY, MaxZ),
+        FVector(MaxX, MaxY, MaxZ),
+        WallThicknessX,
+        CellColor,
+        Random
+    );
+    
+    // Face Y- (avant)
+    GenerateInternalWall(
+        FVector(MinX, MinY, MinZ),
+        FVector(MaxX, MinY, MinZ),
+        FVector(MinX, MinY, MaxZ),
+        FVector(MaxX, MinY, MaxZ),
+        WallThicknessY,
+        CellColor,
+        Random
+    );
+    
+    // Face Y+ (arrière)
+    GenerateInternalWall(
+        FVector(MinX, MaxY, MinZ),
+        FVector(MaxX, MaxY, MinZ),
+        FVector(MinX, MaxY, MaxZ),
+        FVector(MaxX, MaxY, MaxZ),
+        WallThicknessY,
+        CellColor,
+        Random
+    );
+    
+    // Face Z- (bas)
+    GenerateInternalWall(
+        FVector(MinX, MinY, MinZ),
+        FVector(MaxX, MinY, MinZ),
+        FVector(MinX, MaxY, MinZ),
+        FVector(MaxX, MaxY, MinZ),
+        WallThicknessZ,
+        CellColor,
+        Random
+    );
+    
+    // Face Z+ (haut)
+    GenerateInternalWall(
+        FVector(MinX, MinY, MaxZ),
+        FVector(MaxX, MinY, MaxZ),
+        FVector(MinX, MaxY, MaxZ),
+        FVector(MaxX, MaxY, MaxZ),
+        WallThicknessZ,
+        CellColor,
+        Random
+    );
+}
+void ADestructibleTerrain::GenerateInternalWall(
+    const FVector& BottomLeft, 
+    const FVector& BottomRight, 
+    const FVector& TopLeft, 
+    const FVector& TopRight, 
+    float Thickness,
+    const FLinearColor& Color,
+    FRandomStream& Random)
+{
+    // Bilan vertices: 8 vertices par paroi (face avant + face arrière)
+    int32 VertexStartIndex = InternalVertices.Num();
+
+    // Calculer le vecteur normal à la face (pour l'extrusion)
+    FVector Edge1 = BottomRight - BottomLeft;
+    FVector Edge2 = TopLeft - BottomLeft;
+    FVector Normal = FVector::CrossProduct(Edge1, Edge2).GetSafeNormal();
+
+    // Si la normale n'est pas valide, utiliser une direction par défaut
+    if (Normal.IsNearlyZero())
+    {
+        Normal = FVector(0, 1, 0);
+    }
+
+    // Direction d'extrusion pour l'épaisseur
+    FVector ExtrusionDir = Normal * Thickness;
+
+    // Ajouter une variation à l'épaisseur si activé
+    if (bAddNoiseToStructure)
+    {
+        float ThicknessVariation = 1.0f + Random.FRandRange(-0.2f, 0.2f);
+        ExtrusionDir *= ThicknessVariation;
+    }
+
+    // Face avant
+    InternalVertices.Add(BottomLeft);                                // 0
+    InternalVertices.Add(BottomRight);                               // 1
+    InternalVertices.Add(TopLeft);                                   // 2
+    InternalVertices.Add(TopRight);                                  // 3
+
+    // Face arrière (extrudée)
+    InternalVertices.Add(BottomLeft + ExtrusionDir);                 // 4
+    InternalVertices.Add(BottomRight + ExtrusionDir);                // 5
+    InternalVertices.Add(TopLeft + ExtrusionDir);                    // 6
+    InternalVertices.Add(TopRight + ExtrusionDir);                   // 7
+
+    // Triangles pour la face avant
+    InternalTriangles.Add(VertexStartIndex + 0);
+    InternalTriangles.Add(VertexStartIndex + 2);
+    InternalTriangles.Add(VertexStartIndex + 1);
+
+    InternalTriangles.Add(VertexStartIndex + 1);
+    InternalTriangles.Add(VertexStartIndex + 2);
+    InternalTriangles.Add(VertexStartIndex + 3);
+
+    // Triangles pour la face arrière (orientation inversée)
+    InternalTriangles.Add(VertexStartIndex + 4);
+    InternalTriangles.Add(VertexStartIndex + 5);
+    InternalTriangles.Add(VertexStartIndex + 6);
+
+    InternalTriangles.Add(VertexStartIndex + 5);
+    InternalTriangles.Add(VertexStartIndex + 7);
+    InternalTriangles.Add(VertexStartIndex + 6);
+
+    // Triangles pour les côtés (4 côtés à relier)
+    
+    // Côté bas
+    InternalTriangles.Add(VertexStartIndex + 0);
+    InternalTriangles.Add(VertexStartIndex + 1);
+    InternalTriangles.Add(VertexStartIndex + 4);
+
+    InternalTriangles.Add(VertexStartIndex + 1);
+    InternalTriangles.Add(VertexStartIndex + 5);
+    InternalTriangles.Add(VertexStartIndex + 4);
+
+    // Côté droit
+    InternalTriangles.Add(VertexStartIndex + 1);
+    InternalTriangles.Add(VertexStartIndex + 3);
+    InternalTriangles.Add(VertexStartIndex + 5);
+
+    InternalTriangles.Add(VertexStartIndex + 3);
+    InternalTriangles.Add(VertexStartIndex + 7);
+    InternalTriangles.Add(VertexStartIndex + 5);
+
+    // Côté haut
+    InternalTriangles.Add(VertexStartIndex + 2);
+    InternalTriangles.Add(VertexStartIndex + 6);
+    InternalTriangles.Add(VertexStartIndex + 3);
+
+    InternalTriangles.Add(VertexStartIndex + 3);
+    InternalTriangles.Add(VertexStartIndex + 6);
+    InternalTriangles.Add(VertexStartIndex + 7);
+
+    // Côté gauche
+    InternalTriangles.Add(VertexStartIndex + 0);
+    InternalTriangles.Add(VertexStartIndex + 4);
+    InternalTriangles.Add(VertexStartIndex + 2);
+
+    InternalTriangles.Add(VertexStartIndex + 2);
+    InternalTriangles.Add(VertexStartIndex + 4);
+    InternalTriangles.Add(VertexStartIndex + 6);
+
+    // Ajouter des UVs et des couleurs pour tous les vertices
+    for (int32 i = 0; i < 8; ++i)
+    {
+        // UVs simplement répartis sur la paroi
+        float U = (i == 1 || i == 3 || i == 5 || i == 7) ? 1.0f : 0.0f;
+        float V = (i == 2 || i == 3 || i == 6 || i == 7) ? 1.0f : 0.0f;
+        InternalUVs.Add(FVector2D(U, V));
+
+        // Ajouter une légère variation à la couleur
+        FLinearColor ModifiedColor = Color;
+        if (bAddNoiseToStructure)
+        {
+            float ColorVariation = Random.FRandRange(-0.1f, 0.1f);
+            ModifiedColor.R = FMath::Clamp(ModifiedColor.R + ColorVariation, 0.0f, 1.0f);
+            ModifiedColor.G = FMath::Clamp(ModifiedColor.G + ColorVariation, 0.0f, 1.0f);
+            ModifiedColor.B = FMath::Clamp(ModifiedColor.B + ColorVariation, 0.0f, 1.0f);
+        }
+        
+        InternalVertexColors.Add(ModifiedColor.ToFColor(true));
+    }
+}
+
+// Helper pour calculer les normales
+void ADestructibleTerrain::CalculateInternalNormals()
+{
+    // Initialiser les normales
     InternalNormals.Init(FVector::ZeroVector, InternalVertices.Num());
     
     // Calculer les normales pour chaque triangle et les ajouter aux normales des vertices
@@ -406,29 +599,54 @@ void ADestructibleTerrain::GenerateInternalStructure()
         int32 Index1 = InternalTriangles[i + 1];
         int32 Index2 = InternalTriangles[i + 2];
         
-        // Calculer les vecteurs des côtés du triangle
-        FVector Side1 = InternalVertices[Index1] - InternalVertices[Index0];
-        FVector Side2 = InternalVertices[Index2] - InternalVertices[Index0];
-        
-        // Calculer la normale du triangle (produit vectoriel)
-        FVector Normal = FVector::CrossProduct(Side1, Side2).GetSafeNormal();
-        
-        // Ajouter la normale à chaque vertex du triangle
-        InternalNormals[Index0] += Normal;
-        InternalNormals[Index1] += Normal;
-        InternalNormals[Index2] += Normal;
+        // Vérifier que les indices sont valides
+        if (InternalVertices.IsValidIndex(Index0) && InternalVertices.IsValidIndex(Index1) && InternalVertices.IsValidIndex(Index2))
+        {
+            // Calculer les vecteurs des côtés du triangle
+            FVector Side1 = InternalVertices[Index1] - InternalVertices[Index0];
+            FVector Side2 = InternalVertices[Index2] - InternalVertices[Index0];
+            
+            // Calculer la normale du triangle (produit vectoriel)
+            FVector Normal = FVector::CrossProduct(Side1, Side2).GetSafeNormal();
+            
+            // Ajouter la normale à chaque vertex du triangle
+            InternalNormals[Index0] += Normal;
+            InternalNormals[Index1] += Normal;
+            InternalNormals[Index2] += Normal;
+        }
     }
     
     // Normaliser toutes les normales
     for (int32 i = 0; i < InternalNormals.Num(); i++)
     {
-        InternalNormals[i] = InternalNormals[i].GetSafeNormal();
+        if (!InternalNormals[i].IsZero())
+        {
+            InternalNormals[i] = InternalNormals[i].GetSafeNormal();
+        }
+        else
+        {
+            // Par défaut, on met une normale vers l'extérieur
+            InternalNormals[i] = FVector(0.0f, -1.0f, 0.0f);
+        }
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Generated internal structure with %d vertices and %d triangles"), 
-        InternalVertices.Num(), InternalTriangles.Num() / 3);
 }
 
+// Helper pour obtenir une couleur pour une couche
+FLinearColor ADestructibleTerrain::GetInternalLayerColor(int32 LayerIndex)
+{
+    if (InternalLayerColors.IsValidIndex(LayerIndex))
+    {
+        return InternalLayerColors[LayerIndex];
+    }
+    else if (InternalLayerColors.Num() > 0)
+    {
+        // Fallback à la première couleur
+        return InternalLayerColors[0];
+    }
+    
+    // Couleur par défaut si aucune n'est définie
+    return FLinearColor(0.5f, 0.3f, 0.1f, 1.0f);
+}
 void ADestructibleTerrain::GenerateTerrain()
 {
     // Vider les tableaux
@@ -711,7 +929,6 @@ void ADestructibleTerrain::InitializeTangents()
         Tangents.Add(FProcMeshTangent(1.0f, 0.0f, 0.0f));
     }
 }
-
 void ADestructibleTerrain::CreateMeshFromData(const FTerrainMeshData& InMeshData)
 {
     if (!InMeshData.bIsValid)
@@ -723,40 +940,45 @@ void ADestructibleTerrain::CreateMeshFromData(const FTerrainMeshData& InMeshData
     // Convertir les couleurs
     TArray<FLinearColor> LinearColors = ConvertColorsToLinear(InMeshData.VertexColors);
     
-    // S'assurer que toutes les propriétés sont correctement définies
-    TArray<FVector> EmptyVertices;
-    TArray<int32> EmptyTriangles;
-    
-    // Créer la section de mesh
-    // IMPORTANT: Nous utilisons ClearMeshSection pour éviter tout problème
-    TerrainMesh->ClearMeshSection(0);
-    
-    // Vérification supplémentaire pour éviter des crashs
-    if (InMeshData.Vertices.Num() > 0 && InMeshData.Triangles.Num() > 0 && 
-        InMeshData.Normals.Num() == InMeshData.Vertices.Num() && 
-        InMeshData.UVs.Num() == InMeshData.Vertices.Num() &&
-        LinearColors.Num() == InMeshData.Vertices.Num())
+    // Vérification des dimensions de données pour éviter les crashs
+    if (InMeshData.Vertices.Num() == 0 || InMeshData.Triangles.Num() == 0 || 
+        InMeshData.Normals.Num() != InMeshData.Vertices.Num() || 
+        InMeshData.UVs.Num() != InMeshData.Vertices.Num() ||
+        LinearColors.Num() != InMeshData.Vertices.Num())
     {
-        // Créer la section avec les données fournies
-        TerrainMesh->CreateMeshSection_LinearColor(
-            0, 
-            InMeshData.Vertices, 
-            InMeshData.Triangles, 
-            InMeshData.Normals, 
-            InMeshData.UVs, 
-            LinearColors, 
-            Tangents, 
-            true  // Génère une collision
-        );
-        
-        // Activer les collisions
-        TerrainMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("Invalid mesh data dimensions"));
+        UE_LOG(LogTemp, Error, TEXT("Invalid mesh data dimensions - V:%d, T:%d, N:%d, UV:%d, C:%d"), 
+            InMeshData.Vertices.Num(), InMeshData.Triangles.Num(), 
+            InMeshData.Normals.Num(), InMeshData.UVs.Num(), LinearColors.Num());
         return;
     }
+    
+    // IMPORTANT: Nettoyer complètement la section avant de la recréer
+    // pour garantir que les données de collision sont également nettoyées
+    TerrainMesh->ClearMeshSection(0);
+    
+    // Recréer la section avec collision
+    TerrainMesh->CreateMeshSection_LinearColor(
+        0, 
+        InMeshData.Vertices, 
+        InMeshData.Triangles, 
+        InMeshData.Normals, 
+        InMeshData.UVs, 
+        LinearColors, 
+        Tangents, 
+        true  // Générer une collision - CRUCIAL
+    );
+    
+    // Forcer une mise à jour complète des données de collision
+    TerrainMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    
+    // Activation explicite de la collision à la fin
+    TerrainMesh->ContainsPhysicsTriMeshData(true);
+    
+    // Explicitement créer les convex hulls pour une meilleure collision
+    TerrainMesh->bUseComplexAsSimpleCollision = false;
+    
+    // Utiliser RecreatePhysicsState pour forcer la mise à jour de la collision
+    TerrainMesh->RecreatePhysicsState();
     
     // Forcer l'application du matériau
     if (TerrainMaterialInstance)
@@ -781,6 +1003,7 @@ void ADestructibleTerrain::CreateMeshFromData(const FTerrainMeshData& InMeshData
     // Forcer une mise à jour du rendu
     TerrainMesh->MarkRenderStateDirty();
 }
+
 
 TArray<FLinearColor> ADestructibleTerrain::ConvertColorsToLinear(const TArray<FColor>& Colors)
 {
@@ -984,28 +1207,220 @@ void ADestructibleTerrain::OnRep_TerrainModifications()
 
 bool ADestructibleTerrain::IsVertexInModification(const FVector& Vertex, const FTerrainModification& Modification)
 {
-    // Obtenir la position locale du vertex par rapport à l'acteur
-    FVector LocalVertex = Vertex;
-    
-    // Log pour déboguer
-    //UE_LOG(LogTemp, Log, TEXT("Checking vertex at (%f, %f, %f) against modification at (%f, %f) with size (%f, %f)"),LocalVertex.X, LocalVertex.Y, LocalVertex.Z,Modification.Position.X, Modification.Position.Y,Modification.Size.X, Modification.Size.Y);
-    
-    // Considérer que le vertex est en 2D (X, Z)
-    float VertexX = LocalVertex.X;
-    float VertexZ = LocalVertex.Z;
-    
-    // Vérifier si le vertex est dans le rectangle de modification
-    bool isInside = (VertexX >= Modification.Position.X && 
-            VertexX <= Modification.Position.X + Modification.Size.X &&
-            VertexZ >= Modification.Position.Y && 
-            VertexZ <= Modification.Position.Y + Modification.Size.Y);
-    
-    if (isInside)
+    // Rechercher d'abord à quelle cellule appartient ce vertex
+    for (const FTerrainCell& Cell : TerrainCells)
     {
-        UE_LOG(LogTemp, Verbose, TEXT("Vertex is inside modification area!"));
+        if (Cell.ContainsPoint(Vertex) && Cell.IsAffectedByModification(Modification))
+        {
+            // Le vertex est dans une cellule affectée par la modification
+            return true;
+        }
     }
     
-    return isInside;
+    // Fallback à l'ancien test si vertex n'est dans aucune cellule connue
+    // Considérer que le vertex est en 2D (X, Z)
+    float VertexX = Vertex.X;
+    float VertexZ = Vertex.Z;
+    
+    // Si c'est une modification circulaire
+    if (Modification.bIsCircular)
+    {
+        // Calculer la distance du vertex au centre du cercle
+        float DistanceSquared = FMath::Square(VertexX - Modification.CircleCenter.X) + 
+                               FMath::Square(VertexZ - Modification.CircleCenter.Y);
+        
+        // Comparer au carré du rayon
+        return DistanceSquared <= FMath::Square(Modification.CircleRadius);
+    }
+    else
+    {
+        // Pour une modification rectangulaire
+        return (VertexX >= Modification.Position.X && 
+                VertexX <= Modification.Position.X + Modification.Size.X &&
+                VertexZ >= Modification.Position.Y && 
+                VertexZ <= Modification.Position.Y + Modification.Size.Y);
+    }
+}
+
+// Fonction pour détecter les cellules affectées par une modification
+TArray<FTerrainCell*> ADestructibleTerrain::GetAffectedCells(const FTerrainModification& Modification)
+{
+    TArray<FTerrainCell*> AffectedCells;
+    
+    for (int32 i = 0; i < TerrainCells.Num(); ++i)
+    {
+        if (TerrainCells[i].IsAffectedByModification(Modification))
+        {
+            AffectedCells.Add(&TerrainCells[i]);
+        }
+    }
+    
+    // Si aucune cellule n'est trouvée avec la nouvelle méthode, essayer l'ancienne
+    if (AffectedCells.Num() == 0)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("No cells found with cell-based detection, falling back to legacy method"));
+        
+        // Méthode traditionnelle - estimer les cellules touchées
+        if (Modification.bIsCircular)
+        {
+            // Pour les modifications circulaires
+            float CenterX = Modification.CircleCenter.X;
+            float CenterZ = Modification.CircleCenter.Y;
+            float Radius = Modification.CircleRadius;
+            
+            // Calculer les limites de la zone affectée
+            int32 MinGridX = FMath::Max(0, FMath::FloorToInt((CenterX - Radius) / CellSizeX));
+            int32 MaxGridX = FMath::Min(CellCountX - 1, FMath::CeilToInt((CenterX + Radius) / CellSizeX));
+            int32 MinGridZ = FMath::Max(0, FMath::FloorToInt((CenterZ - Radius) / CellSizeZ));
+            int32 MaxGridZ = FMath::Min(CellCountZ - 1, FMath::CeilToInt((CenterZ + Radius) / CellSizeZ));
+            
+            // Parcourir les cellules potentiellement touchées
+            for (int32 z = MinGridZ; z <= MaxGridZ; ++z)
+            {
+                for (int32 y = 0; y < CellCountY; ++y) // Inclure toute la profondeur
+                {
+                    for (int32 x = MinGridX; x <= MaxGridX; ++x)
+                    {
+                        int32 CellIndex = (z * CellCountY + y) * CellCountX + x;
+                        if (TerrainCells.IsValidIndex(CellIndex) && !TerrainCells[CellIndex].bIsDestroyed)
+                        {
+                            AffectedCells.Add(&TerrainCells[CellIndex]);
+                        }
+                    }
+                }
+            }
+        }
+        else
+        {
+            // Pour les modifications rectangulaires
+            float MinX = Modification.Position.X;
+            float MinZ = Modification.Position.Y;
+            float MaxX = MinX + Modification.Size.X;
+            float MaxZ = MinZ + Modification.Size.Y;
+            
+            // Calculer les limites de la zone affectée
+            int32 MinGridX = FMath::Max(0, FMath::FloorToInt(MinX / CellSizeX));
+            int32 MaxGridX = FMath::Min(CellCountX - 1, FMath::CeilToInt(MaxX / CellSizeX));
+            int32 MinGridZ = FMath::Max(0, FMath::FloorToInt(MinZ / CellSizeZ));
+            int32 MaxGridZ = FMath::Min(CellCountZ - 1, FMath::CeilToInt(MaxZ / CellSizeZ));
+            
+            // Parcourir les cellules potentiellement touchées
+            for (int32 z = MinGridZ; z <= MaxGridZ; ++z)
+            {
+                for (int32 y = 0; y < CellCountY; ++y) // Inclure toute la profondeur
+                {
+                    for (int32 x = MinGridX; x <= MaxGridX; ++x)
+                    {
+                        int32 CellIndex = (z * CellCountY + y) * CellCountX + x;
+                        if (TerrainCells.IsValidIndex(CellIndex) && !TerrainCells[CellIndex].bIsDestroyed)
+                        {
+                            AffectedCells.Add(&TerrainCells[CellIndex]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    return AffectedCells;
+}
+
+// Fonction pour créer une modification circulaire
+UFUNCTION(BlueprintCallable, Category = "Terrain")
+void ADestructibleTerrain::RequestDestroyTerrainCircle(FVector2D Center, float Radius)
+{
+    // Créer une modification circulaire
+    FTerrainModification Mod = FTerrainModification::MakeCircular(Center, Radius);
+    
+    // Appeler la fonction serveur pour valider et appliquer la destruction
+    if (GetLocalRole() < ROLE_Authority)
+    {
+        Server_DestroyTerrainCircle(Center, Radius);
+    }
+    else
+    {
+        // Si déjà sur le serveur, appliquer directement
+        Server_DestroyTerrainCircle(Center, Radius);
+    }
+}
+
+// RPC serveur pour les destructions circulaires
+void ADestructibleTerrain::Server_DestroyTerrainCircle(FVector2D Center, float Radius)
+{
+    UE_LOG(LogTemp, Warning, TEXT("Destroying terrain in circle at position (%f, %f) with radius %f"), 
+        Center.X, Center.Y, Radius);
+    
+    // Créer une nouvelle modification circulaire
+    FTerrainModification NewMod = FTerrainModification::MakeCircular(Center, Radius);
+    
+    // Ajouter à la liste globale des modifications
+    TerrainModifications.Add(NewMod);
+    
+    // Afficher le nombre total de modifications
+    UE_LOG(LogTemp, Warning, TEXT("Total modifications: %d"), TerrainModifications.Num());
+    
+    if (bUseTerrainSections)
+    {
+        // Assigner cette modification aux sections appropriées et les mettre à jour
+        AssignModificationToSections(NewMod);
+    }
+    else
+    {
+        // Approche classique : appliquer toutes les modifications sur le mesh entier
+        ApplyTerrainModifications();
+    }
+}
+
+bool ADestructibleTerrain::Server_DestroyTerrainCircle_Validate(FVector2D Center, float Radius)
+{
+    // Validation simple: s'assurer que le rayon est positif
+    return Radius > 0.0f;
+}
+
+// Fonction pour ajuster les paramètres de la structure interne à l'exécution
+UFUNCTION(BlueprintCallable, Category = "Terrain|Internal")
+void ADestructibleTerrain::SetInternalStructureParameters(
+    float NewCellSizeX, 
+    float NewCellSizeY, 
+    float NewCellSizeZ, 
+    float NewWallThickness, 
+    bool bRegenerate)
+{
+    // Mettre à jour les paramètres
+    CellSizeX = FMath::Max(10.0f, NewCellSizeX);
+    CellSizeY = FMath::Max(10.0f, NewCellSizeY);
+    CellSizeZ = FMath::Max(10.0f, NewCellSizeZ);
+    WallThickness = FMath::Max(1.0f, NewWallThickness);
+    
+    UE_LOG(LogTemp, Log, TEXT("Updated internal structure parameters: Cell Size = (%f, %f, %f), Wall Thickness = %f"),
+        CellSizeX, CellSizeY, CellSizeZ, WallThickness);
+    
+    // Si demandé, régénérer le terrain avec les nouveaux paramètres
+    if (bRegenerate && HasAuthority())
+    {
+        // Regenerate internal structure only
+        InternalVertices.Empty();
+        InternalTriangles.Empty();
+        InternalUVs.Empty();
+        InternalNormals.Empty();
+        InternalVertexColors.Empty();
+        
+        // Générer la nouvelle structure interne
+        GenerateInternalStructure();
+        
+        // Mettre à jour le mesh
+        MeshData.Vertices.Empty();
+        MeshData.Triangles.Empty();
+        MeshData.UVs.Empty();
+        MeshData.Normals.Empty();
+        MeshData.VertexColors.Empty();
+        
+        // Recréer tout le terrain
+        GenerateTerrain();
+        
+        // Réappliquer les modifications existantes
+        ApplyTerrainModifications();
+    }
 }
 
 void ADestructibleTerrain::ApplyTerrainModifications()
@@ -1039,27 +1454,80 @@ void ADestructibleTerrain::ApplyTerrainModifications()
     TArray<FVector2D> NewUVs = MeshData.UVs;
     TArray<FColor> NewVertexColors = MeshData.VertexColors;
     
-    // Liste des triangles à conserver (non affectés par les modifications)
-    TArray<bool> TriangleToKeep;
+    // Lister les cellules affectées par les nouvelles modifications
+    TArray<FTerrainCell*> AllAffectedCells;
+    
+    // Utiliser une approche par lot pour traiter toutes les modifications d'un coup
+    for (const FTerrainModification& Mod : NewModifications)
+    {
+        TArray<FTerrainCell*> CellsAffectedByThisMod = GetAffectedCells(Mod);
+        
+        for (FTerrainCell* Cell : CellsAffectedByThisMod)
+        {
+            if (Cell && !Cell->bIsDestroyed)
+            {
+                // Marquer la cellule comme détruite
+                Cell->bIsDestroyed = true;
+                AllAffectedCells.AddUnique(Cell);
+            }
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Found %d affected cells"), AllAffectedCells.Num());
+    
+    if (AllAffectedCells.Num() == 0)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("No cells affected, no changes to make"));
+        
+        // Ajouter quand même les modifications à la liste des appliquées
+        for (const FTerrainModification& Mod : NewModifications)
+        {
+            AppliedModifications.Add(Mod);
+        }
+        
+        return;
+    }
+    
+    // 1. Première étape: identifier les triangles touchés par les cellules détruites
+    TBitArray<> TriangleToKeep;
     TriangleToKeep.Init(true, MeshData.Triangles.Num() / 3);
     
-// 1. Première passe: identifier les triangles touchés par les modifications
     for (int32 TriIdx = 0; TriIdx < MeshData.Triangles.Num() / 3; TriIdx++)
     {
         int32 Index1 = MeshData.Triangles[TriIdx * 3];
         int32 Index2 = MeshData.Triangles[TriIdx * 3 + 1];
         int32 Index3 = MeshData.Triangles[TriIdx * 3 + 2];
         
-        // Vérifier si le triangle est affecté par l'une des nouvelles modifications
-        for (const FTerrainModification& Mod : NewModifications)
+        // Vérifier que les indices sont valides
+        if (NewVertices.IsValidIndex(Index1) && NewVertices.IsValidIndex(Index2) && NewVertices.IsValidIndex(Index3))
         {
-            if (IsVertexInModification(MeshData.Vertices[Index1], Mod) ||
-                IsVertexInModification(MeshData.Vertices[Index2], Mod) ||
-                IsVertexInModification(MeshData.Vertices[Index3], Mod))
+            // Récupérer les vertices du triangle
+            FVector Vertex1 = NewVertices[Index1];
+            FVector Vertex2 = NewVertices[Index2];
+            FVector Vertex3 = NewVertices[Index3];
+            
+            // Vérifier si au moins un des vertices est dans une cellule détruite
+            bool bTriangleAffected = false;
+            
+            for (FTerrainCell* Cell : AllAffectedCells)
+            {
+                if (Cell && (Cell->ContainsPoint(Vertex1) || Cell->ContainsPoint(Vertex2) || Cell->ContainsPoint(Vertex3)))
+                {
+                    bTriangleAffected = true;
+                    break;
+                }
+            }
+            
+            if (bTriangleAffected)
             {
                 TriangleToKeep[TriIdx] = false;
-                break;
             }
+        }
+        else
+        {
+            // Si les indices sont invalides, ne pas garder ce triangle
+            TriangleToKeep[TriIdx] = false;
+            UE_LOG(LogTemp, Warning, TEXT("Invalid triangle index detected: %d, %d, %d"), Index1, Index2, Index3);
         }
     }
     
@@ -1075,11 +1543,20 @@ void ADestructibleTerrain::ApplyTerrainModifications()
         }
     }
     
-    // 3. Mettre à jour les données de mesh
-    MeshData.Triangles = NewTriangles;
+    // 3. Créer des faces propres aux bords des cellules détruites
+    CreateCleanCellCutFaces(AllAffectedCells, NewVertices, NewTriangles, NewUVs, NewVertexColors);
     
-    // 4. Recalculer les normales
-    MeshData.Normals.Init(FVector::ZeroVector, NewVertices.Num());
+    // 4. Nettoyer les vertices orphelins
+    CleanupOrphanVertices(NewVertices, NewTriangles, NewUVs, NewVertexColors, MeshData.Normals);
+    
+    // 5. Mettre à jour les données de mesh
+    MeshData.Vertices = NewVertices;
+    MeshData.Triangles = NewTriangles;
+    MeshData.UVs = NewUVs;
+    MeshData.VertexColors = NewVertexColors;
+    
+    // 6. Recalculer les normales
+    MeshData.Normals.Init(FVector::ZeroVector, MeshData.Vertices.Num());
     
     for (int32 i = 0; i < NewTriangles.Num(); i += 3)
     {
@@ -1119,10 +1596,13 @@ void ADestructibleTerrain::ApplyTerrainModifications()
         }
     }
     
-    // 5. Appliquer les données au mesh
+    // Marquer les données comme valides
+    MeshData.bIsValid = true;
+    
+    // 7. Appliquer les données au mesh
     CreateMeshFromData(MeshData);
     
-    // 6. Ajouter les nouvelles modifications à la liste des modifications appliquées
+    // 8. Ajouter les nouvelles modifications à la liste des modifications appliquées
     for (const FTerrainModification& Mod : NewModifications)
     {
         AppliedModifications.Add(Mod);
@@ -1131,13 +1611,447 @@ void ADestructibleTerrain::ApplyTerrainModifications()
     // Marquer que les modifications ont été appliquées
     bModificationsApplied = true;
     
-    // Si nous sommes sur le serveur, répliquer ces données vers tous les clients
+    // 9. Spawner les effets de destruction APRÈS avoir mis à jour le mesh
+    SpawnDestructionEffects(AllAffectedCells);
+    
+    // 10. Si nous sommes sur le serveur, répliquer ces données vers tous les clients
     if (HasAuthority())
     {
         UE_LOG(LogTemp, Warning, TEXT("Replicating updated mesh to clients"));
         Multicast_UpdateTerrainMesh(MeshData);
     }
 }
+
+
+// Fonction pour créer des faces propres aux bords des zones détruites
+void ADestructibleTerrain::CreateCleanCutFaces(
+    const TArray<FTerrainModification>& Modifications,
+    TArray<FVector>& Vertices,
+    TArray<int32>& Triangles,
+    TArray<FVector2D>& UVs,
+    TArray<FColor>& VertexColors)
+{
+    // Pour chaque modification, créer des faces de "coupe" propres
+    for (const FTerrainModification& Mod : Modifications)
+    {
+        if (Mod.bIsCircular)
+        {
+            CreateCircularCutFaces(Mod, Vertices, Triangles, UVs, VertexColors);
+        }
+        else
+        {
+            CreateRectangularCutFaces(Mod, Vertices, Triangles, UVs, VertexColors);
+        }
+    }
+}
+
+void ADestructibleTerrain::CreateRectangularCutFaces(
+    const FTerrainModification& Mod,
+    TArray<FVector>& Vertices,
+    TArray<int32>& Triangles,
+    TArray<FVector2D>& UVs,
+    TArray<FColor>& VertexColors)
+{
+    // Obtenir les coins du rectangle de modification
+    float MinX = Mod.Position.X;
+    float MinZ = Mod.Position.Y;
+    float MaxX = MinX + Mod.Size.X;
+    float MaxZ = MinZ + Mod.Size.Y;
+    
+    // Créer des faces pour les 4 plans de coupe (avant/arrière de chaque côté)
+    
+    // Pour la couleur des faces de coupe
+    FColor CutFaceColor = FColor(100, 80, 60, 255); // Marron pour les coupes
+    
+    // 1. Face de coupe gauche
+    CreateCutFace(
+        FVector(MinX, 0.0f, MinZ),             // Bas avant
+        FVector(MinX, TerrainDepth, MinZ),     // Bas arrière
+        FVector(MinX, 0.0f, MaxZ),             // Haut avant
+        FVector(MinX, TerrainDepth, MaxZ),     // Haut arrière
+        Vertices, Triangles, UVs, VertexColors, CutFaceColor
+    );
+    
+    // 2. Face de coupe droite
+    CreateCutFace(
+        FVector(MaxX, 0.0f, MinZ),             // Bas avant
+        FVector(MaxX, TerrainDepth, MinZ),     // Bas arrière
+        FVector(MaxX, 0.0f, MaxZ),             // Haut avant
+        FVector(MaxX, TerrainDepth, MaxZ),     // Haut arrière
+        Vertices, Triangles, UVs, VertexColors, CutFaceColor
+    );
+    
+    // 3. Face de coupe inférieure
+    CreateCutFace(
+        FVector(MinX, 0.0f, MinZ),             // Gauche avant
+        FVector(MinX, TerrainDepth, MinZ),     // Gauche arrière
+        FVector(MaxX, 0.0f, MinZ),             // Droite avant
+        FVector(MaxX, TerrainDepth, MinZ),     // Droite arrière
+        Vertices, Triangles, UVs, VertexColors, CutFaceColor
+    );
+    
+    // 4. Face de coupe supérieure
+    CreateCutFace(
+        FVector(MinX, 0.0f, MaxZ),             // Gauche avant
+        FVector(MinX, TerrainDepth, MaxZ),     // Gauche arrière
+        FVector(MaxX, 0.0f, MaxZ),             // Droite avant
+        FVector(MaxX, TerrainDepth, MaxZ),     // Droite arrière
+        Vertices, Triangles, UVs, VertexColors, CutFaceColor
+    );
+}
+
+void ADestructibleTerrain::CreateCircularCutFaces(
+    const FTerrainModification& Mod,
+    TArray<FVector>& Vertices,
+    TArray<int32>& Triangles,
+    TArray<FVector2D>& UVs,
+    TArray<FColor>& VertexColors)
+{
+    // Obtenir le centre et le rayon du cercle
+    FVector2D Center = Mod.CircleCenter;
+    float Radius = Mod.CircleRadius;
+    
+    // Nombre de segments pour approximer le cercle
+    const int32 NumSegments = 24; // Plus de segments = meilleure qualité
+    
+    // Couleur pour les faces de coupe
+    FColor CutFaceColor = FColor(100, 80, 60, 255);
+    
+    // Créer un cylindre de coupe
+    TArray<FVector> CircleVerticesFront;
+    TArray<FVector> CircleVerticesBack;
+    
+    for (int32 i = 0; i < NumSegments; ++i)
+    {
+        float Angle = 2.0f * PI * i / NumSegments;
+        float X = Center.X + Radius * FMath::Cos(Angle);
+        float Z = Center.Y + Radius * FMath::Sin(Angle);
+        
+        // Créer les vertices avant et arrière
+        CircleVerticesFront.Add(FVector(X, 0.0f, Z));
+        CircleVerticesBack.Add(FVector(X, TerrainDepth, Z));
+    }
+    
+    // Index de départ pour les nouveaux vertices
+    int32 BaseVertexIndex = Vertices.Num();
+    
+    // Ajouter tous les vertices au mesh
+    for (int32 i = 0; i < NumSegments; ++i)
+    {
+        // Vertices avant
+        Vertices.Add(CircleVerticesFront[i]);
+        UVs.Add(FVector2D(static_cast<float>(i) / NumSegments, 0.0f));
+        VertexColors.Add(CutFaceColor);
+        
+        // Vertices arrière
+        Vertices.Add(CircleVerticesBack[i]);
+        UVs.Add(FVector2D(static_cast<float>(i) / NumSegments, 1.0f));
+        VertexColors.Add(CutFaceColor);
+    }
+    
+    // Créer les triangles pour les faces de coupe
+    for (int32 i = 0; i < NumSegments; ++i)
+    {
+        int32 NextI = (i + 1) % NumSegments;
+        
+        // Indices des vertices actuels
+        int32 CurFront = BaseVertexIndex + i * 2;
+        int32 CurBack = BaseVertexIndex + i * 2 + 1;
+        
+        // Indices des vertices suivants
+        int32 NextFront = BaseVertexIndex + NextI * 2;
+        int32 NextBack = BaseVertexIndex + NextI * 2 + 1;
+        
+        // Créer la face du côté
+        Triangles.Add(CurFront);
+        Triangles.Add(NextFront);
+        Triangles.Add(CurBack);
+        
+        Triangles.Add(NextFront);
+        Triangles.Add(NextBack);
+        Triangles.Add(CurBack);
+    }
+}
+
+void ADestructibleTerrain::CreateCutFace(
+    const FVector& Corner1,
+    const FVector& Corner2,
+    const FVector& Corner3,
+    const FVector& Corner4,
+    TArray<FVector>& Vertices,
+    TArray<int32>& Triangles,
+    TArray<FVector2D>& UVs,
+    TArray<FColor>& VertexColors,
+    const FColor& BaseColor)
+{
+    // Index de départ pour les nouveaux vertices
+    int32 BaseIndex = Vertices.Num();
+    
+    // Ajouter les 4 vertices
+    Vertices.Add(Corner1);
+    Vertices.Add(Corner2);
+    Vertices.Add(Corner3);
+    Vertices.Add(Corner4);
+    
+    // Ajouter les coordonnées UV
+    // Utiliser une projection adaptée à l'orientation de la face
+    FVector FaceNormal = FVector::CrossProduct(Corner3 - Corner1, Corner2 - Corner1).GetSafeNormal();
+    
+    // Déterminer l'orientation principale de la face
+    float AbsX = FMath::Abs(FaceNormal.X);
+    float AbsY = FMath::Abs(FaceNormal.Y);
+    float AbsZ = FMath::Abs(FaceNormal.Z);
+    
+    if (AbsX >= AbsY && AbsX >= AbsZ)
+    {
+        // Face orientée selon X, utiliser Y et Z pour les UV
+        UVs.Add(FVector2D(Corner1.Y / 100.0f, Corner1.Z / 100.0f));
+        UVs.Add(FVector2D(Corner2.Y / 100.0f, Corner2.Z / 100.0f));
+        UVs.Add(FVector2D(Corner3.Y / 100.0f, Corner3.Z / 100.0f));
+        UVs.Add(FVector2D(Corner4.Y / 100.0f, Corner4.Z / 100.0f));
+    }
+    else if (AbsY >= AbsX && AbsY >= AbsZ)
+    {
+        // Face orientée selon Y, utiliser X et Z pour les UV
+        UVs.Add(FVector2D(Corner1.X / 100.0f, Corner1.Z / 100.0f));
+        UVs.Add(FVector2D(Corner2.X / 100.0f, Corner2.Z / 100.0f));
+        UVs.Add(FVector2D(Corner3.X / 100.0f, Corner3.Z / 100.0f));
+        UVs.Add(FVector2D(Corner4.X / 100.0f, Corner4.Z / 100.0f));
+    }
+    else
+    {
+        // Face orientée selon Z, utiliser X et Y pour les UV
+        UVs.Add(FVector2D(Corner1.X / 100.0f, Corner1.Y / 100.0f));
+        UVs.Add(FVector2D(Corner2.X / 100.0f, Corner2.Y / 100.0f));
+        UVs.Add(FVector2D(Corner3.X / 100.0f, Corner3.Y / 100.0f));
+        UVs.Add(FVector2D(Corner4.X / 100.0f, Corner4.Y / 100.0f));
+    }
+    
+    // Ajouter un peu de variation à la couleur en fonction de la position
+    for (int32 i = 0; i < 4; ++i)
+    {
+        FVector CornerPosition = Vertices[BaseIndex + i];
+        
+        // Variation de couleur basée sur la profondeur (axe Y)
+        float DepthFactor = FMath::Clamp((CornerPosition.Y / TerrainDepth) * 0.3f, 0.0f, 0.3f);
+        
+        // Variation de couleur basée sur la hauteur (axe Z)
+        float HeightFactor = FMath::Clamp((CornerPosition.Z / TerrainHeight) * 0.2f, 0.0f, 0.2f);
+        
+        // Créer une couleur avec variation
+        FColor ModifiedColor = BaseColor;
+        ModifiedColor.R = FMath::Clamp(int32(BaseColor.R * (1.0f - DepthFactor + HeightFactor)), 0, 255);
+        ModifiedColor.G = FMath::Clamp(int32(BaseColor.G * (1.0f - DepthFactor + HeightFactor)), 0, 255);
+        ModifiedColor.B = FMath::Clamp(int32(BaseColor.B * (1.0f - DepthFactor + HeightFactor)), 0, 255);
+        
+        VertexColors.Add(ModifiedColor);
+    }
+    
+    // Ajouter les deux triangles qui forment le quad
+    Triangles.Add(BaseIndex);
+    Triangles.Add(BaseIndex + 2);
+    Triangles.Add(BaseIndex + 1);
+    
+    Triangles.Add(BaseIndex + 1);
+    Triangles.Add(BaseIndex + 2);
+    Triangles.Add(BaseIndex + 3);
+}
+
+// Fonction pour ajouter des effets de débris et particules lors de la destruction
+void ADestructibleTerrain::SpawnDestructionEffects(const TArray<FTerrainCell*>& DestroyedCells)
+{
+    // Ne rien faire s'il n'y a pas de cellules détruites
+    if (DestroyedCells.Num() == 0)
+    {
+        return;
+    }
+    
+    // Calculer le centre de la zone détruite
+    FVector AveragePosition = FVector::ZeroVector;
+    int32 CellsUsedForAverage = 0;
+    
+    for (const FTerrainCell* Cell : DestroyedCells)
+    {
+        if (Cell)
+        {
+            AveragePosition += (Cell->Min + Cell->Max) * 0.5f;
+            CellsUsedForAverage++;
+        }
+    }
+    
+    if (CellsUsedForAverage > 0)
+    {
+        AveragePosition /= CellsUsedForAverage;
+    }
+    
+    // Si nous avons un effet de destruction, le jouer à cette position
+    if (DestructionEffect)
+    {
+        UGameplayStatics::SpawnEmitterAtLocation(
+            GetWorld(),
+            DestructionEffect,
+            AveragePosition,
+            FRotator::ZeroRotator,
+            true
+        );
+    }
+    
+    // Si nous avons un son de destruction, le jouer à cette position
+    if (DestructionSound)
+    {
+        UGameplayStatics::PlaySoundAtLocation(
+            this,
+            DestructionSound,
+            AveragePosition
+        );
+    }
+    
+    // Réduire la quantité de débris pour de meilleures performances
+    int32 MaxDebrisToSpawn = FMath::Min(DestroyedCells.Num() * NumDebrisPerCell, 50);
+    int32 DebrisSpawned = 0;
+    
+    // Créer une copie du tableau pour le tri
+    TArray<FTerrainCell*> PrioritizedCells = DestroyedCells;
+    
+    // Trouver la caméra du joueur si disponible
+    FVector CameraLocation = FVector::ZeroVector;
+    FRotator CameraRotation = FRotator::ZeroRotator;
+    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+    if (PC)
+    {
+        PC->GetPlayerViewPoint(CameraLocation, CameraRotation);
+        
+        // Tri manuel plutôt que d'utiliser la méthode Sort()
+        for (int32 i = 0; i < PrioritizedCells.Num() - 1; i++)
+        {
+            for (int32 j = 0; j < PrioritizedCells.Num() - i - 1; j++)
+            {
+                if (PrioritizedCells[j] && PrioritizedCells[j+1])
+                {
+                    FVector CenterA = (PrioritizedCells[j]->Min + PrioritizedCells[j]->Max) * 0.5f;
+                    FVector CenterB = (PrioritizedCells[j+1]->Min + PrioritizedCells[j+1]->Max) * 0.5f;
+                    
+                    if (FVector::DistSquared(CenterA, CameraLocation) > FVector::DistSquared(CenterB, CameraLocation))
+                    {
+                        // Échanger les cellules
+                        FTerrainCell* Temp = PrioritizedCells[j];
+                        PrioritizedCells[j] = PrioritizedCells[j+1];
+                        PrioritizedCells[j+1] = Temp;
+                    }
+                }
+            }
+        }
+    }
+    
+    // Spawn de débris pour chaque cellule, en commençant par les plus prioritaires
+    for (FTerrainCell* Cell : PrioritizedCells)
+    {
+        if (!Cell || DebrisSpawned >= MaxDebrisToSpawn)
+            break;
+            
+        // Calculer le centre de la cellule
+        FVector CellCenter = (Cell->Min + Cell->Max) * 0.5f;
+        
+        // Si nous avons un blueprint de débris
+        if (DebrisClass)
+        {
+            // Déterminer combien de débris spawner pour cette cellule
+            int32 DebrisForThisCell = FMath::Min(NumDebrisPerCell, MaxDebrisToSpawn - DebrisSpawned);
+            
+            // Spawner plusieurs débris avec des positions et rotations aléatoires
+            for (int32 i = 0; i < DebrisForThisCell; ++i)
+            {
+                // Position aléatoire dans la cellule, mais ajustée pour être plus proche du centre
+                FVector RandomOffset(
+                    FMath::RandRange(-0.3f, 0.3f) * (Cell->Max.X - Cell->Min.X),
+                    FMath::RandRange(-0.3f, 0.3f) * (Cell->Max.Y - Cell->Min.Y),
+                    FMath::RandRange(-0.3f, 0.3f) * (Cell->Max.Z - Cell->Min.Z)
+                );
+                
+                FVector SpawnLocation = CellCenter + RandomOffset;
+                
+                // Rotation aléatoire
+                FRotator SpawnRotation(
+                    FMath::RandRange(0.0f, 360.0f),
+                    FMath::RandRange(0.0f, 360.0f),
+                    FMath::RandRange(0.0f, 360.0f)
+                );
+                
+                // Taille aléatoire
+                float DebrisScale = FMath::RandRange(0.3f, 0.8f);
+                
+                // Paramètres de spawn
+                FActorSpawnParameters SpawnParams;
+                SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+                
+                // Spawner le débris
+                AActor* Debris = GetWorld()->SpawnActor<AActor>(
+                    DebrisClass,
+                    SpawnLocation,
+                    SpawnRotation,
+                    SpawnParams
+                );
+                
+                // Ajuster la taille
+                if (Debris)
+                {
+                    Debris->SetActorScale3D(FVector(DebrisScale));
+                    
+                    // Si le débris a un composant de mesh, lui donner une impulsion
+                    UStaticMeshComponent* MeshComp = Debris->FindComponentByClass<UStaticMeshComponent>();
+                    if (MeshComp && MeshComp->IsSimulatingPhysics())
+                    {
+                        // Direction d'impulsion aléatoire, principalement vers l'extérieur
+                        FVector ImpulseDir = (SpawnLocation - CellCenter).GetSafeNormal();
+                        
+                        // Ajouter une composante verticale pour éviter que les débris ne tombent directement
+                        ImpulseDir += FVector(
+                            FMath::RandRange(-0.1f, 0.1f),
+                            FMath::RandRange(-0.1f, 0.1f),
+                            FMath::RandRange(0.2f, 0.5f)
+                        );
+                        ImpulseDir = ImpulseDir.GetSafeNormal();
+                        
+                        // Force aléatoire
+                        float ImpulseStrength = FMath::RandRange(300.0f, 700.0f);
+                        
+                        // Appliquer l'impulsion
+                        MeshComp->AddImpulse(ImpulseDir * ImpulseStrength);
+                        
+                        // Ajouter une rotation aléatoire
+                        MeshComp->AddAngularImpulseInDegrees(
+                            FVector(
+                                FMath::RandRange(-300.0f, 300.0f),
+                                FMath::RandRange(-300.0f, 300.0f),
+                                FMath::RandRange(-300.0f, 300.0f)
+                            )
+                        );
+                        
+                        // Définir une durée de vie limitée pour les débris
+                        FTimerHandle DestroyTimerHandle;
+                        float DebrisLifetime = FMath::RandRange(5.0f, 10.0f);
+                        GetWorld()->GetTimerManager().SetTimer(
+                            DestroyTimerHandle,
+                            FTimerDelegate::CreateLambda([Debris]() {
+                                if (Debris && Debris->IsValidLowLevel())
+                                {
+                                    Debris->Destroy();
+                                }
+                            }),
+                            DebrisLifetime,
+                            false
+                        );
+                    }
+                    
+                    DebrisSpawned++;
+                }
+            }
+        }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Spawned %d debris for %d destroyed cells"), DebrisSpawned, DestroyedCells.Num());
+}
+
 
 void ADestructibleTerrain::Multicast_ForceVisualUpdate_Implementation()
 {
@@ -1244,4 +2158,519 @@ void ADestructibleTerrain::SwitchResolution(bool bUseLowResolution)
     UE_LOG(LogTemp, Log, TEXT("Switched terrain resolution to %s (%d x %d)"), 
         bUseLowResolution ? TEXT("LOD") : TEXT("normal"),
         HorizontalResolution, VerticalResolution);
+}
+void ADestructibleTerrain::CreateCleanCellCutFaces(
+    const TArray<FTerrainCell*>& AffectedCells,
+    TArray<FVector>& Vertices,
+    TArray<int32>& Triangles,
+    TArray<FVector2D>& UVs,
+    TArray<FColor>& VertexColors)
+{
+    // Couleur pour les faces de coupe
+    FColor CutFaceColor = FColor(100, 80, 60, 255); // Marron pour les coupes
+    
+    // Pour éviter de créer des faces dupliquées, nous allons garder une trace des faces déjà créées
+    TSet<TPair<FIntPoint, FIntPoint>> CreatedFaces;
+    
+    // Pour chaque cellule affectée, créer des faces de coupe aux bords de la cellule
+    for (FTerrainCell* Cell : AffectedCells)
+    {
+        if (!Cell)
+            continue;
+            
+        // Récupérer les coordonnées de la cellule
+        float MinX = Cell->Min.X;
+        float MinY = Cell->Min.Y;
+        float MinZ = Cell->Min.Z;
+        float MaxX = Cell->Max.X;
+        float MaxY = Cell->Max.Y;
+        float MaxZ = Cell->Max.Z;
+        
+        // Pour chaque face de la cellule, vérifier si c'est une face extérieure
+        // Face X- (gauche)
+        if (Cell->GridX == 0 || !IsCellDestroyed(Cell->GridX - 1, Cell->GridY, Cell->GridZ))
+        {
+            // Clé unique pour identifier cette face (combinaison des coordonnées de grille)
+            TPair<FIntPoint, FIntPoint> FaceKey(
+                FIntPoint(Cell->GridX * 10 - 1, Cell->GridY * 10),
+                FIntPoint(Cell->GridZ * 10, 0) // Second élément pour rendre la clé unique
+            );
+            
+            if (!CreatedFaces.Contains(FaceKey))
+            {
+                CreatedFaces.Add(FaceKey);
+                CreateCutFace(
+                    FVector(MinX, MinY, MinZ), // Coin bas avant
+                    FVector(MinX, MaxY, MinZ), // Coin bas arrière
+                    FVector(MinX, MinY, MaxZ), // Coin haut avant
+                    FVector(MinX, MaxY, MaxZ), // Coin haut arrière
+                    Vertices, Triangles, UVs, VertexColors, CutFaceColor
+                );
+            }
+        }
+        
+        // Face X+ (droite)
+        if (Cell->GridX == CellCountX - 1 || !IsCellDestroyed(Cell->GridX + 1, Cell->GridY, Cell->GridZ))
+        {
+            // Clé unique pour cette face
+            TPair<FIntPoint, FIntPoint> FaceKey(
+                FIntPoint(Cell->GridX * 10 + 1, Cell->GridY * 10),
+                FIntPoint(Cell->GridZ * 10, 1) // Second élément pour rendre la clé unique
+            );
+            
+            if (!CreatedFaces.Contains(FaceKey))
+            {
+                CreatedFaces.Add(FaceKey);
+                CreateCutFace(
+                    FVector(MaxX, MinY, MinZ), // Coin bas avant
+                    FVector(MaxX, MaxY, MinZ), // Coin bas arrière
+                    FVector(MaxX, MinY, MaxZ), // Coin haut avant
+                    FVector(MaxX, MaxY, MaxZ), // Coin haut arrière
+                    Vertices, Triangles, UVs, VertexColors, CutFaceColor
+                );
+            }
+        }
+        
+        // Face Y- (avant)
+        if (Cell->GridY == 0 || !IsCellDestroyed(Cell->GridX, Cell->GridY - 1, Cell->GridZ))
+        {
+            // Clé unique pour cette face
+            TPair<FIntPoint, FIntPoint> FaceKey(
+                FIntPoint(Cell->GridX * 10, Cell->GridY * 10 - 1),
+                FIntPoint(Cell->GridZ * 10, 2) // Second élément pour rendre la clé unique
+            );
+            
+            if (!CreatedFaces.Contains(FaceKey))
+            {
+                CreatedFaces.Add(FaceKey);
+                CreateCutFace(
+                    FVector(MinX, MinY, MinZ), // Coin bas gauche
+                    FVector(MaxX, MinY, MinZ), // Coin bas droite
+                    FVector(MinX, MinY, MaxZ), // Coin haut gauche
+                    FVector(MaxX, MinY, MaxZ), // Coin haut droite
+                    Vertices, Triangles, UVs, VertexColors, CutFaceColor
+                );
+            }
+        }
+        
+        // Face Y+ (arrière)
+        if (Cell->GridY == CellCountY - 1 || !IsCellDestroyed(Cell->GridX, Cell->GridY + 1, Cell->GridZ))
+        {
+            // Clé unique pour cette face
+            TPair<FIntPoint, FIntPoint> FaceKey(
+                FIntPoint(Cell->GridX * 10, Cell->GridY * 10 + 1),
+                FIntPoint(Cell->GridZ * 10, 3) // Second élément pour rendre la clé unique
+            );
+            
+            if (!CreatedFaces.Contains(FaceKey))
+            {
+                CreatedFaces.Add(FaceKey);
+                CreateCutFace(
+                    FVector(MinX, MaxY, MinZ), // Coin bas gauche
+                    FVector(MaxX, MaxY, MinZ), // Coin bas droite
+                    FVector(MinX, MaxY, MaxZ), // Coin haut gauche
+                    FVector(MaxX, MaxY, MaxZ), // Coin haut droite
+                    Vertices, Triangles, UVs, VertexColors, CutFaceColor
+                );
+            }
+        }
+        
+        // Face Z- (bas)
+        if (Cell->GridZ == 0 || !IsCellDestroyed(Cell->GridX, Cell->GridY, Cell->GridZ - 1))
+        {
+            // Clé unique pour cette face
+            TPair<FIntPoint, FIntPoint> FaceKey(
+                FIntPoint(Cell->GridX * 10, Cell->GridY * 10),
+                FIntPoint(Cell->GridZ * 10 - 1, 4) // Second élément pour rendre la clé unique
+            );
+            
+            if (!CreatedFaces.Contains(FaceKey))
+            {
+                CreatedFaces.Add(FaceKey);
+                CreateCutFace(
+                    FVector(MinX, MinY, MinZ), // Coin avant gauche
+                    FVector(MaxX, MinY, MinZ), // Coin avant droite
+                    FVector(MinX, MaxY, MinZ), // Coin arrière gauche
+                    FVector(MaxX, MaxY, MinZ), // Coin arrière droite
+                    Vertices, Triangles, UVs, VertexColors, CutFaceColor
+                );
+            }
+        }
+        
+        // Face Z+ (haut)
+        if (Cell->GridZ == CellCountZ - 1 || !IsCellDestroyed(Cell->GridX, Cell->GridY, Cell->GridZ + 1))
+        {
+            // Clé unique pour cette face
+            TPair<FIntPoint, FIntPoint> FaceKey(
+                FIntPoint(Cell->GridX * 10, Cell->GridY * 10),
+                FIntPoint(Cell->GridZ * 10 + 1, 5) // Second élément pour rendre la clé unique
+            );
+            
+            if (!CreatedFaces.Contains(FaceKey))
+            {
+                CreatedFaces.Add(FaceKey);
+                CreateCutFace(
+                    FVector(MinX, MinY, MaxZ), // Coin avant gauche
+                    FVector(MaxX, MinY, MaxZ), // Coin avant droite
+                    FVector(MinX, MaxY, MaxZ), // Coin arrière gauche
+                    FVector(MaxX, MaxY, MaxZ), // Coin arrière droite
+                    Vertices, Triangles, UVs, VertexColors, CutFaceColor
+                );
+            }
+        }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Created %d unique cut faces"), CreatedFaces.Num());
+}
+
+// Fonction pour vérifier si une cellule est détruite
+bool ADestructibleTerrain::IsCellDestroyed(int32 GridX, int32 GridY, int32 GridZ)
+{
+    // Vérifier que les indices sont valides
+    if (GridX < 0 || GridX >= CellCountX ||
+        GridY < 0 || GridY >= CellCountY ||
+        GridZ < 0 || GridZ >= CellCountZ)
+    {
+        // Hors limites, considérée comme non détruite
+        return false;
+    }
+    
+    // Trouver l'index de la cellule dans le tableau
+    int32 CellIndex = (GridZ * CellCountY + GridY) * CellCountX + GridX;
+    
+    // Vérifier si cette cellule existe et est détruite
+    if (TerrainCells.IsValidIndex(CellIndex))
+    {
+        return TerrainCells[CellIndex].bIsDestroyed;
+    }
+    
+    return false;
+}
+void ADestructibleTerrain::CleanupOrphanVertices(
+    TArray<FVector>& Vertices,
+    TArray<int32>& Triangles,
+    TArray<FVector2D>& UVs,
+    TArray<FColor>& VertexColors,
+    TArray<FVector>& Normals)
+{
+    // Vérifier que tous les tableaux ont des dimensions cohérentes
+    if (Vertices.Num() == 0)
+    {
+        UE_LOG(LogTemp, Error, TEXT("CleanupOrphanVertices: No vertices to clean up!"));
+        return;
+    }
+    
+    if (Vertices.Num() != UVs.Num() || Vertices.Num() != VertexColors.Num())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("CleanupOrphanVertices: Array size mismatch! V=%d, UV=%d, Color=%d"),
+               Vertices.Num(), UVs.Num(), VertexColors.Num());
+               
+        // Ajuster les tableaux pour qu'ils aient la même taille
+        UVs.SetNum(Vertices.Num());
+        VertexColors.SetNum(Vertices.Num());
+    }
+    
+    // Ajuster les normales si nécessaire
+    if (Normals.Num() != Vertices.Num())
+    {
+        Normals.SetNum(Vertices.Num());
+        
+        // Initialiser les nouvelles normales
+        for (int32 i = Normals.Num() - 1; i >= 0; --i)
+        {
+            if (Normals[i].IsZero())
+            {
+                Normals[i] = FVector(0.0f, -1.0f, 0.0f);
+            }
+        }
+    }
+    
+    // Marquer tous les vertices comme non utilisés
+    TArray<bool> VertexIsUsed;
+    VertexIsUsed.Init(false, Vertices.Num());
+    
+    // Parcourir tous les triangles et marquer les vertices utilisés
+    TArray<int32> InvalidIndices;
+    bool bHasInvalidIndices = false;
+    
+    for (int32 i = 0; i < Triangles.Num(); ++i)
+    {
+        int32 VertexIndex = Triangles[i];
+        if (VertexIndex >= 0 && VertexIndex < VertexIsUsed.Num())
+        {
+            VertexIsUsed[VertexIndex] = true;
+        }
+        else
+        {
+            bHasInvalidIndices = true;
+            InvalidIndices.Add(i);
+            UE_LOG(LogTemp, Warning, TEXT("Invalid vertex index %d (max: %d) in triangle %d"),
+                VertexIndex, VertexIsUsed.Num() > 0 ? VertexIsUsed.Num() - 1 : -1, i / 3);
+        }
+    }
+    
+    // Si des indices invalides ont été trouvés, les corriger
+    if (bHasInvalidIndices)
+    {
+        // Corriger les indices en partant de la fin pour ne pas perturber les indices précédents
+        for (int32 i = InvalidIndices.Num() - 1; i >= 0; --i)
+        {
+            int32 TriangleIdx = InvalidIndices[i] / 3;
+            
+            // Si c'est un triangle entier à supprimer
+            if (TriangleIdx * 3 + 2 < Triangles.Num() && 
+                (InvalidIndices.Contains(TriangleIdx * 3) ||
+                 InvalidIndices.Contains(TriangleIdx * 3 + 1) ||
+                 InvalidIndices.Contains(TriangleIdx * 3 + 2)))
+            {
+                // Supprimer le triangle entier en commençant par la fin
+                if (TriangleIdx * 3 + 2 < Triangles.Num())
+                    Triangles.RemoveAt(TriangleIdx * 3 + 2);
+                if (TriangleIdx * 3 + 1 < Triangles.Num())
+                    Triangles.RemoveAt(TriangleIdx * 3 + 1);
+                if (TriangleIdx * 3 < Triangles.Num())
+                    Triangles.RemoveAt(TriangleIdx * 3);
+            }
+            else
+            {
+                // Remplacer l'index invalide par 0 (valeur sûre)
+                if (InvalidIndices[i] < Triangles.Num())
+                {
+                    Triangles[InvalidIndices[i]] = 0;
+                }
+            }
+        }
+    }
+    
+    // Compter combien de vertices sont encore utilisés
+    int32 VerticesUsed = 0;
+    for (bool bUsed : VertexIsUsed)
+    {
+        if (bUsed) VerticesUsed++;
+    }
+    
+    // Si la majorité des vertices sont inutilisés, on procède au nettoyage
+    const float OrphanThreshold = 0.25f; // Si plus de 75% des vertices sont orphelins, reconstruire
+    
+    if (VerticesUsed < Vertices.Num() * OrphanThreshold)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Severe vertex orphaning detected: %d/%d used. Rebuilding mesh..."),
+            VerticesUsed, Vertices.Num());
+        
+        // Créer une nouvelle map et de nouveaux tableaux
+        TMap<int32, int32> OldToNewIndexMap;
+        TArray<FVector> NewVertices;
+        TArray<FVector2D> NewUVs;
+        TArray<FColor> NewVertexColors;
+        TArray<FVector> NewNormals;
+        TArray<int32> NewTriangles;
+        
+        // Pour chaque indice dans le tableau de triangles
+        for (int32 i = 0; i < Triangles.Num(); i += 3)
+        {
+            // Vérifier que nous avons un triangle complet
+            if (i + 2 >= Triangles.Num())
+                continue;
+                
+            int32 Index0 = Triangles[i];
+            int32 Index1 = Triangles[i + 1];
+            int32 Index2 = Triangles[i + 2];
+            
+            // Vérifier que tous les indices sont valides
+            if (!Vertices.IsValidIndex(Index0) || !Vertices.IsValidIndex(Index1) || !Vertices.IsValidIndex(Index2))
+                continue;
+                
+            // Ajouter un nouveau triangle avec des indices mis à jour
+            int32 NewIndex0, NewIndex1, NewIndex2;
+            
+            // Pour chaque sommet du triangle
+            if (!OldToNewIndexMap.Contains(Index0))
+            {
+                NewIndex0 = NewVertices.Num();
+                OldToNewIndexMap.Add(Index0, NewIndex0);
+                
+                NewVertices.Add(Vertices[Index0]);
+                
+                // S'assurer que les tableaux d'attributs ont assez d'éléments
+                if (Index0 < UVs.Num())
+                    NewUVs.Add(UVs[Index0]);
+                else
+                    NewUVs.Add(FVector2D::ZeroVector);
+                    
+                if (Index0 < VertexColors.Num())
+                    NewVertexColors.Add(VertexColors[Index0]);
+                else
+                    NewVertexColors.Add(FColor::White);
+                    
+                if (Index0 < Normals.Num())
+                    NewNormals.Add(Normals[Index0]);
+                else
+                    NewNormals.Add(FVector(0.0f, -1.0f, 0.0f));
+            }
+            else
+            {
+                NewIndex0 = OldToNewIndexMap[Index0];
+            }
+            
+            // Répéter pour les autres sommets
+            if (!OldToNewIndexMap.Contains(Index1))
+            {
+                NewIndex1 = NewVertices.Num();
+                OldToNewIndexMap.Add(Index1, NewIndex1);
+                
+                NewVertices.Add(Vertices[Index1]);
+                
+                if (Index1 < UVs.Num())
+                    NewUVs.Add(UVs[Index1]);
+                else
+                    NewUVs.Add(FVector2D::ZeroVector);
+                    
+                if (Index1 < VertexColors.Num())
+                    NewVertexColors.Add(VertexColors[Index1]);
+                else
+                    NewVertexColors.Add(FColor::White);
+                    
+                if (Index1 < Normals.Num())
+                    NewNormals.Add(Normals[Index1]);
+                else
+                    NewNormals.Add(FVector(0.0f, -1.0f, 0.0f));
+            }
+            else
+            {
+                NewIndex1 = OldToNewIndexMap[Index1];
+            }
+            
+            if (!OldToNewIndexMap.Contains(Index2))
+            {
+                NewIndex2 = NewVertices.Num();
+                OldToNewIndexMap.Add(Index2, NewIndex2);
+                
+                NewVertices.Add(Vertices[Index2]);
+                
+                if (Index2 < UVs.Num())
+                    NewUVs.Add(UVs[Index2]);
+                else
+                    NewUVs.Add(FVector2D::ZeroVector);
+                    
+                if (Index2 < VertexColors.Num())
+                    NewVertexColors.Add(VertexColors[Index2]);
+                else
+                    NewVertexColors.Add(FColor::White);
+                    
+                if (Index2 < Normals.Num())
+                    NewNormals.Add(Normals[Index2]);
+                else
+                    NewNormals.Add(FVector(0.0f, -1.0f, 0.0f));
+            }
+            else
+            {
+                NewIndex2 = OldToNewIndexMap[Index2];
+            }
+            
+            // Ajouter le triangle avec les nouveaux indices
+            NewTriangles.Add(NewIndex0);
+            NewTriangles.Add(NewIndex1);
+            NewTriangles.Add(NewIndex2);
+        }
+        
+        // Mettre à jour les tableaux originaux
+        Vertices = NewVertices;
+        Triangles = NewTriangles;
+        UVs = NewUVs;
+        VertexColors = NewVertexColors;
+        Normals = NewNormals;
+        
+        UE_LOG(LogTemp, Log, TEXT("Mesh rebuilt: V=%d, T=%d (from V=%d)"),
+            Vertices.Num(), Triangles.Num() / 3, OldToNewIndexMap.Num());
+    }
+    else
+    {
+        // Approche classique moins radicale - créer une mapping des anciens indices vers les nouveaux
+        TArray<int32> OldToNewIndexMap;
+        OldToNewIndexMap.Init(-1, Vertices.Num());
+        
+        // Compter combien de vertices sont conservés
+        int32 NewVertexCount = 0;
+        for (int32 i = 0; i < VertexIsUsed.Num(); ++i)
+        {
+            if (VertexIsUsed[i])
+            {
+                OldToNewIndexMap[i] = NewVertexCount++;
+            }
+        }
+        
+        // Créer de nouveaux tableaux pour contenir seulement les vertices utilisés
+        TArray<FVector> NewVertices;
+        TArray<FVector2D> NewUVs;
+        TArray<FColor> NewVertexColors;
+        TArray<FVector> NewNormals;
+        
+        // Pré-allouer les tableaux pour de meilleures performances
+        NewVertices.Reserve(NewVertexCount);
+        NewUVs.Reserve(NewVertexCount);
+        NewVertexColors.Reserve(NewVertexCount);
+        NewNormals.Reserve(NewVertexCount);
+        
+        // Copier uniquement les données des vertices utilisés
+        for (int32 i = 0; i < Vertices.Num(); ++i)
+        {
+            if (VertexIsUsed[i])
+            {
+                NewVertices.Add(Vertices[i]);
+                
+                // S'assurer que les autres tableaux ont des indices valides
+                if (i < UVs.Num())
+                    NewUVs.Add(UVs[i]);
+                else
+                    NewUVs.Add(FVector2D::ZeroVector);
+                    
+                if (i < VertexColors.Num())
+                    NewVertexColors.Add(VertexColors[i]);
+                else
+                    NewVertexColors.Add(FColor::White);
+                    
+                if (i < Normals.Num())
+                    NewNormals.Add(Normals[i]);
+                else
+                    NewNormals.Add(FVector::UpVector);
+            }
+        }
+        
+        // Mettre à jour les indices des triangles
+        for (int32 i = 0; i < Triangles.Num(); ++i)
+        {
+            int32 OldIndex = Triangles[i];
+            if (OldIndex >= 0 && OldIndex < OldToNewIndexMap.Num())
+            {
+                int32 NewIndex = OldToNewIndexMap[OldIndex];
+                if (NewIndex >= 0)  // Vérifier que le vertex est utilisé
+                {
+                    Triangles[i] = NewIndex;
+                }
+                else
+                {
+                    // Si nous arrivons ici, c'est qu'il y a une incohérence dans les données
+                    UE_LOG(LogTemp, Error, TEXT("Triangle references unused vertex %d"), OldIndex);
+                    // Utiliser l'indice 0 comme fallback
+                    Triangles[i] = 0;
+                }
+            }
+            else
+            {
+                // Si nous arrivons ici, c'est qu'il y a une incohérence dans les données
+                UE_LOG(LogTemp, Error, TEXT("Invalid triangle index %d (out of bounds)"), OldIndex);
+                // Utiliser l'indice 0 comme fallback
+                Triangles[i] = 0;
+            }
+        }
+        
+        // Remplacer les tableaux originaux par les nouveaux
+        Vertices = NewVertices;
+        UVs = NewUVs;
+        VertexColors = NewVertexColors;
+        Normals = NewNormals;
+        
+        UE_LOG(LogTemp, Log, TEXT("CleanupOrphanVertices: Removed %d unused vertices (from %d to %d)"),
+            VertexIsUsed.Num() - NewVertexCount, VertexIsUsed.Num(), NewVertexCount);
+    }
 }

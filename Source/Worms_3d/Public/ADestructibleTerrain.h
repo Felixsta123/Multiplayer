@@ -7,6 +7,9 @@
 #include "ADestructibleTerrain.generated.h"
 
 
+
+
+
 USTRUCT(BlueprintType)
 struct FTerrainModification
 {
@@ -102,6 +105,111 @@ struct FTerrainMeshData
     bool bIsValid = false;
 };
 
+
+USTRUCT(BlueprintType)
+struct FTerrainCell
+{
+    GENERATED_BODY()
+    
+    UPROPERTY(BlueprintReadWrite)
+    FVector Min;
+    
+    UPROPERTY(BlueprintReadWrite)
+    FVector Max;
+    
+    UPROPERTY(BlueprintReadWrite)
+    bool bIsDestroyed;
+    
+    // Coordonnées de la cellule dans la grille
+    UPROPERTY(BlueprintReadWrite)
+    int32 GridX;
+    
+    UPROPERTY(BlueprintReadWrite)
+    int32 GridY;
+    
+    UPROPERTY(BlueprintReadWrite)
+    int32 GridZ;
+    
+    // Constructeur par défaut
+    FTerrainCell()
+    {
+        Min = FVector::ZeroVector;
+        Max = FVector::ZeroVector;
+        bIsDestroyed = false;
+        GridX = 0;
+        GridY = 0;
+        GridZ = 0;
+    }
+    
+    // Constructeur pour initialiser une cellule
+    FTerrainCell(const FVector& InMin, const FVector& InMax, int32 InGridX, int32 InGridY, int32 InGridZ)
+    {
+        Min = InMin;
+        Max = InMax;
+        bIsDestroyed = false;
+        GridX = InGridX;
+        GridY = InGridY;
+        GridZ = InGridZ;
+    }
+    
+    // Vérifier si un point est dans cette cellule
+    bool ContainsPoint(const FVector& Point) const
+    {
+        return Point.X >= Min.X && Point.X <= Max.X &&
+               Point.Y >= Min.Y && Point.Y <= Max.Y &&
+               Point.Z >= Min.Z && Point.Z <= Max.Z;
+    }
+    
+    // Vérifier si cette cellule est touchée par une modification
+    bool IsAffectedByModification(const FTerrainModification& Modification) const
+    {
+        if (bIsDestroyed)
+        {
+            // La cellule est déjà détruite, pas besoin de la modifier davantage
+            return false;
+        }
+    
+        // Pour les modifications circulaires
+        if (Modification.bIsCircular)
+        {
+            // 1. Convertir le centre du cercle en 3D (en utilisant Y=Min.Y pour le plan de référence)
+            FVector CircleCenter3D(Modification.CircleCenter.X, Min.Y, Modification.CircleCenter.Y);
+            float CircleRadius = Modification.CircleRadius;
+        
+            // 2. Test de collision entre boîte et sphère - méthode améliorée
+        
+            // a. Calculer le point le plus proche de la boîte au centre du cercle
+            FVector ClosestPoint(
+                FMath::Clamp(CircleCenter3D.X, Min.X, Max.X),
+                FMath::Clamp(CircleCenter3D.Y, Min.Y, Max.Y),
+                FMath::Clamp(CircleCenter3D.Z, Min.Z, Max.Z)
+            );
+        
+            // b. Calculer la distance carrée entre ce point et le centre du cercle
+            float DistanceSquared = FVector::DistSquared(ClosestPoint, CircleCenter3D);
+        
+            // c. Si cette distance est inférieure au carré du rayon, alors il y a collision
+            return DistanceSquared <= (CircleRadius * CircleRadius);
+        }
+        else // Pour les modifications rectangulaires
+        {
+            // Convertir la position et la taille en 3D (en considérant la profondeur complète)
+            FVector ModMin(Modification.Position.X, Min.Y, Modification.Position.Y);
+            FVector ModMax(
+                Modification.Position.X + Modification.Size.X,
+                Max.Y, // Utiliser toute la profondeur Y
+                Modification.Position.Y + Modification.Size.Y
+            );
+        
+            // Test de collision entre deux boîtes alignées sur les axes
+            return !(Max.X < ModMin.X || Min.X > ModMax.X ||
+                    Max.Y < ModMin.Y || Min.Y > ModMax.Y ||
+                    Max.Z < ModMin.Z || Min.Z > ModMax.Z);
+        }
+    }
+};
+
+
 UCLASS()
 class WORMS_3D_API ADestructibleTerrain : public AActor
 {
@@ -121,12 +229,14 @@ public:
     // Fonction serveur pour valider et appliquer la destruction
     UFUNCTION(Server, Reliable, WithValidation)
     void Server_DestroyTerrainAt(FVector2D Position, FVector2D Size);
-    
+
+    void CalculateInternalNormals();
+    FLinearColor GetInternalLayerColor(int32 LayerIndex);
     // Génère le mesh procédural du terrain
     UFUNCTION(BlueprintCallable, Category = "Terrain")
     void GenerateTerrain();
-    
-    // Applique les modifications de terrain (appelé après réplication)
+
+        // Applique les modifications de terrain (appelé après réplication)
     UFUNCTION(BlueprintCallable, Category = "Terrain")
     void ApplyTerrainModifications();
     
@@ -145,6 +255,20 @@ public:
 
     UPROPERTY(EditDefaultsOnly, Category = "Terrain")
     UMaterialInterface* TerrainMaterial;
+
+    //Field for Explosion
+   //DestructionEffect
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    UParticleSystem* DestructionEffect;
+    //DestructionSound
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    USoundBase* DestructionSound;
+
+    //class for the Debris and a parameter for the number of debris
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    TSubclassOf<AActor> DebrisClass;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    int32 NumDebrisPerCell = 10;
     
     // Fonction helper pour créer le mesh à partir des données
     void CreateMeshFromData(const FTerrainMeshData& MeshData);
@@ -159,7 +283,26 @@ public:
     // Largeur du terrain
     UPROPERTY(Replicated, EditAnywhere, BlueprintReadWrite, Category = "Terrain")
     float TerrainHeight;
-    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Internal", meta = (EditCondition = "bGenerateInternalStructure"))
+    float CellSizeX = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Internal", meta = (EditCondition = "bGenerateInternalStructure"))
+    float CellSizeY = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Internal", meta = (EditCondition = "bGenerateInternalStructure"))
+    float CellSizeZ = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Internal", meta = (EditCondition = "bGenerateInternalStructure"))
+    float WallThickness = 10.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Internal", meta = (EditCondition = "bGenerateInternalStructure"))
+    bool bAddNoiseToStructure = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Internal", meta = (EditCondition = "bAddNoiseToStructure"))
+    float StructureNoiseAmount = 0.15f;
+
+
+
     // Profondeur du terrain
     UPROPERTY(Replicated, EditAnywhere, BlueprintReadWrite, Category = "Terrain")
     float TerrainDepth;
@@ -210,11 +353,91 @@ public:
     
     // Méthode pour générer la structure interne
     void GenerateInternalStructure();
-    
+    void GenerateInternalWall(const FVector& BottomLeft, const FVector& BottomRight, const FVector& TopLeft,
+                              const FVector& TopRight, float Thickness, const FLinearColor& Color,
+                              FRandomStream& Random);
+
     // Fonction Tick pour les mises à jour périodiques
     virtual void Tick(float DeltaTime) override;
+    void CreateCircularCutFaces(
+    const FTerrainModification& Mod,
+    TArray<FVector>& Vertices,
+    TArray<int32>& Triangles,
+    TArray<FVector2D>& UVs,
+    TArray<FColor>& VertexColors);
+
+    void CreateCleanCutFaces(
+    const TArray<FTerrainModification>& Modifications,
+    TArray<FVector>& Vertices,
+    TArray<int32>& Triangles,
+    TArray<FVector2D>& UVs,
+    TArray<FColor>& VertexColors);
+
+    void CreateRectangularCutFaces(const FTerrainModification& Mod,
+    TArray<FVector>& Vertices,
+    TArray<int32>& Triangles,
+    TArray<FVector2D>& UVs,
+    TArray<FColor>& VertexColors);
+    void CreateCutFace(
+        const FVector& Corner1,
+        const FVector& Corner2,
+        const FVector& Corner3,
+        const FVector& Corner4,
+        TArray<FVector>& Vertices,
+        TArray<int32>& Triangles,
+        TArray<FVector2D>& UVs,
+        TArray<FColor>& VertexColors,
+        const FColor& Color);
+
+
+    UFUNCTION(BlueprintCallable, Category = "Terrain")
+    void RequestDestroyTerrainCircle(FVector2D Center, float Radius);
+
+    void Server_DestroyTerrainCircle(FVector2D Center, float Radius);
+    bool Server_DestroyTerrainCircle_Validate(FVector2D Center, float Radius);
+    // Fonction pour ajuster les paramètres de la structure interne à l'exécution
+    UFUNCTION(BlueprintCallable, Category = "Terrain|Internal")
+    void SetInternalStructureParameters(float NewCellSizeX, float NewCellSizeY, float NewCellSizeZ, float NewWallThickness, bool bRegenerate);
 
 protected:
+    UPROPERTY()
+    TArray<FTerrainCell> TerrainCells;
+
+    UPROPERTY()
+    int32 CellCountX;
+
+    UPROPERTY()
+    int32 CellCountY;
+
+    UPROPERTY()
+    int32 CellCountZ;
+
+    // Vérifier si une cellule est détruite
+    bool IsCellDestroyed(int32 GridX, int32 GridY, int32 GridZ);
+
+    // Obtenir les cellules affectées par une modification
+    TArray<FTerrainCell*> GetAffectedCells(const FTerrainModification& Modification);
+
+    void SpawnDestructionEffects(const TArray<FTerrainCell*>& DestroyedCells);
+
+    // Nettoyer les vertices orphelins
+    void CleanupOrphanVertices(
+        TArray<FVector>& Vertices,
+        TArray<int32>& Triangles,
+        TArray<FVector2D>& UVs,
+        TArray<FColor>& VertexColors,
+        TArray<FVector>& Normals);
+
+    // Créer des faces aux bords des cellules détruites
+    void CreateCleanCellCutFaces(
+        const TArray<FTerrainCell*>& AffectedCells,
+        TArray<FVector>& Vertices,
+        TArray<int32>& Triangles,
+        TArray<FVector2D>& UVs,
+        TArray<FColor>& VertexColors);
+
+    // Générer les parois d'une cellule spécifique
+    void GenerateCellWalls(const FTerrainCell& Cell, FRandomStream& Random);
     virtual void BeginPlay() override;
     virtual void OnConstruction(const FTransform& Transform) override;
     virtual void PostInitializeComponents() override;

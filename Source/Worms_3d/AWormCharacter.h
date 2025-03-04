@@ -142,6 +142,11 @@ public:
     // === FONCTIONS DE DÉBOGAGE ===
     UFUNCTION(BlueprintCallable, Category = "Debug")
     void DiagnoseWeapons();
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Worm")
+    float MovementPoints;
+    
+    UPROPERTY(EditDefaultsOnly, Category = "Worm")
+    float MaxMovementPoints;
     
 protected:
     // === ÉTAT DU PERSONNAGE ===
@@ -154,12 +159,7 @@ protected:
     UPROPERTY(ReplicatedUsing = OnRep_CurrentWeaponIndex, BlueprintReadOnly, Category = "Worm")
     int32 CurrentWeaponIndex;
     
-    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Worm")
-    float MovementPoints;
-    
-    UPROPERTY(EditDefaultsOnly, Category = "Worm")
-    float MaxMovementPoints;
-    
+ 
     UPROPERTY()
     FVector LastPosition;
 
