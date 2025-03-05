@@ -399,7 +399,7 @@ void AWormCharacter::Tick(float DeltaTime)
 void AWormCharacter::UpdateWeaponRotation()
 {
     // Mise à jour de l'arme seulement si on est contrôlé localement et qu'on a une arme
-    if (IsLocallyControlled() && WeaponPivotComponent && CurrentWeapon)
+    if (IsLocallyControlled() && CurrentWeapon)
     {
         FRotator NewWeaponRotation;
         
@@ -411,8 +411,8 @@ void AWormCharacter::UpdateWeaponRotation()
             FRotator ControlRotation = GetControlRotation();
             NewWeaponRotation = FRotator(ControlRotation.Pitch, ControlRotation.Yaw, 0.0f);
             
-            // Appliquer la nouvelle rotation
-            WeaponPivotComponent->SetWorldRotation(NewWeaponRotation);
+            // Appliquer directement la rotation à l'arme
+            CurrentWeapon->SetActorRelativeRotation(NewWeaponRotation);
         
             // Envoyer au serveur si c'est un client et que c'est notre tour
             if (GetLocalRole() < ROLE_Authority && bIsMyTurn)
@@ -431,12 +431,9 @@ void AWormCharacter::UpdateWeaponRotation()
         {
             // En mode TPS, l'arme reste fixe par rapport au personnage
             // On n'applique aucune mise à jour de rotation ici
-            // L'arme conserve sa rotation DefaultWeaponRotation définie à l'initialisation 
-            // ou lors du passage de FPS à TPS
         }
     }
 }
-
 void AWormCharacter::UpdateMovementPoints()
 {
     FVector CurrentPosition = GetActorLocation();
@@ -483,7 +480,6 @@ void AWormCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
     DOREPLIFETIME(AWormCharacter, CurrentWeapon);
     DOREPLIFETIME(AWormCharacter, MovementPoints);
     DOREPLIFETIME(AWormCharacter, AvailableWeapons);
-    DOREPLIFETIME(AWormCharacter, WeaponPivotComponent);
 }
 
 // Fonctions de mouvement legacy
@@ -636,34 +632,6 @@ void AWormCharacter::Server_SwitchWeapon_Implementation(int32 WeaponIndex)
 }
 
 
-void AWormCharacter::Multicast_SynchronizeWeapon_Implementation()
-{
-    // Ne pas exécuter sur le serveur, il a déjà fait cette opération
-    if (HasAuthority())
-    {
-        return;
-    }
-    
-    // S'assurer que le pivot existe avant d'attacher l'arme
-    if (!WeaponPivotComponent)
-    {
-        CreateWeaponPivot();
-    }
-    
-    // Si l'arme existe, la réattacher au pivot
-    if (CurrentWeapon && WeaponPivotComponent)
-    {
-        // Détacher l'arme si elle est déjà attachée ailleurs
-        CurrentWeapon->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
-        
-        // Attacher l'arme au pivot
-        CurrentWeapon->AttachToComponent(WeaponPivotComponent, 
-            FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-            
-        UE_LOG(LogTemp, Warning, TEXT("Multicast_SynchronizeWeapon: Réattaché l'arme %s au pivot pour %s"), 
-            *CurrentWeapon->GetName(), *GetName());
-    }
-}
 
 void AWormCharacter::SpawnCurrentWeapon()
 {
@@ -686,11 +654,18 @@ void AWormCharacter::SpawnCurrentWeapon()
         CurrentWeapon = nullptr;
     }
     
-    // Créer le pivot de l'arme
-    CreateWeaponPivot();
-    
-    // Calculer la transformation de spawn
-    FTransform SpawnTransform = CalculateWeaponSpawnTransform();
+    // Calculer la transformation de spawn - maintenant directement basée sur le socket
+    FTransform SpawnTransform;
+    if (GetMesh()->DoesSocketExist(WeaponSocketName))
+    {
+        SpawnTransform = GetMesh()->GetSocketTransform(WeaponSocketName);
+    }
+    else
+    {
+        // Fallback au cas où le socket n'existe pas
+        SpawnTransform = GetActorTransform();
+        SpawnTransform.AddToTranslation(FVector(50.0f, 0.0f, 0.0f));
+    }
     
     // Paramètres de spawn
     FActorSpawnParameters SpawnParams;
@@ -706,12 +681,17 @@ void AWormCharacter::SpawnCurrentWeapon()
     
     if (CurrentWeapon)
     {
-        // Attacher l'arme au pivot
-        CurrentWeapon->AttachToComponent(WeaponPivotComponent, 
-            FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+        // Attacher l'arme directement au socket (sans pivot intermédiaire)
+        AttachWeaponToSocket(CurrentWeapon);
         
+        // Définir le propriétaire
         CurrentWeapon->SetOwner(this);
-        Multicast_SynchronizeWeapon();
+        
+        // Mettre à jour la visibilité
+        CurrentWeapon->EnsureWeaponVisibility();
+        
+        // Forcer une mise à jour sur tous les clients
+        Multicast_WeaponChanged();
     }
 }
 
@@ -1033,31 +1013,64 @@ bool AWormCharacter::Server_UpdateWeaponRotation_Validate(FRotator NewRotation)
 {
     return true;
 }
+void AWormCharacter::AttachWeaponToSocket(AWormWeapon* Weapon)
+{
+    if (!Weapon)
+    {
+        return;
+    }
 
+    // Utilisation directe du socket sur le SkeletalMeshComponent du personnage
+    USkeletalMeshComponent* CharMesh = GetMesh();
+    if (CharMesh && CharMesh->DoesSocketExist(WeaponSocketName))
+    {
+        // Détacher l'arme de son parent actuel si nécessaire
+        Weapon->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+        
+        // Attacher directement l'arme au socket du personnage
+        Weapon->AttachToComponent(CharMesh, 
+            FAttachmentTransformRules::SnapToTargetIncludingScale, 
+            WeaponSocketName);
+            
+        UE_LOG(LogTemp, Warning, TEXT("Arme %s attachée directement au socket %s de %s"),
+            *Weapon->GetName(), *WeaponSocketName.ToString(), *GetName());
+            
+        // S'assurer que l'arme est visible
+        Weapon->SetActorHiddenInGame(false);
+        if (Weapon->WeaponMesh)
+        {
+            Weapon->WeaponMesh->SetVisibility(true);
+            Weapon->WeaponMesh->SetHiddenInGame(false);
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("Impossible d'attacher l'arme: socket %s non trouvé sur %s"),
+            *WeaponSocketName.ToString(), *GetName());
+    }
+}
 void AWormCharacter::Server_UpdateWeaponRotation_Implementation(FRotator NewRotation)
 {
-    if (WeaponPivotComponent)
+    if (CurrentWeapon)
     {
-        // Appliquer la rotation reçue - on respecte également le mode de caméra
-        // Utiliser directement la rotation envoyée par le client (qui a déjà géré le mode)
-        WeaponPivotComponent->SetWorldRotation(NewRotation);
+        // Appliquer la rotation directement à l'arme
+        CurrentWeapon->SetActorRelativeRotation(NewRotation);
         
         // Propager aux clients via Multicast
         Multicast_UpdateWeaponRotation(NewRotation);
     }
 }
 
+// 8. Mise à jour de Multicast_UpdateWeaponRotation dans AWormCharacter.cpp
 void AWormCharacter::Multicast_UpdateWeaponRotation_Implementation(FRotator NewRotation)
 {
     // Ne pas exécuter sur le client qui a envoyé la rotation (pour éviter les doublons)
-    if (!IsLocallyControlled() && WeaponPivotComponent)
+    if (!IsLocallyControlled() && CurrentWeapon)
     {
-        // Appliquer la rotation telle qu'elle est reçue, sans modifier le pitch
-        // ce qui permet de conserver l'orientation en mode FPS
-        WeaponPivotComponent->SetWorldRotation(NewRotation);
+        // Appliquer la rotation directement à l'arme
+        CurrentWeapon->SetActorRelativeRotation(NewRotation);
     }
 }
-
 void AWormCharacter::ToggleCameraMode(bool bUseFPSCamera)
 {
     if (FollowCamera && FPSCamera)
@@ -1076,11 +1089,7 @@ void AWormCharacter::ToggleCameraMode(bool bUseFPSCamera)
             SavedCameraDistance = CameraBoom->TargetArmLength;
             
             // Si on passe du mode TPS au mode FPS, on applique la rotation actuelle de la caméra
-            if (WeaponPivotComponent)
-            {
-                FRotator ControlRotation = GetControlRotation();
-                WeaponPivotComponent->SetWorldRotation(FRotator(ControlRotation.Pitch, ControlRotation.Yaw, 0.0f));
-            }
+            
         }
         else
         {
@@ -1088,57 +1097,11 @@ void AWormCharacter::ToggleCameraMode(bool bUseFPSCamera)
             CameraBoom->TargetArmLength = SavedCameraDistance;
             
             // Si on retourne en mode TPS, remettre l'arme dans la rotation par défaut
-            if (WeaponPivotComponent)
-            {
-                WeaponPivotComponent->SetWorldRotation(DefaultWeaponRotation);
-            }
+            
         }
     }
 }
   
-void AWormCharacter::CreateWeaponPivot()
-{
-    // Nettoyage du pivot existant
-    if (WeaponPivotComponent)
-    {
-        WeaponPivotComponent->DestroyComponent();
-    }
-    
-    // Créer le nouveau pivot
-    WeaponPivotComponent = NewObject<USceneComponent>(this, TEXT("WeaponPivot"));
-    WeaponPivotComponent->RegisterComponent();
-    
-    // Attacher au bon socket si disponible, sinon au root
-    if (GetMesh()->DoesSocketExist(WeaponSocketName))
-    {
-        WeaponPivotComponent->AttachToComponent(GetMesh(), 
-            FAttachmentTransformRules::SnapToTargetNotIncludingScale, 
-            WeaponSocketName);
-            
-        // En mode TPS, appliquer la rotation fixe par défaut,
-        // sinon utiliser la rotation de contrôle en mode FPS
-        if (!bIsInFirstPersonMode)
-        {
-            WeaponPivotComponent->SetWorldRotation(DefaultWeaponRotation);
-        }
-        else
-        {
-            FRotator ControlRotation = GetControlRotation();
-            WeaponPivotComponent->SetWorldRotation(FRotator(ControlRotation.Pitch, ControlRotation.Yaw, 0.0f));
-        }
-    }
-    else
-    {
-        WeaponPivotComponent->AttachToComponent(GetRootComponent(), 
-            FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-        
-        // Appliquer également la rotation appropriée
-        if (!bIsInFirstPersonMode)
-        {
-            WeaponPivotComponent->SetWorldRotation(DefaultWeaponRotation);
-        }
-    }
-}
 
 FTransform AWormCharacter::CalculateWeaponSpawnTransform()
 {
@@ -1217,24 +1180,6 @@ void AWormCharacter::OnRep_Health()
 
 void AWormCharacter::OnRep_CurrentWeaponIndex()
 {
-    // Si nous sommes toujours en train de nous initialiser, attendre un peu
-    if (GetWorld()->GetTimeSeconds() < 2.0f)
-    {
-        // Programmer une réexécution après un court délai
-        FTimerHandle RetryTimerHandle;
-        GetWorld()->GetTimerManager().SetTimer(
-            RetryTimerHandle,
-            [this]() {
-                OnRep_CurrentWeaponIndex();
-            },
-            0.5f,
-            false
-        );
-        
-        UE_LOG(LogTemp, Warning, TEXT("OnRep_CurrentWeaponIndex: Reprogrammé pour %s car trop tôt après le démarrage"), *GetName());
-        return;
-    }
-
     // Fonction optimisée d'initialisation d'armes côté client
     if (AvailableWeapons.Num() <= 0 || !AvailableWeapons.IsValidIndex(CurrentWeaponIndex))
     {
@@ -1253,21 +1198,17 @@ void AWormCharacter::OnRep_CurrentWeaponIndex()
         CurrentWeapon = nullptr;
     }
     
-    // Créer le pivot pour l'arme
-    if (!WeaponPivotComponent)
+    // Calculer la transformation de spawn - directement depuis le socket
+    FTransform SpawnTransform;
+    if (GetMesh()->DoesSocketExist(WeaponSocketName))
     {
-        CreateWeaponPivot();
+        SpawnTransform = GetMesh()->GetSocketTransform(WeaponSocketName);
     }
-    
-    // S'assurer que le pivot existe avant de continuer
-    if (!WeaponPivotComponent)
+    else
     {
-        UE_LOG(LogTemp, Error, TEXT("OnRep_CurrentWeaponIndex: Échec de création du pivot pour %s"), *GetName());
-        return;
+        // Fallback
+        SpawnTransform = GetActorTransform();
     }
-    
-    // Utiliser la transformation du pivot pour le spawn
-    FTransform SpawnTransform = WeaponPivotComponent->GetComponentTransform();
     
     // Créer l'arme
     FActorSpawnParameters SpawnParams;
@@ -1284,23 +1225,17 @@ void AWormCharacter::OnRep_CurrentWeaponIndex()
     
     if (CurrentWeapon)
     {
-        // Attacher l'arme au pivot
-        CurrentWeapon->AttachToComponent(WeaponPivotComponent, 
-            FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+        // Attacher directement l'arme au socket
+        AttachWeaponToSocket(CurrentWeapon);
         
+        // Définir le propriétaire
         CurrentWeapon->SetOwner(this);
         
         // S'assurer que l'arme est visible
         CurrentWeapon->EnsureWeaponVisibility();
         
-        // Logs supplémentaires
-        UE_LOG(LogTemp, Warning, TEXT("OnRep_CurrentWeaponIndex: Arme %s créée et attachée au pivot pour %s"), 
+        UE_LOG(LogTemp, Warning, TEXT("OnRep_CurrentWeaponIndex: Arme %s créée et attachée directement pour %s"), 
                *CurrentWeapon->GetName(), *GetName());
-        
-        // IMPORTANT: Désactiver les collisions avec l'arme
-        if (CurrentWeapon->GetRootComponent())
-        {
-        }
     }
     else
     {

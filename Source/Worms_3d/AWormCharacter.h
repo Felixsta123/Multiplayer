@@ -88,6 +88,7 @@ public:
     UFUNCTION(BlueprintPure, Category = "Worm")
     bool IsMyTurn() const { return bIsMyTurn; }
     
+
     // État du personnage
     UFUNCTION(BlueprintPure, Category = "Worm")
     float GetHealth() const { return Health; }
@@ -128,9 +129,8 @@ public:
     
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Worm")
     AWormWeapon* CurrentWeapon;
-    
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", Replicated)
-    USceneComponent* WeaponPivotComponent;
+    UFUNCTION(BlueprintCallable, Category = "Worm")
+    void AttachWeaponToSocket(AWormWeapon* Weapon);
 
     // === RÉPLICATION RÉSEAU ===
     UFUNCTION(Server, Reliable, WithValidation)
@@ -150,9 +150,6 @@ public:
     float MaxMovementPoints;
 
 
-    // Fonction pour synchroniser l'arme avec le pivot
-    UFUNCTION(NetMulticast, Reliable)
-    void Multicast_SynchronizeWeapon();
 protected:
     // === ÉTAT DU PERSONNAGE ===
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Worm")

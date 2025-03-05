@@ -144,28 +144,7 @@ void AWormWeapon::BeginPlay()
                *GetName(), *OwnerChar->GetName());
         
         // Si on est sur un client, retarder légèrement l'attachement
-        if (!HasAuthority())
-        {
-            FTimerHandle AttachTimerHandle;
-            GetWorld()->GetTimerManager().SetTimer(
-                AttachTimerHandle,
-                [this, OwnerChar]() {
-                    // Se détacher pour être sûr
-                    DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
-                    
-                    // S'attacher au pivot s'il existe
-                    if (OwnerChar->WeaponPivotComponent)
-                    {
-                        AttachToComponent(OwnerChar->WeaponPivotComponent, 
-                            FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-                            
-                        UE_LOG(LogTemp, Warning, TEXT("Arme %s rattachée au pivot après délai"), *GetName());
-                    }
-                },
-                0.5f,
-                false
-            );
-        }
+        
     }
 }
 

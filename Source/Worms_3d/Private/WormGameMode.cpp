@@ -194,6 +194,11 @@ void AWormGameMode::StartNextTurn()
         {
             Character->SetIsMyTurn(false);
         }
+        if (Character && Character->CurrentWeapon)
+        {
+            // Forcer une synchronisation de l'arme pour chaque joueur
+             Character->AttachWeaponToSocket(Character->CurrentWeapon);
+        }
     }
 
     // Activer le personnage du controller actif
