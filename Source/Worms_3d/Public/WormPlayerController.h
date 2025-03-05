@@ -25,8 +25,20 @@ protected:
     // L'instance du widget UI
     UPROPERTY(BlueprintReadOnly, Category = "UI")
     UUserWidget* GameUIWidget;
-    
+    // La classe du widget UI du joueur
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "UI")
+    TSubclassOf<class UUserWidget> PlayerUIWidgetClass;
+
+    // L'instance du widget UI du joueur
+    UPROPERTY(BlueprintReadOnly, Category = "UI")
+    class UUserWidget* PlayerUIWidget;
+
+    // Fonction pour créer l'UI du joueur
+    UFUNCTION(BlueprintCallable, Category = "UI")
+    void CreatePlayerUI();
 private:
     FTimerHandle UICheckTimerHandle;
+    FTimerHandle PlayerUITimerHandle;
+
     void CheckAndCreateUI();
 };

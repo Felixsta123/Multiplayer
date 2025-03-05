@@ -22,6 +22,13 @@ void AWormPlayerController::BeginPlay()
         0.5f,
         true // Répéter jusqu'à ce que l'UI soit créée
     );
+    GetWorldTimerManager().SetTimer(
+        PlayerUITimerHandle, 
+        this, 
+        &AWormPlayerController::CreatePlayerUI, 
+        1.0f, 
+        false
+    );
 }
 
 
@@ -79,5 +86,27 @@ void AWormPlayerController::CheckAndCreateUI()
         // Si ce n'est pas un contrôleur local, arrêter le timer
         UE_LOG(LogTemp, Log, TEXT("Not a local controller, stopping UI creation timer"));
         GetWorldTimerManager().ClearTimer(UICheckTimerHandle);
+    }
+}
+
+void AWormPlayerController::CreatePlayerUI()
+{
+    // Vérifier que la classe UI est définie
+    if (!PlayerUIWidgetClass)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("PlayerUIWidgetClass non défini dans WormPlayerController"));
+        return;
+    }
+    
+    // Créer le widget si ce n'est pas déjà fait
+    if (!PlayerUIWidget)
+    {
+        PlayerUIWidget = CreateWidget<UUserWidget>(this, PlayerUIWidgetClass);
+        
+        if (PlayerUIWidget)
+        {
+            PlayerUIWidget->AddToViewport(1); // Z-Order 1 pour être au-dessus de l'UI du jeu de base
+            UE_LOG(LogTemp, Log, TEXT("Interface utilisateur du joueur créée avec succès"));
+        }
     }
 }
