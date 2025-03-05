@@ -428,20 +428,34 @@ void AWormGameMode::InitializeWeaponsForAllPlayers()
     // Recollectons les controllers pour plus de sécurité
     GatherAllPlayerControllers();
 
-    // Distribuer les armes à tous les personnages
-    for (AController* Controller : AllPlayerControllers)
+    // Distribuer les armes à tous les personnages un par un avec un léger délai
+    for (int32 i = 0; i < AllPlayerControllers.Num(); i++)
     {
-        AWormCharacter* Character = GetWormCharacterFromController(Controller);
-        if (Character)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Assigning weapons to %s"), *Character->GetName());
-            Character->SetAvailableWeapons(AvailableWeaponTypes);
-        }
-        else
-        {
-            UE_LOG(LogTemp, Error, TEXT("Could not get character for controller %s"), 
-                Controller ? *Controller->GetName() : TEXT("NULL"));
-        }
+        AController* Controller = AllPlayerControllers[i];
+        
+        // Créer une capture locale des variables pour le lambda
+        int32 PlayerIndex = i;
+        
+        // Ajouter un léger délai pour chaque joueur pour éviter les conflits
+        GetWorld()->GetTimerManager().SetTimer(
+            WeaponSpawnTimerHandle,
+            [this, Controller, PlayerIndex]() {
+                AWormCharacter* Character = GetWormCharacterFromController(Controller);
+                if (Character)
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("Assigning weapons to %s (Player %d)"), 
+                        *Character->GetName(), PlayerIndex);
+                    Character->SetAvailableWeapons(AvailableWeaponTypes);
+                }
+                else
+                {
+                    UE_LOG(LogTemp, Error, TEXT("Could not get character for controller %s"), 
+                        Controller ? *Controller->GetName() : TEXT("NULL"));
+                }
+            },
+            0.5f + (0.2f * i),  // Délai progressif pour chaque joueur
+            false
+        );
     }
 
     // Programmer une vérification retardée pour s'assurer que tous les personnages ont bien leurs armes
@@ -449,6 +463,7 @@ void AWormGameMode::InitializeWeaponsForAllPlayers()
     GetWorld()->GetTimerManager().SetTimer(
         WeaponCheckTimer,
         [this]() {
+            UE_LOG(LogTemp, Warning, TEXT("Verification des armes pour tous les joueurs..."));
             for (AController* Controller : AllPlayerControllers)
             {
                 AWormCharacter* Character = GetWormCharacterFromController(Controller);
@@ -457,9 +472,14 @@ void AWormGameMode::InitializeWeaponsForAllPlayers()
                     UE_LOG(LogTemp, Warning, TEXT("Reassigning weapons to %s"), *Character->GetName());
                     Character->SetAvailableWeapons(AvailableWeaponTypes);
                 }
+                else if (Character && Character->CurrentWeapon)
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("Verification: %s a déjà l'arme %s"), 
+                        *Character->GetName(), *Character->CurrentWeapon->GetName());
+                }
             }
         },
-        3.0f,
+        3.0f,  // Vérification après 3 secondes
         false
     );
 }

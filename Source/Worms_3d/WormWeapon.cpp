@@ -53,6 +53,13 @@ void AWormWeapon::BeginPlay()
 {
     Super::BeginPlay();
 
+    // S'assurer que l'arme est visible dès le début
+    EnsureWeaponVisibility();
+    
+    // Log l'initialisation de l'arme
+    UE_LOG(LogTemp, Warning, TEXT("BeginPlay de l'arme %s - Owner: %s"), 
+        *GetName(), GetOwner() ? *GetOwner()->GetName() : TEXT("None"));
+
     APawn* OwnerPawn = Cast<APawn>(GetOwner());
     
     // Ne créer les points de trajectoire que pour le client qui contrôle le personnage
@@ -130,24 +137,7 @@ void AWormWeapon::BeginPlay()
 
     // Cacher la trajectoire au début (pour tous les clients)
     ShowTrajectory(false);
-
-    EnsureWeaponVisibility();
-    
-    // S'assurer que l'arme se trouve bien au socket correct si elle a un owner
-    AActor* WeaponOwner = GetOwner();
-    AWormCharacter* OwnerChar = Cast<AWormCharacter>(WeaponOwner);
-    
-    if (OwnerChar)
-    {
-        // L'arme a un propriétaire, essayer de l'attacher correctement
-        UE_LOG(LogTemp, Warning, TEXT("BeginPlay de l'arme %s pour le propriétaire %s"), 
-               *GetName(), *OwnerChar->GetName());
-        
-        // Si on est sur un client, retarder légèrement l'attachement
-        
-    }
 }
-
 void AWormWeapon::EnsureWeaponVisibility()
 {
     // S'assurer que l'acteur lui-même est visible
@@ -159,11 +149,18 @@ void AWormWeapon::EnsureWeaponVisibility()
         WeaponMesh->SetVisibility(true);
         WeaponMesh->SetHiddenInGame(false);
         
-        // Logs pour déboguer
-        UE_LOG(LogTemp, Warning, TEXT("EnsureWeaponVisibility: Arme %s rendue visible"), *GetName());
+        // Forcer une mise à jour des composants au cas où
+        WeaponMesh->MarkRenderStateDirty();
+        
+        // Log pour déboguer
+        UE_LOG(LogTemp, Warning, TEXT("EnsureWeaponVisibility: Arme %s rendue visible (Owner: %s)"), 
+            *GetName(), GetOwner() ? *GetOwner()->GetName() : TEXT("None"));
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("EnsureWeaponVisibility: WeaponMesh est NULL pour l'arme %s!"), *GetName());
     }
 }
-
 
 void AWormWeapon::Tick(float DeltaTime)
 {

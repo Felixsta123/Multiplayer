@@ -144,33 +144,34 @@ void AWormCharacter::BeginPlay()
 
 void AWormCharacter::SetupWeaponDiagnostic()
 {
-    // Ne configurer que pour les clients
-    if (!HasAuthority())
+    // Ne configurer que pour les clients et limiter à 3 tentatives maximum
+    if (!HasAuthority() && IsLocallyControlled())
     {
+        UE_LOG(LogTemp, Warning, TEXT("[CLIENT] Configuration du diagnostic d'arme pour %s"), *GetName());
+        
+        static int32 DiagnosticCount = 0;
         FTimerHandle DiagnosticTimerHandle;
+        
         GetWorld()->GetTimerManager().SetTimer(
             DiagnosticTimerHandle,
             [this]() {
-                static int32 DiagnosticCount = 0;
-                if (DiagnosticCount < 5) // Limite à 5 diagnostics
+                if (DiagnosticCount < 3) // Limiter à 3 diagnostics
                 {
                     DiagnoseWeapons();
                     DiagnosticCount++;
                     
-                    // Force la création d'arme si nécessaire après 3 tentatives
-                    if (DiagnosticCount >= 3 && !CurrentWeapon && AvailableWeapons.Num() > 0)
+                    // Force la création d'arme uniquement après la 2ème tentative et seulement si nécessaire
+                    if (DiagnosticCount >= 2 && !CurrentWeapon && AvailableWeapons.Num() > 0)
                     {
                         OnRep_CurrentWeaponIndex();
                     }
                 }
             },
             2.0f,  // Premier diagnostic après 2 secondes
-            true,  // Répéter
-            1.0f   // Puis toutes les secondes
+            false   // Ne pas répéter
         );
     }
 }
-
 void AWormCharacter::PossessedBy(AController* NewController)
 {
     Super::PossessedBy(NewController);
@@ -647,11 +648,15 @@ void AWormCharacter::SpawnCurrentWeapon()
         return;
     }
     
-    // Nettoyage de l'arme existante
+    // Nettoyage de l'arme existante avec une approche plus robuste
     if (CurrentWeapon)
     {
-        CurrentWeapon->Destroy();
-        CurrentWeapon = nullptr;
+        AWormWeapon* WeaponToDestroy = CurrentWeapon;
+        CurrentWeapon = nullptr; // Éviter les références mortes
+        
+        // Détacher l'arme avant de la détruire
+        WeaponToDestroy->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+        WeaponToDestroy->Destroy();
     }
     
     // Calculer la transformation de spawn - maintenant directement basée sur le socket
@@ -671,6 +676,7 @@ void AWormCharacter::SpawnCurrentWeapon()
     FActorSpawnParameters SpawnParams;
     SpawnParams.Owner = this;
     SpawnParams.Instigator = GetInstigator();
+    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
     
     // Spawner l'arme
     CurrentWeapon = GetWorld()->SpawnActor<AWormWeapon>(
@@ -689,6 +695,10 @@ void AWormCharacter::SpawnCurrentWeapon()
         
         // Mettre à jour la visibilité
         CurrentWeapon->EnsureWeaponVisibility();
+        
+        // Log pour le débogage
+        UE_LOG(LogTemp, Warning, TEXT("[SERVER] Spawned weapon %s for %s, attached to socket %s"), 
+               *CurrentWeapon->GetName(), *GetName(), *WeaponSocketName.ToString());
         
         // Forcer une mise à jour sur tous les clients
         Multicast_WeaponChanged();
@@ -896,9 +906,18 @@ void AWormCharacter::SetAvailableWeapons_Implementation(const TArray<TSubclassOf
 void AWormCharacter::DiagnoseWeapons()
 {
     // Diagnostic minimal avec les informations essentielles uniquement
-    if (!HasAuthority() && IsLocallyControlled() && !CurrentWeapon && AvailableWeapons.Num() > 0)
+    if (!HasAuthority() && IsLocallyControlled())
     {
-        OnRep_CurrentWeaponIndex();
+        if (!CurrentWeapon && AvailableWeapons.Num() > 0)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("[CLIENT] DiagnoseWeapons: Arme manquante pour %s, tentative de récupération"), *GetName());
+            OnRep_CurrentWeaponIndex();
+        }
+        else if (CurrentWeapon)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("[CLIENT] DiagnoseWeapons: %s a déjà l'arme %s"), 
+                *GetName(), *CurrentWeapon->GetName());
+        }
     }
 }
 
@@ -1049,6 +1068,7 @@ void AWormCharacter::AttachWeaponToSocket(AWormWeapon* Weapon)
             *WeaponSocketName.ToString(), *GetName());
     }
 }
+
 void AWormCharacter::Server_UpdateWeaponRotation_Implementation(FRotator NewRotation)
 {
     if (CurrentWeapon)
@@ -1144,23 +1164,19 @@ FTransform AWormCharacter::CalculateWeaponSpawnTransform()
 
 void AWormCharacter::Multicast_WeaponChanged_Implementation()
 {
-    // Ne pas exécuter cette logique sur le serveur
+    // Ne pas exécuter cette logique sur le serveur, seulement sur les clients
     if (HasAuthority())
     {
         return;
     }
     
+    UE_LOG(LogTemp, Warning, TEXT("[CLIENT] Multicast_WeaponChanged pour %s"), *GetName());
+    
     // S'assurer que l'index est valide avant de continuer
     if (AvailableWeapons.Num() > 0 && AvailableWeapons.IsValidIndex(CurrentWeaponIndex))
     {
-        // Détruire l'arme actuelle si elle existe
-        if (CurrentWeapon)
-        {
-            CurrentWeapon->Destroy();
-            CurrentWeapon = nullptr;
-        }
-        
-        // Créer la nouvelle arme (uniquement visuel)
+        // IMPORTANT: Ne pas créer une nouvelle arme dans le multicast, utiliser OnRep_CurrentWeaponIndex
+        // Cela élimine une source de duplication
         OnRep_CurrentWeaponIndex();
     }
 }
@@ -1183,19 +1199,33 @@ void AWormCharacter::OnRep_CurrentWeaponIndex()
     // Fonction optimisée d'initialisation d'armes côté client
     if (AvailableWeapons.Num() <= 0 || !AvailableWeapons.IsValidIndex(CurrentWeaponIndex))
     {
-        UE_LOG(LogTemp, Warning, TEXT("OnRep_CurrentWeaponIndex: Pas d'armes disponibles pour %s"), *GetName());
+        UE_LOG(LogTemp, Warning, TEXT("[CLIENT] OnRep_CurrentWeaponIndex: Pas d'armes disponibles pour %s"), *GetName());
         return;
     }
     
     // Log de débug pour tracker l'exécution
-    UE_LOG(LogTemp, Warning, TEXT("OnRep_CurrentWeaponIndex: Création de l'arme pour %s, index=%d"), 
+    UE_LOG(LogTemp, Warning, TEXT("[CLIENT] OnRep_CurrentWeaponIndex: Création/mise à jour de l'arme pour %s, index=%d"), 
            *GetName(), CurrentWeaponIndex);
+    
+    // IMPORTANT: Si nous avons déjà une arme du même type, ne pas la recréer, simplement la réattacher
+    if (CurrentWeapon && CurrentWeapon->IsA(AvailableWeapons[CurrentWeaponIndex]))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[CLIENT] L'arme existe déjà et est du bon type, réattachement uniquement"));
+        AttachWeaponToSocket(CurrentWeapon);
+        CurrentWeapon->EnsureWeaponVisibility();
+        return;
+    }
     
     // Nettoyage de l'arme existante
     if (CurrentWeapon)
     {
-        CurrentWeapon->Destroy();
-        CurrentWeapon = nullptr;
+        UE_LOG(LogTemp, Warning, TEXT("[CLIENT] Destroying existing weapon: %s"), *CurrentWeapon->GetName());
+        AWormWeapon* WeaponToDestroy = CurrentWeapon;
+        CurrentWeapon = nullptr; // Éviter les références mortes
+        
+        // Détacher l'arme avant de la détruire
+        WeaponToDestroy->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+        WeaponToDestroy->Destroy();
     }
     
     // Calculer la transformation de spawn - directement depuis le socket
@@ -1234,11 +1264,11 @@ void AWormCharacter::OnRep_CurrentWeaponIndex()
         // S'assurer que l'arme est visible
         CurrentWeapon->EnsureWeaponVisibility();
         
-        UE_LOG(LogTemp, Warning, TEXT("OnRep_CurrentWeaponIndex: Arme %s créée et attachée directement pour %s"), 
+        UE_LOG(LogTemp, Warning, TEXT("[CLIENT] OnRep_CurrentWeaponIndex: Arme %s créée et attachée directement pour %s"), 
                *CurrentWeapon->GetName(), *GetName());
     }
     else
     {
-        UE_LOG(LogTemp, Error, TEXT("OnRep_CurrentWeaponIndex: Échec de création de l'arme pour %s"), *GetName());
+        UE_LOG(LogTemp, Error, TEXT("[CLIENT] OnRep_CurrentWeaponIndex: Échec de création de l'arme pour %s"), *GetName());
     }
 }
