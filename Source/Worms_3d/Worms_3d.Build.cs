@@ -8,7 +8,8 @@ public class Worms_3d : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 	
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "ProceduralMeshComponent", "NetCore"});
+		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "ProceduralMeshComponent", "NetCore", "Chaos",	"FieldSystemEngine",  
+			"ChaosSolverEngine"  });
 
 		PrivateDependencyModuleNames.AddRange(new string[] { "ProceduralMeshComponent", "EnhancedInput", "AIModule" });
 
@@ -21,3 +22,4 @@ public class Worms_3d : ModuleRules
 		// To include OnlineSubsystemSteam, add it to the plugins section in your uproject file with the Enabled attribute set to true
 	}
 }
+

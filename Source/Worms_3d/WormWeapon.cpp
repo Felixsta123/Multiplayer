@@ -130,7 +130,62 @@ void AWormWeapon::BeginPlay()
 
     // Cacher la trajectoire au début (pour tous les clients)
     ShowTrajectory(false);
+
+    EnsureWeaponVisibility();
+    
+    // S'assurer que l'arme se trouve bien au socket correct si elle a un owner
+    AActor* WeaponOwner = GetOwner();
+    AWormCharacter* OwnerChar = Cast<AWormCharacter>(WeaponOwner);
+    
+    if (OwnerChar)
+    {
+        // L'arme a un propriétaire, essayer de l'attacher correctement
+        UE_LOG(LogTemp, Warning, TEXT("BeginPlay de l'arme %s pour le propriétaire %s"), 
+               *GetName(), *OwnerChar->GetName());
+        
+        // Si on est sur un client, retarder légèrement l'attachement
+        if (!HasAuthority())
+        {
+            FTimerHandle AttachTimerHandle;
+            GetWorld()->GetTimerManager().SetTimer(
+                AttachTimerHandle,
+                [this, OwnerChar]() {
+                    // Se détacher pour être sûr
+                    DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+                    
+                    // S'attacher au pivot s'il existe
+                    if (OwnerChar->WeaponPivotComponent)
+                    {
+                        AttachToComponent(OwnerChar->WeaponPivotComponent, 
+                            FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+                            
+                        UE_LOG(LogTemp, Warning, TEXT("Arme %s rattachée au pivot après délai"), *GetName());
+                    }
+                },
+                0.5f,
+                false
+            );
+        }
+    }
 }
+
+void AWormWeapon::EnsureWeaponVisibility()
+{
+    // S'assurer que l'acteur lui-même est visible
+    SetActorHiddenInGame(false);
+    
+    // S'assurer que le mesh est visible
+    if (WeaponMesh)
+    {
+        WeaponMesh->SetVisibility(true);
+        WeaponMesh->SetHiddenInGame(false);
+        
+        // Logs pour déboguer
+        UE_LOG(LogTemp, Warning, TEXT("EnsureWeaponVisibility: Arme %s rendue visible"), *GetName());
+    }
+}
+
+
 void AWormWeapon::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);

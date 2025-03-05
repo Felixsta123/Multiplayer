@@ -57,7 +57,10 @@ public:
     void OnPowerChanged(float NewPower, float NormalizedPower);
     UPROPERTY(EditDefaultsOnly, Category = "Weapon|Aiming")
     float PowerAdjustmentStep;
-
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    USkeletalMeshComponent* WeaponMesh;
+    UFUNCTION(BlueprintCallable, Category = "Weapon")
+    void EnsureWeaponVisibility();
 protected:
     UPROPERTY()
     USplineComponent* TrajectorySpline;
@@ -77,9 +80,7 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Weapon")
     float SimulationDuration;
     // Composant mesh pour l'arme
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    USkeletalMeshComponent* WeaponMesh;
-    
+
     // Position de départ du projectile
     UPROPERTY(EditDefaultsOnly, Category = "Weapon")
     FName MuzzleSocketName;

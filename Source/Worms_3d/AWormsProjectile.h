@@ -3,6 +3,11 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "public/ADestructibleTerrain.h"
+#include "Field/FieldSystemComponent.h"
+#include "Field/FieldSystemActor.h"
+#include "Chaos/ChaosSolverActor.h"
+#include "Field/FieldSystemTypes.h"
+#include "GeometryCollection/GeometryCollectionComponent.h"
 #include "AWormsProjectile.generated.h"
 
 UCLASS()
@@ -23,6 +28,13 @@ public:
     // Initialiser le projectile avec une direction et une puissance
     UFUNCTION(BlueprintCallable, Category = "Projectile")
     void InitializeProjectile(FVector Direction, float Power);
+    UFUNCTION(Server, Reliable, WithValidation)
+    void Server_SpawnDestructionField(FVector Location);
+    
+    UFUNCTION(NetMulticast, Reliable)
+    void Multicast_SpawnDestructionField(FVector Location);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Field System")
+    TSubclassOf<AFieldSystemActor> FieldSystemActorClass;
 
 protected:
     virtual void BeginPlay() override;
@@ -59,7 +71,8 @@ protected:
     UFUNCTION()
     void OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, 
                FVector NormalImpulse, const FHitResult& Hit);
-    
+    void Multicast_SpawnDestructionField_Implementation(FVector Location);
+
     // Fonction pour l'explosion
     UFUNCTION(BlueprintCallable)
     void Explode();

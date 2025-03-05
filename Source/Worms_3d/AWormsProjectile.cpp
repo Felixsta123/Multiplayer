@@ -2,6 +2,14 @@
 #include "Components/SphereComponent.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "Field/FieldSystemComponent.h"
+#include "Field/FieldSystemActor.h"
+#include "Field/FieldSystemTypes.h"
+#include "Field/FieldSystemObjects.h"
+#include "GeometryCollection/GeometryCollectionComponent.h"
+#include "GameFramework/Actor.h"
+#include "Kismet/GameplayStatics.h"
+#include "Net/UnrealNetwork.h"
 #include "AWormCharacter.h"
 #include "Net/UnrealNetwork.h"
 
@@ -23,7 +31,7 @@ AWormProjectile::AWormProjectile()
     CollisionComp->SetNotifyRigidBodyCollision(true);  // Hit Events
     
     // Désactiver initialement les collisions - elles seront activées plus tard
-    CollisionComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    //CollisionComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     
     RootComponent = CollisionComp;
     
@@ -116,26 +124,7 @@ void AWormProjectile::BeginPlay()
     SetupIgnoredActors();
     
     // Activer les collisions après un délai
-    FTimerHandle CollisionTimerHandle;
-    GetWorldTimerManager().SetTimer(
-        CollisionTimerHandle,
-        this,
-        &AWormProjectile::EnableCollisions,
-        CollisionActivationDelay,
-        false
-    );
-    
-    // Démarrer le timer pour l'explosion automatique
-    if (HasAuthority())
-    {
-        GetWorldTimerManager().SetTimer(
-            DetonationTimerHandle,
-            this,
-            &AWormProjectile::Explode,
-            DetonationDelay,
-            false
-        );
-    }
+  
 }
 
 void AWormProjectile::EnableCollisions()
@@ -250,22 +239,80 @@ void AWormProjectile::Tick(float DeltaTime)
     }
 }
 
-void AWormProjectile::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
+void AWormProjectile::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp,
+                             FVector NormalImpulse, const FHitResult& Hit)
 {
-    // Vérifier si on est sur le serveur
-    if (HasAuthority())
+    if (HasAuthority()) // Assurer que seul le serveur spawn l'effet
     {
-        // Exploser au contact si le projectile touche le terrain ou un personnage
-        if (OtherActor != GetInstigator())
+        if (FieldSystemActorClass)
         {
-            // Log pour voir ce qui a été touché
-            UE_LOG(LogTemp, Warning, TEXT("Projectile hit: %s at location %s"), 
-                OtherActor ? *OtherActor->GetName() : TEXT("Unknown Actor"),
-                *Hit.Location.ToString());
-                
-            Explode();
+            // Spawn du BP_MasterField à la position d'impact
+            FActorSpawnParameters SpawnParams;
+            SpawnParams.Owner = this;
+            SpawnParams.Instigator = GetInstigator();
+            SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+            AFieldSystemActor* FieldActor = GetWorld()->SpawnActor<AFieldSystemActor>(
+                FieldSystemActorClass, Hit.Location, FRotator::ZeroRotator, SpawnParams);
+
+            if (FieldActor)
+            {
+                UE_LOG(LogTemp, Log, TEXT("Field System Actor spawned successfully at impact!"));
+                // Auto-détruire après 2 secondes pour éviter de surcharger la scène
+                FieldActor->SetLifeSpan(2.0f);
+            }
+            else
+            {
+                UE_LOG(LogTemp, Error, TEXT("Failed to spawn Field System Actor"));
+            }
         }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("FieldSystemActorClass is NULL"));
+        }
+
+        Destroy(); // Détruire le projectile après impact
     }
+}
+
+void AWormProjectile::Server_SpawnDestructionField_Implementation(FVector Location)
+{
+    Multicast_SpawnDestructionField(Location);
+}
+void AWormProjectile::Multicast_SpawnDestructionField_Implementation(FVector Location)
+{
+    if (!GetWorld()) return;
+
+    // Spawn un Field System Actor
+    AFieldSystemActor* FieldActor = GetWorld()->SpawnActor<AFieldSystemActor>(AFieldSystemActor::StaticClass(), Location, FRotator::ZeroRotator);
+    if (!FieldActor) return;
+
+    UFieldSystemComponent* FieldSystem = FieldActor->GetFieldSystemComponent();
+    if (!FieldSystem) return;
+
+    // Création d'un Radial Falloff Field
+    URadialFalloff* RadialFalloff = NewObject<URadialFalloff>();
+    RadialFalloff->Magnitude = -5000.0f;   // Force de destruction (doit être négative)
+    RadialFalloff->Radius = 300.0f;       // Rayon d'affectation
+    RadialFalloff->Position = Location;
+    RadialFalloff->Falloff = EFieldFalloffType::Field_FallOff_None;
+
+    // Création d'une force linéaire
+    UUniformVector* LinearForce = NewObject<UUniformVector>();
+    LinearForce->Magnitude = 2000.0f;
+    LinearForce->Direction = FVector(0, 0, 1); // Force vers le haut
+
+    // Application au Field System
+    FieldSystem->ApplyPhysicsField(true, EFieldPhysicsType::Field_LinearForce, nullptr, LinearForce);
+    FieldSystem->ApplyPhysicsField(true, EFieldPhysicsType::Field_ExternalClusterStrain, nullptr, RadialFalloff);
+
+    // Détruire après quelques secondes
+    FieldActor->SetLifeSpan(2.0f);
+}
+
+bool AWormProjectile::Server_SpawnDestructionField_Validate(FVector Location)
+{
+    return true; // Toujours valide
 }
 
 void AWormProjectile::Explode()

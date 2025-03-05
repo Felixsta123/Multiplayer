@@ -142,7 +142,17 @@ public:
     // === FONCTIONS DE DÉBOGAGE ===
     UFUNCTION(BlueprintCallable, Category = "Debug")
     void DiagnoseWeapons();
+        
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Worm")
+    float MovementPoints;
     
+    UPROPERTY(EditDefaultsOnly, Category = "Worm")
+    float MaxMovementPoints;
+
+
+    // Fonction pour synchroniser l'arme avec le pivot
+    UFUNCTION(NetMulticast, Reliable)
+    void Multicast_SynchronizeWeapon();
 protected:
     // === ÉTAT DU PERSONNAGE ===
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Worm")
@@ -153,13 +163,7 @@ protected:
     
     UPROPERTY(ReplicatedUsing = OnRep_CurrentWeaponIndex, BlueprintReadOnly, Category = "Worm")
     int32 CurrentWeaponIndex;
-    
-    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Worm")
-    float MovementPoints;
-    
-    UPROPERTY(EditDefaultsOnly, Category = "Worm")
-    float MaxMovementPoints;
-    
+
     UPROPERTY()
     FVector LastPosition;
 

@@ -11,6 +11,8 @@
 #include "Blueprint/UserWidget.h"
 #include "Components/ProgressBar.h"
 #include "Components/TextBlock.h"
+// Ajouter les includes manquants pour les collisions Cannot resolve symbol 'SetCollisionEnabled'
+#include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
 
 // Conserve le constructeur existant sans modifications mais améliore la lisibilité
@@ -119,6 +121,24 @@ void AWormCharacter::BeginPlay()
         
         // Diagnostic d'armes pour client
         SetupWeaponDiagnostic();
+    }
+    if (!HasAuthority() && IsLocallyControlled())
+    {
+        // Pour le client local, forcer une mise à jour de l'arme après un délai
+        FTimerHandle ForceWeaponUpdateTimer;
+        GetWorld()->GetTimerManager().SetTimer(
+            ForceWeaponUpdateTimer,
+            [this]() {
+                // Forcer une mise à jour de l'arme si nécessaire
+                if (!CurrentWeapon && AvailableWeapons.Num() > 0)
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("Force Weapon Update pour %s"), *GetName());
+                    OnRep_CurrentWeaponIndex();
+                }
+            },
+            3.0f,  // Attendre 3 secondes pour être sûr que tout est initialisé
+            false
+        );
     }
 }
 
@@ -615,6 +635,36 @@ void AWormCharacter::Server_SwitchWeapon_Implementation(int32 WeaponIndex)
     SwitchWeapon(WeaponIndex);
 }
 
+
+void AWormCharacter::Multicast_SynchronizeWeapon_Implementation()
+{
+    // Ne pas exécuter sur le serveur, il a déjà fait cette opération
+    if (HasAuthority())
+    {
+        return;
+    }
+    
+    // S'assurer que le pivot existe avant d'attacher l'arme
+    if (!WeaponPivotComponent)
+    {
+        CreateWeaponPivot();
+    }
+    
+    // Si l'arme existe, la réattacher au pivot
+    if (CurrentWeapon && WeaponPivotComponent)
+    {
+        // Détacher l'arme si elle est déjà attachée ailleurs
+        CurrentWeapon->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+        
+        // Attacher l'arme au pivot
+        CurrentWeapon->AttachToComponent(WeaponPivotComponent, 
+            FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+            
+        UE_LOG(LogTemp, Warning, TEXT("Multicast_SynchronizeWeapon: Réattaché l'arme %s au pivot pour %s"), 
+            *CurrentWeapon->GetName(), *GetName());
+    }
+}
+
 void AWormCharacter::SpawnCurrentWeapon()
 {
     // Cette fonction ne devrait s'exécuter que sur le serveur
@@ -661,6 +711,7 @@ void AWormCharacter::SpawnCurrentWeapon()
             FAttachmentTransformRules::SnapToTargetNotIncludingScale);
         
         CurrentWeapon->SetOwner(this);
+        Multicast_SynchronizeWeapon();
     }
 }
 
@@ -1166,11 +1217,34 @@ void AWormCharacter::OnRep_Health()
 
 void AWormCharacter::OnRep_CurrentWeaponIndex()
 {
+    // Si nous sommes toujours en train de nous initialiser, attendre un peu
+    if (GetWorld()->GetTimeSeconds() < 2.0f)
+    {
+        // Programmer une réexécution après un court délai
+        FTimerHandle RetryTimerHandle;
+        GetWorld()->GetTimerManager().SetTimer(
+            RetryTimerHandle,
+            [this]() {
+                OnRep_CurrentWeaponIndex();
+            },
+            0.5f,
+            false
+        );
+        
+        UE_LOG(LogTemp, Warning, TEXT("OnRep_CurrentWeaponIndex: Reprogrammé pour %s car trop tôt après le démarrage"), *GetName());
+        return;
+    }
+
     // Fonction optimisée d'initialisation d'armes côté client
     if (AvailableWeapons.Num() <= 0 || !AvailableWeapons.IsValidIndex(CurrentWeaponIndex))
     {
+        UE_LOG(LogTemp, Warning, TEXT("OnRep_CurrentWeaponIndex: Pas d'armes disponibles pour %s"), *GetName());
         return;
     }
+    
+    // Log de débug pour tracker l'exécution
+    UE_LOG(LogTemp, Warning, TEXT("OnRep_CurrentWeaponIndex: Création de l'arme pour %s, index=%d"), 
+           *GetName(), CurrentWeaponIndex);
     
     // Nettoyage de l'arme existante
     if (CurrentWeapon)
@@ -1180,16 +1254,26 @@ void AWormCharacter::OnRep_CurrentWeaponIndex()
     }
     
     // Créer le pivot pour l'arme
-    CreateWeaponPivot();
+    if (!WeaponPivotComponent)
+    {
+        CreateWeaponPivot();
+    }
+    
+    // S'assurer que le pivot existe avant de continuer
+    if (!WeaponPivotComponent)
+    {
+        UE_LOG(LogTemp, Error, TEXT("OnRep_CurrentWeaponIndex: Échec de création du pivot pour %s"), *GetName());
+        return;
+    }
+    
+    // Utiliser la transformation du pivot pour le spawn
+    FTransform SpawnTransform = WeaponPivotComponent->GetComponentTransform();
     
     // Créer l'arme
     FActorSpawnParameters SpawnParams;
     SpawnParams.Owner = this;
     SpawnParams.Instigator = GetInstigator();
     SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-    
-    // Utiliser la transformation du pivot pour le spawn
-    FTransform SpawnTransform = WeaponPivotComponent->GetComponentTransform();
     
     // Spawner l'arme
     CurrentWeapon = GetWorld()->SpawnActor<AWormWeapon>(
@@ -1206,29 +1290,20 @@ void AWormCharacter::OnRep_CurrentWeaponIndex()
         
         CurrentWeapon->SetOwner(this);
         
+        // S'assurer que l'arme est visible
+        CurrentWeapon->EnsureWeaponVisibility();
+        
+        // Logs supplémentaires
+        UE_LOG(LogTemp, Warning, TEXT("OnRep_CurrentWeaponIndex: Arme %s créée et attachée au pivot pour %s"), 
+               *CurrentWeapon->GetName(), *GetName());
+        
         // IMPORTANT: Désactiver les collisions avec l'arme
         if (CurrentWeapon->GetRootComponent())
         {
-            // Désactiver les collisions pour tous les composants de l'arme
-            TArray<UPrimitiveComponent*> Components;
-            CurrentWeapon->GetComponents<UPrimitiveComponent>(Components);
-            for (UPrimitiveComponent* Component : Components)
-            {
-                if (Component)
-                {
-                    Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-                    Component->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
-                    Component->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Ignore);
-                    Component->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Ignore);
-                }
-            }
-            
-            // Si le composant principal est un SkeletalMeshComponent ou StaticMeshComponent
-            if (UMeshComponent* MeshComponent = Cast<UMeshComponent>(CurrentWeapon->GetRootComponent()))
-            {
-                MeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-                MeshComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
-            }
         }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("OnRep_CurrentWeaponIndex: Échec de création de l'arme pour %s"), *GetName());
     }
 }
