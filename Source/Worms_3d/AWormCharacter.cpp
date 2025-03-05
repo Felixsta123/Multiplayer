@@ -11,6 +11,8 @@
 #include "Blueprint/UserWidget.h"
 #include "Components/ProgressBar.h"
 #include "Components/TextBlock.h"
+//include for   AWormCharacter.cpp(1045): [C2039] 'IsNormalized': is not a member of 'UE::Math::TRotator<double>'
+#include "Math/UnrealMathUtility.h"
 // Ajouter les includes manquants pour les collisions Cannot resolve symbol 'SetCollisionEnabled'
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
@@ -395,44 +397,16 @@ void AWormCharacter::Tick(float DeltaTime)
     LimitMovementWhenNotMyTurn();
 }
 
-void AWormCharacter::UpdateWeaponRotation()
+// Optionnel: Ajouter une fonction helper pour vérifier si une rotation est dans les limites
+bool AWormCharacter::IsRotationWithinLimits(const FRotator& TestRotation) const
 {
-    // Mise à jour de l'arme seulement si on est contrôlé localement et qu'on a une arme
-    if (IsLocallyControlled() && CurrentWeapon)
-    {
-        FRotator NewWeaponRotation;
-        
-        // En mode FPS: l'arme suit la rotation de la caméra
-        // En mode TPS: l'arme conserve une orientation fixe par rapport au personnage
-        if (bIsInFirstPersonMode)
-        {
-            // En mode FPS, permettre la rotation complète (y compris la hauteur)
-            FRotator ControlRotation = GetControlRotation();
-            NewWeaponRotation = FRotator(ControlRotation.Pitch, ControlRotation.Yaw, 0.0f);
-            
-            // Appliquer directement la rotation à l'arme
-            CurrentWeapon->SetActorRelativeRotation(NewWeaponRotation);
-        
-            // Envoyer au serveur si c'est un client et que c'est notre tour
-            if (GetLocalRole() < ROLE_Authority && bIsMyTurn)
-            {
-                // Envoyer moins souvent pour réduire le trafic réseau
-                static int32 FrameCounter = 0;
-                if (++FrameCounter >= 5)
-                {
-                    // Envoyer la rotation calculée
-                    Server_UpdateWeaponRotation(NewWeaponRotation);
-                    FrameCounter = 0;
-                }
-            }
-        }
-        else
-        {
-            // En mode TPS, l'arme reste fixe par rapport au personnage
-            // On n'applique aucune mise à jour de rotation ici
-        }
-    }
+    FRotator ActorRotation = GetActorRotation();
+    float DeltaYaw = FMath::FindDeltaAngleDegrees(ActorRotation.Yaw, TestRotation.Yaw);
+    
+    return FMath::Abs(DeltaYaw) <= MaxYawAngle && 
+           FMath::Abs(TestRotation.Pitch) <= MaxPitchAngle;
 }
+
 void AWormCharacter::UpdateMovementPoints()
 {
     FVector CurrentPosition = GetActorLocation();
@@ -1020,8 +994,55 @@ void AWormCharacter::AdjustPower(float PowerLevel)
     }
 }
 
+void AWormCharacter::UpdateWeaponRotation()
+{
+    // Ne rien faire si on n'a pas le contrôle local ou pas d'arme
+    if (!IsLocallyControlled() || !CurrentWeapon)
+    {
+        return;
+    }
+
+    // Obtenir les rotations nécessaires
+    const FRotator ActorRotation = GetActorRotation();
+    const FRotator ControlRotation = GetControlRotation();
+    
+    // Calculer la nouvelle rotation selon le mode de caméra
+    FRotator TargetRotation;
+    
+    if (bIsInFirstPersonMode)
+    {
+        // Limiter les angles avant de les envoyer au serveur
+        float DeltaYaw = FMath::FindDeltaAngleDegrees(ActorRotation.Yaw, ControlRotation.Yaw);
+        float ClampedYaw = FMath::ClampAngle(DeltaYaw, -MaxYawAngle, MaxYawAngle);
+        float ClampedPitch = FMath::ClampAngle(ControlRotation.Pitch, -MaxPitchAngle, MaxPitchAngle);
+        
+        TargetRotation = FRotator(ClampedPitch, ActorRotation.Yaw + ClampedYaw, 0.0f);
+    }
+    else
+    {
+        // En TPS, aligner avec le personnage
+        TargetRotation = FRotator(0.0f, ActorRotation.Yaw, 0.0f);
+    }
+
+    // Appliquer la rotation localement
+    CurrentWeapon->SetActorRotation(TargetRotation);
+    
+    // Envoyer au serveur avec throttling pour réduire le trafic réseau
+    static float LastSendTime = 0.0f;
+    const float CurrentTime = GetWorld()->GetTimeSeconds();
+    
+    if (CurrentTime - LastSendTime >= 0.1f) 
+    {
+        if (GetLocalRole() < ROLE_Authority)
+        {
+            Server_UpdateWeaponRotation(TargetRotation);
+        }
+        LastSendTime = CurrentTime;
+    }
+}
 bool AWormCharacter::Server_UpdateWeaponRotation_Validate(FRotator NewRotation)
 {
+    // Validation simple : vérifier que les angles sont dans des limites raisonnables
     return true;
 }
 void AWormCharacter::AttachWeaponToSocket(AWormWeapon* Weapon)
@@ -1044,24 +1065,33 @@ void AWormCharacter::AttachWeaponToSocket(AWormWeapon* Weapon)
 }
 void AWormCharacter::Server_UpdateWeaponRotation_Implementation(FRotator NewRotation)
 {
-    if (CurrentWeapon)
+    if (!CurrentWeapon)
     {
-        // Appliquer la rotation directement à l'arme
-        CurrentWeapon->SetActorRelativeRotation(NewRotation);
-        
-        // Propager aux clients via Multicast
-        Multicast_UpdateWeaponRotation(NewRotation);
+        return;
     }
-}
 
+    // Appliquer les limites sur le serveur pour garantir la validité
+    const FRotator ActorRotation = GetActorRotation();
+    float DeltaYaw = FMath::FindDeltaAngleDegrees(ActorRotation.Yaw, NewRotation.Yaw);
+    
+    // Limiter dans les valeurs valides
+    float ClampedYaw = FMath::ClampAngle(DeltaYaw, -MaxYawAngle, MaxYawAngle);
+    float ClampedPitch = FMath::ClampAngle(NewRotation.Pitch, -MaxPitchAngle, MaxPitchAngle);
+    
+    // Reconstruire la rotation finale
+    FRotator SafeRotation = FRotator(ClampedPitch, ActorRotation.Yaw + ClampedYaw, 0.0f);
+
+    // Appliquer et propager
+    CurrentWeapon->SetActorRotation(SafeRotation);
+    Multicast_UpdateWeaponRotation(SafeRotation);
+}
 // 8. Mise à jour de Multicast_UpdateWeaponRotation dans AWormCharacter.cpp
 void AWormCharacter::Multicast_UpdateWeaponRotation_Implementation(FRotator NewRotation)
 {
-    // Ne pas exécuter sur le client qui a envoyé la rotation (pour éviter les doublons)
+    // Ne pas appliquer sur le client qui a envoyé la rotation
     if (!IsLocallyControlled() && CurrentWeapon)
     {
-        // Appliquer la rotation directement à l'arme
-        CurrentWeapon->SetActorRelativeRotation(NewRotation);
+        CurrentWeapon->SetActorRotation(NewRotation);
     }
 }
 void AWormCharacter::ToggleCameraMode(bool bUseFPSCamera)

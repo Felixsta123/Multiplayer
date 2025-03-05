@@ -266,7 +266,12 @@ protected:
     // === CALLBACKS DE RÉPLICATION ===
     UFUNCTION()
     void OnRep_CurrentWeaponIndex();
-    
+    UPROPERTY(EditDefaultsOnly, Category = "Weapon|Aiming")
+    float MaxPitchAngle = 85.0f;  // Angle maximum vers le haut/bas
+
+    UPROPERTY(EditDefaultsOnly, Category = "Weapon|Aiming")
+    float MaxYawAngle = 45.0f;    // Angle maximum de rotation latérale
+
     UFUNCTION()
     void OnRep_Health();
     
@@ -295,5 +300,6 @@ protected:
     void InitializeCameraSystem();
     void SetupWeaponDiagnostic();
     void UpdateWeaponRotation();
+    bool IsRotationWithinLimits(const FRotator& TestRotation) const;
     void UpdateMovementPoints();
 };
