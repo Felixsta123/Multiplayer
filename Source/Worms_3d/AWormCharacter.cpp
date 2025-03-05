@@ -124,19 +124,17 @@ void AWormCharacter::BeginPlay()
     }
     if (!HasAuthority() && IsLocallyControlled())
     {
-        // Pour le client local, forcer une mise à jour de l'arme après un délai
-        FTimerHandle ForceWeaponUpdateTimer;
+        FTimerHandle WeaponCheckTimer;
         GetWorld()->GetTimerManager().SetTimer(
-            ForceWeaponUpdateTimer,
-            [this]() {
-                // Forcer une mise à jour de l'arme si nécessaire
+            WeaponCheckTimer,
+            [this]()
+            {
                 if (!CurrentWeapon && AvailableWeapons.Num() > 0)
                 {
-                    UE_LOG(LogTemp, Warning, TEXT("Force Weapon Update pour %s"), *GetName());
                     OnRep_CurrentWeaponIndex();
                 }
             },
-            3.0f,  // Attendre 3 secondes pour être sûr que tout est initialisé
+            1.0f,
             false
         );
     }
@@ -636,75 +634,69 @@ void AWormCharacter::Server_SwitchWeapon_Implementation(int32 WeaponIndex)
 
 void AWormCharacter::SpawnCurrentWeapon()
 {
-    // Cette fonction ne devrait s'exécuter que sur le serveur
+    // Vérification d'autorité
     if (!HasAuthority())
     {
         return;
     }
     
-    // Vérifier que l'index est valide
+    // Vérifier l'index valide avant tout
     if (!AvailableWeapons.IsValidIndex(CurrentWeaponIndex))
     {
         return;
     }
-    
-    // Nettoyage de l'arme existante avec une approche plus robuste
+
+    // Nettoyage plus strict de l'arme existante
     if (CurrentWeapon)
     {
         AWormWeapon* WeaponToDestroy = CurrentWeapon;
-        CurrentWeapon = nullptr; // Éviter les références mortes
-        
-        // Détacher l'arme avant de la détruire
+        CurrentWeapon = nullptr;
         WeaponToDestroy->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
-        WeaponToDestroy->Destroy();
+        GetWorld()->DestroyActor(WeaponToDestroy);
     }
-    
-    // Calculer la transformation de spawn - maintenant directement basée sur le socket
+
+    // Obtenir la transformation du socket pour le spawn
     FTransform SpawnTransform;
-    if (GetMesh()->DoesSocketExist(WeaponSocketName))
+    if (USkeletalMeshComponent* Meshss = GetMesh())
     {
-        SpawnTransform = GetMesh()->GetSocketTransform(WeaponSocketName);
+        SpawnTransform = Meshss->GetSocketTransform(WeaponSocketName);
     }
     else
     {
-        // Fallback au cas où le socket n'existe pas
-        SpawnTransform = GetActorTransform();
-        SpawnTransform.AddToTranslation(FVector(50.0f, 0.0f, 0.0f));
+        return;
     }
-    
-    // Paramètres de spawn
+
+    // Spawn avec vérification du propriétaire
     FActorSpawnParameters SpawnParams;
     SpawnParams.Owner = this;
-    SpawnParams.Instigator = GetInstigator();
+    SpawnParams.Instigator = this;
     SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-    
-    // Spawner l'arme
+
+    // Création de l'arme
     CurrentWeapon = GetWorld()->SpawnActor<AWormWeapon>(
-        AvailableWeapons[CurrentWeaponIndex], 
-        SpawnTransform, 
+        AvailableWeapons[CurrentWeaponIndex],
+        SpawnTransform,
         SpawnParams
     );
-    
+
     if (CurrentWeapon)
     {
-        // Attacher l'arme directement au socket (sans pivot intermédiaire)
-        AttachWeaponToSocket(CurrentWeapon);
+        // Attachement direct avec une seule méthode
+        CurrentWeapon->AttachToComponent(GetMesh(),
+            FAttachmentTransformRules::SnapToTargetIncludingScale,
+            WeaponSocketName);
+            
+        // Force une update réseau
+        ForceNetUpdate();
         
-        // Définir le propriétaire
-        CurrentWeapon->SetOwner(this);
-        
-        // Mettre à jour la visibilité
-        CurrentWeapon->EnsureWeaponVisibility();
-        
-        // Log pour le débogage
-        UE_LOG(LogTemp, Warning, TEXT("[SERVER] Spawned weapon %s for %s, attached to socket %s"), 
-               *CurrentWeapon->GetName(), *GetName(), *WeaponSocketName.ToString());
-        
-        // Forcer une mise à jour sur tous les clients
-        Multicast_WeaponChanged();
+        // Attendre un court instant avant de propager aux clients
+        FTimerHandle TimerHandle;
+        GetWorld()->GetTimerManager().SetTimer(TimerHandle, [this]()
+        {
+            Multicast_WeaponChanged();
+        }, 0.1f, false);
     }
 }
-
 void AWormCharacter::ApplyDamageToWorm(float DamageAmount, FVector ImpactDirection)
 {
     if (HasAuthority())
@@ -1034,41 +1026,22 @@ bool AWormCharacter::Server_UpdateWeaponRotation_Validate(FRotator NewRotation)
 }
 void AWormCharacter::AttachWeaponToSocket(AWormWeapon* Weapon)
 {
-    if (!Weapon)
+    if (!Weapon || !GetMesh())
     {
         return;
     }
 
-    // Utilisation directe du socket sur le SkeletalMeshComponent du personnage
-    USkeletalMeshComponent* CharMesh = GetMesh();
-    if (CharMesh && CharMesh->DoesSocketExist(WeaponSocketName))
-    {
-        // Détacher l'arme de son parent actuel si nécessaire
-        Weapon->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+    // Détacher d'abord
+    Weapon->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+    
+    // Réattacher avec des règles strictes
+    Weapon->AttachToComponent(GetMesh(),
+        FAttachmentTransformRules::SnapToTargetIncludingScale,
+        WeaponSocketName);
         
-        // Attacher directement l'arme au socket du personnage
-        Weapon->AttachToComponent(CharMesh, 
-            FAttachmentTransformRules::SnapToTargetIncludingScale, 
-            WeaponSocketName);
-            
-        UE_LOG(LogTemp, Warning, TEXT("Arme %s attachée directement au socket %s de %s"),
-            *Weapon->GetName(), *WeaponSocketName.ToString(), *GetName());
-            
-        // S'assurer que l'arme est visible
-        Weapon->SetActorHiddenInGame(false);
-        if (Weapon->WeaponMesh)
-        {
-            Weapon->WeaponMesh->SetVisibility(true);
-            Weapon->WeaponMesh->SetHiddenInGame(false);
-        }
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("Impossible d'attacher l'arme: socket %s non trouvé sur %s"),
-            *WeaponSocketName.ToString(), *GetName());
-    }
+    // S'assurer que l'arme est visible
+    Weapon->EnsureWeaponVisibility();
 }
-
 void AWormCharacter::Server_UpdateWeaponRotation_Implementation(FRotator NewRotation)
 {
     if (CurrentWeapon)
@@ -1196,79 +1169,50 @@ void AWormCharacter::OnRep_Health()
 
 void AWormCharacter::OnRep_CurrentWeaponIndex()
 {
-    // Fonction optimisée d'initialisation d'armes côté client
-    if (AvailableWeapons.Num() <= 0 || !AvailableWeapons.IsValidIndex(CurrentWeaponIndex))
+    // Ne rien faire sur le serveur
+    if (HasAuthority())
     {
-        UE_LOG(LogTemp, Warning, TEXT("[CLIENT] OnRep_CurrentWeaponIndex: Pas d'armes disponibles pour %s"), *GetName());
         return;
     }
-    
-    // Log de débug pour tracker l'exécution
-    UE_LOG(LogTemp, Warning, TEXT("[CLIENT] OnRep_CurrentWeaponIndex: Création/mise à jour de l'arme pour %s, index=%d"), 
-           *GetName(), CurrentWeaponIndex);
-    
-    // IMPORTANT: Si nous avons déjà une arme du même type, ne pas la recréer, simplement la réattacher
+
+    // Vérification index valide
+    if (!AvailableWeapons.IsValidIndex(CurrentWeaponIndex))
+    {
+        return;
+    }
+
+    // Vérifier si on a déjà la bonne arme
     if (CurrentWeapon && CurrentWeapon->IsA(AvailableWeapons[CurrentWeaponIndex]))
     {
-        UE_LOG(LogTemp, Warning, TEXT("[CLIENT] L'arme existe déjà et est du bon type, réattachement uniquement"));
         AttachWeaponToSocket(CurrentWeapon);
-        CurrentWeapon->EnsureWeaponVisibility();
         return;
     }
-    
-    // Nettoyage de l'arme existante
+
+    // Destruction propre de l'arme existante
     if (CurrentWeapon)
     {
-        UE_LOG(LogTemp, Warning, TEXT("[CLIENT] Destroying existing weapon: %s"), *CurrentWeapon->GetName());
         AWormWeapon* WeaponToDestroy = CurrentWeapon;
-        CurrentWeapon = nullptr; // Éviter les références mortes
-        
-        // Détacher l'arme avant de la détruire
+        CurrentWeapon = nullptr;
         WeaponToDestroy->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
         WeaponToDestroy->Destroy();
     }
+
+    // Création de la nouvelle arme avec la transformation du socket
+    FTransform SpawnTransform = GetMesh()->GetSocketTransform(WeaponSocketName);
     
-    // Calculer la transformation de spawn - directement depuis le socket
-    FTransform SpawnTransform;
-    if (GetMesh()->DoesSocketExist(WeaponSocketName))
-    {
-        SpawnTransform = GetMesh()->GetSocketTransform(WeaponSocketName);
-    }
-    else
-    {
-        // Fallback
-        SpawnTransform = GetActorTransform();
-    }
-    
-    // Créer l'arme
     FActorSpawnParameters SpawnParams;
     SpawnParams.Owner = this;
-    SpawnParams.Instigator = GetInstigator();
     SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-    
-    // Spawner l'arme
+
     CurrentWeapon = GetWorld()->SpawnActor<AWormWeapon>(
-        AvailableWeapons[CurrentWeaponIndex], 
-        SpawnTransform, 
+        AvailableWeapons[CurrentWeaponIndex],
+        SpawnTransform,
         SpawnParams
     );
-    
+
     if (CurrentWeapon)
     {
-        // Attacher directement l'arme au socket
         AttachWeaponToSocket(CurrentWeapon);
-        
-        // Définir le propriétaire
-        CurrentWeapon->SetOwner(this);
-        
-        // S'assurer que l'arme est visible
         CurrentWeapon->EnsureWeaponVisibility();
-        
-        UE_LOG(LogTemp, Warning, TEXT("[CLIENT] OnRep_CurrentWeaponIndex: Arme %s créée et attachée directement pour %s"), 
-               *CurrentWeapon->GetName(), *GetName());
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("[CLIENT] OnRep_CurrentWeaponIndex: Échec de création de l'arme pour %s"), *GetName());
     }
 }

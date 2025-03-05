@@ -55,7 +55,12 @@ void AWormWeapon::BeginPlay()
 
     // S'assurer que l'arme est visible dès le début
     EnsureWeaponVisibility();
-    
+     SetActorHiddenInGame(false);
+    if (WeaponMesh)
+    {
+        WeaponMesh->SetVisibility(true);
+        WeaponMesh->SetHiddenInGame(false);
+    }
     // Log l'initialisation de l'arme
     UE_LOG(LogTemp, Warning, TEXT("BeginPlay de l'arme %s - Owner: %s"), 
         *GetName(), GetOwner() ? *GetOwner()->GetName() : TEXT("None"));
@@ -148,7 +153,7 @@ void AWormWeapon::EnsureWeaponVisibility()
     {
         WeaponMesh->SetVisibility(true);
         WeaponMesh->SetHiddenInGame(false);
-        
+        WeaponMesh->MarkRenderStateDirty();
         // Forcer une mise à jour des composants au cas où
         WeaponMesh->MarkRenderStateDirty();
         
