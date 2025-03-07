@@ -4,6 +4,7 @@
 #include "GameFramework/GameMode.h"
 #include "ADestructibleTerrain.h"
 #include "WormWeapon.h"
+#include "AVoxelBuilding.h"
 #include "TestWormGameMode.generated.h"
 
 UCLASS()
@@ -17,7 +18,21 @@ public:
     // Fonctions de base du GameMode
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
+    // Classe de bâtiment à spawner
+    UPROPERTY(EditDefaultsOnly, Category = "Voxel Building")
+    TSubclassOf<AVoxelBuilding> BuildingClass;
 
+    // Nombre de bâtiments à générer
+    UPROPERTY(EditDefaultsOnly, Category = "Voxel Building")
+    int32 NumberOfBuildings;
+
+    // Zone dans laquelle placer les bâtiments
+    UPROPERTY(EditDefaultsOnly, Category = "Voxel Building")
+    float SpawnAreaSize;
+
+    // Fonction pour générer les bâtiments voxel
+    UFUNCTION(BlueprintCallable, Category = "Voxel Building")
+    void GenerateVoxelBuildings();
     // Terrain destructible
     UPROPERTY(BlueprintReadOnly, Category = "Terrain")
     ADestructibleTerrain* DestructibleTerrain;
@@ -49,4 +64,5 @@ public:
 protected:
     // Timer handles
     FTimerHandle WeaponSpawnTimerHandle;
+    FTimerHandle BuildingsSpawnTimerHandle;
 };

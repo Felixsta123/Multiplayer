@@ -1,4 +1,5 @@
 ﻿#include "TestWormGameMode.h"
+#include "AVoxelBuilding.h"
 #include "AWormCharacter.h"
 #include "Kismet/GameplayStatics.h"
 #include "TestWormPlayerController.h"
@@ -11,6 +12,8 @@ ATestWormGameMode::ATestWormGameMode()
     // Valeurs par défaut
     TurnDuration = 60.0f;
     RemainingTurnTime = TurnDuration;
+    NumberOfBuildings = 1;
+    SpawnAreaSize = 1000.0f;
     
     // Activer le Tick pour surveiller le temps
     PrimaryActorTick.bCanEverTick = true;
@@ -20,8 +23,8 @@ void ATestWormGameMode::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Créer un terrain de test
-    SpawnDestructibleTerrain();
+    // Générer les bâtiments voxel après un court délai
+    GetWorldTimerManager().SetTimer(BuildingsSpawnTimerHandle, this, &ATestWormGameMode::GenerateVoxelBuildings, 2.0f, false);
     
     // Initialiser les armes pour le joueur
     GetWorldTimerManager().SetTimer(WeaponSpawnTimerHandle, this, &ATestWormGameMode::InitializeWeaponsForPlayer, 1.0f, false);
@@ -42,6 +45,58 @@ void ATestWormGameMode::Tick(float DeltaTime)
             RemainingTurnTime = 0;
             // Dans un mode solo, on pourrait ici réinitialiser le tour
             ResetTurn();
+        }
+    }
+}
+
+void ATestWormGameMode::GenerateVoxelBuildings()
+{
+    if (!BuildingClass)
+    {
+        UE_LOG(LogTemp, Error, TEXT("BuildingClass not specified in TestWormGameMode!"));
+        return;
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("Generating %d voxel buildings..."), NumberOfBuildings);
+
+    FActorSpawnParameters SpawnParams;
+    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+
+    // Utiliser des valeurs fixes pour la cohérence
+    for (int32 i = 0; i < NumberOfBuildings; i++)
+    {
+        // Calculer une position aléatoire dans la zone
+        float X = FMath::RandRange(-SpawnAreaSize, SpawnAreaSize);
+        float Y = FMath::RandRange(-SpawnAreaSize, SpawnAreaSize);
+        float Z = 0.0f; // Positionner les bâtiments au niveau du sol
+
+        FVector Location = FVector(X, Y, Z);
+        FRotator Rotation = FRotator(0.0f, FMath::RandRange(0.0f, 360.0f), 0.0f);
+
+        // Spawner le bâtiment
+        AVoxelBuilding* Building = GetWorld()->SpawnActor<AVoxelBuilding>(
+            BuildingClass,
+            Location,
+            Rotation,
+            SpawnParams
+        );
+
+        if (Building)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Voxel building %d generated at %s"), i, *Location.ToString());
+
+            // Configurer avec des valeurs fixes
+            Building->GridSizeX = 10;
+            Building->GridSizeY = 10;
+            Building->GridSizeZ = 10;
+            Building->VoxelSize = 100.0f;
+            Building->SmoothingFactor = 0.01f;
+            Building->bUseRandomColors = true;
+            Building->CubeMargin = 0.02f;
+            Building->bUseDoubleSidedGeometry = true;
+
+            // Générer le bâtiment
+            Building->GenerateBuilding();
         }
     }
 }
