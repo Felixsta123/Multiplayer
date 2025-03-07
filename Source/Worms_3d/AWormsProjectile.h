@@ -24,7 +24,8 @@ public:
     // Rendre le composant de collision accessible en public
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     class USphereComponent* CollisionComp;
-    
+    FTimerHandle TrailTimerHandle;
+
     // Initialiser le projectile avec une direction et une puissance
     UFUNCTION(BlueprintCallable, Category = "Projectile")
     void InitializeProjectile(FVector Direction, float Power);
@@ -35,8 +36,31 @@ public:
     void Multicast_SpawnDestructionField(FVector Location);
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Field System")
     TSubclassOf<AFieldSystemActor> FieldSystemActorClass;
+    // Dans la section public:
+    UFUNCTION()
+    void RecordTrailPosition();
 
+    UFUNCTION()
+    void DrawDebugTrail();
 protected:
+    UPROPERTY()
+    TArray<FVector> TrailPositions;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Debug")
+    bool bDebugTrail = true;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Debug")
+    float TrailRecordInterval = 0.05f;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Debug")
+    int32 MaxTrailPoints = 100;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Debug")
+    FLinearColor ServerTrailColor = FLinearColor(1.0f, 0.0f, 0.0f, 1.0f); // Rouge pour le serveur
+
+    UPROPERTY(EditDefaultsOnly, Category = "Debug")
+    FLinearColor ClientTrailColor = FLinearColor(0.0f, 0.0f, 1.0f, 1.0f); // Bleu pour le client
+
     virtual void BeginPlay() override;
     
     // Composant de mouvement projectile

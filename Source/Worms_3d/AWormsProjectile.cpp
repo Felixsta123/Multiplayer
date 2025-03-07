@@ -123,10 +123,91 @@ void AWormProjectile::BeginPlay()
     // Configurer les acteurs à ignorer
     SetupIgnoredActors();
     
+    // Initialiser le tableau des positions du tracé
+    TrailPositions.Empty();
+    
+    // Si le débogage du tracé est activé, commencer à enregistrer les positions
+    if (bDebugTrail)
+    {
+        // Enregistrer la position initiale
+        TrailPositions.Add(GetActorLocation());
+        
+        // Démarrer le timer pour enregistrer les positions suivantes
+        GetWorldTimerManager().SetTimer(
+            TrailTimerHandle,
+            this,
+            &AWormProjectile::RecordTrailPosition,
+            TrailRecordInterval,
+            true // Répéter
+        );
+    }
     // Activer les collisions après un délai
   
 }
+void AWormProjectile::RecordTrailPosition()
+{
+    if (!bDebugTrail)
+        return;
+    
+    // Ajouter la position actuelle au tableau
+    TrailPositions.Add(GetActorLocation());
+    
+    // Limiter le nombre de points pour éviter une consommation excessive de mémoire
+    if (TrailPositions.Num() > MaxTrailPoints)
+    {
+        TrailPositions.RemoveAt(0);
+    }
+    
+    // Dessiner le tracé
+    DrawDebugTrail();
+}
 
+void AWormProjectile::DrawDebugTrail()
+{
+    if (!bDebugTrail || TrailPositions.Num() < 2)
+        return;
+    
+    // Déterminer la couleur en fonction de si nous sommes sur le serveur ou le client
+    FColor TrailColor = HasAuthority() ? 
+        FColor(255, 0, 0) :  // Rouge pour le serveur
+        FColor(0, 0, 255);   // Bleu pour le client
+    
+    // Dessiner des lignes entre chaque position enregistrée
+    for (int32 i = 0; i < TrailPositions.Num() - 1; i++)
+    {
+        DrawDebugLine(
+            GetWorld(),
+            TrailPositions[i],
+            TrailPositions[i + 1],
+            TrailColor,
+            false,   // Persistant
+            TrailRecordInterval * 2.0f,  // Durée (un peu plus que l'intervalle d'enregistrement)
+            0,       // Priorité
+            1.0f     // Épaisseur
+        );
+    }
+    
+    // Dessiner une sphère à la position actuelle pour mieux la voir
+    DrawDebugSphere(
+        GetWorld(),
+        GetActorLocation(),
+        10.0f,
+        8,
+        TrailColor,
+        false,
+        TrailRecordInterval * 2.0f
+    );
+    
+    // Afficher des informations sur la console
+    if (TrailPositions.Num() % 10 == 0)  // Ne pas trop spammer la console
+    {
+        UE_LOG(LogTemp, Verbose, TEXT("%s Projectile Trail: Pos=%s, Vel=%s"),
+            HasAuthority() ? TEXT("[SERVER]") : TEXT("[CLIENT]"),
+            *GetActorLocation().ToString(),
+            ProjectileMovement ? *ProjectileMovement->Velocity.ToString() : TEXT("N/A")
+        );
+    }
+}
 void AWormProjectile::EnableCollisions()
 {
     if (CollisionComp)
@@ -235,13 +316,35 @@ void AWormProjectile::Tick(float DeltaTime)
                     Explode();
                 }
             }
+            
+            // Pour le débogage, afficher la vélocité actuelle
+            if (bDebugTrail && TimeSinceLastCheck < 0.01f) // Juste après la réinitialisation
+            {
+                UE_LOG(LogTemp, Verbose, TEXT("%s Projectile Velocity: %s (magnitude: %.1f)"),
+                    HasAuthority() ? TEXT("[SERVER]") : TEXT("[CLIENT]"),
+                    *ProjectileMovement->Velocity.ToString(),
+                    ProjectileMovement->Velocity.Size()
+                );
+            }
         }
     }
 }
 
+
 void AWormProjectile::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp,
                              FVector NormalImpulse, const FHitResult& Hit)
 {
+    // Arrêter d'enregistrer les positions du tracé
+    if (bDebugTrail)
+    {
+        GetWorldTimerManager().ClearTimer(TrailTimerHandle);
+        
+        UE_LOG(LogTemp, Warning, TEXT("%s Projectile hit: %s at %s"),
+            HasAuthority() ? TEXT("[SERVER]") : TEXT("[CLIENT]"),
+            OtherActor ? *OtherActor->GetName() : TEXT("NULL"),
+            *Hit.Location.ToString()
+        );
+    }
     if (HasAuthority()) // Assurer que seul le serveur spawn l'effet
     {
         if (FieldSystemActorClass)
