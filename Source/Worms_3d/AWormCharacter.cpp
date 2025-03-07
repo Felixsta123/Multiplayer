@@ -500,8 +500,16 @@ void AWormCharacter::LimitMovementWhenNotMyTurn()
 {
     if (!bIsMyTurn)
     {
-        GetCharacterMovement()->Velocity = FVector::ZeroVector;
+        // Stopper les mouvements horizontaux mais conserver la gravité
+        FVector CurrentVelocity = GetCharacterMovement()->Velocity;
+        // Conserver uniquement la composante verticale (Z) pour la gravité
+        GetCharacterMovement()->Velocity = FVector(0, 0, CurrentVelocity.Z);
+        
+        // Empêcher de marcher mais permettre la chute
         GetCharacterMovement()->MaxWalkSpeed = 0;
+        
+        // S'assurer que la gravité reste active
+        GetCharacterMovement()->GravityScale = 1.5f;
     }
     else
     {
@@ -566,7 +574,11 @@ bool AWormCharacter::Server_FireWeapon_Validate()
 
 void AWormCharacter::Server_FireWeapon_Implementation()
 {
-    FireWeapon();
+    // Assurez-vous que le CurrentWeapon est valide
+    if (CurrentWeapon)
+    {
+        CurrentWeapon->Fire();
+    }
 }
 
 void AWormCharacter::SwitchWeapon(int32 WeaponIndex)
@@ -673,20 +685,25 @@ void AWormCharacter::SpawnCurrentWeapon()
 }
 void AWormCharacter::ApplyDamageToWorm(float DamageAmount, FVector ImpactDirection)
 {
-    if (HasAuthority())
+    // Appliquer les dégâts
+    Health = FMath::Max(0.0f, Health - DamageAmount);
+        
+    // Appliquer une impulsion basée sur la direction d'impact
+    ApplyMovementImpulse(ImpactDirection.GetSafeNormal(), DamageAmount * 10.0f);
+        
+    // Vérifier si le personnage est mort
+    if (Health <= 0)
     {
-        // Appliquer les dégâts
-        Health = FMath::Max(0.0f, Health - DamageAmount);
-        
-        // Appliquer une impulsion basée sur la direction d'impact
-        ApplyMovementImpulse(ImpactDirection.GetSafeNormal(), DamageAmount * 10.0f);
-        
-        // Vérifier si le personnage est mort
-        if (Health <= 0)
+        // Désactiver les collisions et le mouvement seulement si mort
+        GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        GetCharacterMovement()->DisableMovement();
+    }
+    else
+    {
+        // Jouer l'animation de réaction aux dégâts si pas mort
+        if (HitReactMontage)
         {
-            // Désactiver les collisions et le mouvement
-            GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-            GetCharacterMovement()->DisableMovement();
+            PlayAnimMontage(HitReactMontage);
         }
     }
 }
@@ -744,9 +761,13 @@ void AWormCharacter::SetIsMyTurn(bool bNewTurn)
         }
         else
         {
-            // Arrêter le mouvement à la fin du tour
-            GetCharacterMovement()->Velocity = FVector::ZeroVector;
+            // Arrêter le mouvement horizontal à la fin du tour, mais laisser la gravité active
+            FVector CurrentVelocity = GetCharacterMovement()->Velocity;
+            GetCharacterMovement()->Velocity = FVector(0, 0, CurrentVelocity.Z);
             GetCharacterMovement()->MaxWalkSpeed = 0;
+            
+            // NE PAS désactiver complètement le mouvement
+            // GetCharacterMovement()->DisableMovement(); // SUPPRIMER OU COMMENTER CETTE LIGNE
         }
         
         // Appeler l'événement BlueprintNativeEvent seulement si l'état a changé
@@ -756,7 +777,6 @@ void AWormCharacter::SetIsMyTurn(bool bNewTurn)
         }
     }
 }
-
 void AWormCharacter::OnTurnChanged_Implementation(bool bIsTurn)
 {
     // Cette fonction peut être surchargée en Blueprint

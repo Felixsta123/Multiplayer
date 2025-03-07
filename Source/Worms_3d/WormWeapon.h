@@ -64,7 +64,8 @@ public:
 protected:
     UPROPERTY()
     USplineComponent* TrajectorySpline;
-
+    UFUNCTION(Server, Reliable, WithValidation)
+    void Server_AdjustPower(float NewPower);
     UPROPERTY()
     TArray<UStaticMeshComponent*> TrajectoryPoints;
 
@@ -90,7 +91,7 @@ protected:
     TSubclassOf<class AActor> ProjectileClass;
     
     // Puissance du tir (vitesse du projectile)
-    UPROPERTY(EditDefaultsOnly, Category = "Weapon")
+    UPROPERTY(Replicated, EditDefaultsOnly, Category = "Weapon")
     float FirePower;
     
     // Délai de rechargement

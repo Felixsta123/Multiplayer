@@ -25,6 +25,7 @@ protected:
     // L'instance du widget UI
     UPROPERTY(BlueprintReadOnly, Category = "UI")
     UUserWidget* GameUIWidget;
+    
     // La classe du widget UI du joueur
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "UI")
     TSubclassOf<class UUserWidget> PlayerUIWidgetClass;

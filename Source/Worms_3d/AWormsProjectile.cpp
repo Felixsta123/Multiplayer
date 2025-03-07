@@ -345,36 +345,12 @@ void AWormProjectile::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UP
             *Hit.Location.ToString()
         );
     }
-    if (HasAuthority()) // Assurer que seul le serveur spawn l'effet
+    
+    // Ne traiter les collisions que sur le serveur
+    if (HasAuthority())
     {
-        if (FieldSystemActorClass)
-        {
-            // Spawn du BP_MasterField à la position d'impact
-            FActorSpawnParameters SpawnParams;
-            SpawnParams.Owner = this;
-            SpawnParams.Instigator = GetInstigator();
-            SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-
-            AFieldSystemActor* FieldActor = GetWorld()->SpawnActor<AFieldSystemActor>(
-                FieldSystemActorClass, Hit.Location, FRotator::ZeroRotator, SpawnParams);
-
-            if (FieldActor)
-            {
-                UE_LOG(LogTemp, Log, TEXT("Field System Actor spawned successfully at impact!"));
-                // Auto-détruire après 2 secondes pour éviter de surcharger la scène
-                FieldActor->SetLifeSpan(2.0f);
-            }
-            else
-            {
-                UE_LOG(LogTemp, Error, TEXT("Failed to spawn Field System Actor"));
-            }
-        }
-        else
-        {
-            UE_LOG(LogTemp, Warning, TEXT("FieldSystemActorClass is NULL"));
-        }
-
-        Destroy(); // Détruire le projectile après impact
+        // Déclencher une explosion
+        Explode();
     }
 }
 
@@ -420,75 +396,101 @@ bool AWormProjectile::Server_SpawnDestructionField_Validate(FVector Location)
 
 void AWormProjectile::Explode()
 {
-    if (HasAuthority())
+    if (!HasAuthority())
     {
-        // Position de l'explosion
-        FVector ExplosionLocation = GetActorLocation();
-        
-        // Chercher les Worms dans le rayon d'explosion
-        TArray<AActor*> OverlappingActors;
-        TArray<AActor*> ActorsToIgnore;
-        ActorsToIgnore.Add(this);
-        
-        UKismetSystemLibrary::SphereOverlapActors(
-            GetWorld(),
-            ExplosionLocation,
-            ExplosionRadius,
-            TArray<TEnumAsByte<EObjectTypeQuery>>(),
-            AWormCharacter::StaticClass(),
-            ActorsToIgnore,
-            OverlappingActors
-        );
-        
-        // Appliquer les dégâts aux personnages touchés
-        for (AActor* Actor : OverlappingActors)
-        {
-            AWormCharacter* WormChar = Cast<AWormCharacter>(Actor);
-            if (WormChar)
-            {
-                // Calculer la direction de l'impact
-                FVector ImpactDirection = WormChar->GetActorLocation() - ExplosionLocation;
-                float Distance = ImpactDirection.Size();
-                
-                // Calculer les dégâts basés sur la distance
-                float DamageToApply = ExplosionDamage * (1.0f - FMath::Min(Distance / ExplosionRadius, 1.0f));
-                
-                // Appliquer les dégâts
-                WormChar->ApplyDamageToWorm(DamageToApply, ImpactDirection);
-            }
-        }
-        
-        // Détruire le terrain dans la zone d'explosion
-        TArray<AActor*> TerrainActors;
-        UGameplayStatics::GetAllActorsOfClass(GetWorld(), ADestructibleTerrain::StaticClass(), TerrainActors);
-        
-        for (AActor* Actor : TerrainActors)
-        {
-            ADestructibleTerrain* Terrain = Cast<ADestructibleTerrain>(Actor);
-            if (Terrain)
-            {
-                // Transformation pour convertir les coordonnées mondiales en coordonnées locales
-                FVector LocalExplosion = Terrain->GetActorTransform().InverseTransformPosition(ExplosionLocation);
-                
-                // Utiliser les coordonnées appropriées pour le terrain 2D
-                float SafeX = FMath::Clamp(LocalExplosion.X, ExplosionRadius, Terrain->TerrainWidth - ExplosionRadius);
-                float SafeZ = FMath::Clamp(LocalExplosion.Z, ExplosionRadius, Terrain->TerrainHeight - ExplosionRadius);
-                
-                // Créer la zone de destruction centrée sur l'explosion
-                FVector2D Position2D(SafeX - ExplosionRadius, SafeZ - ExplosionRadius);
-                FVector2D Size2D(ExplosionRadius * 2.0f, ExplosionRadius * 2.0f);
-                
-                // Demander la destruction du terrain
-                Terrain->RequestDestroyTerrainAt(Position2D, Size2D);
-            }
-        }
-        
-        // Effets multicast d'explosion
-        Multicast_Explode(ExplosionLocation);
-        
-        // Détruire le projectile
-        Destroy();
+        return; // Ne s'exécute que sur le serveur
     }
+    
+    // Position de l'explosion
+    FVector ExplosionLocation = GetActorLocation();
+    
+    UE_LOG(LogTemp, Warning, TEXT("Explosion at location: %s with radius: %.1f and damage: %.1f"), 
+        *ExplosionLocation.ToString(), ExplosionRadius, ExplosionDamage);
+    
+    // Chercher les personnages dans le rayon d'explosion
+    TArray<AActor*> OverlappingActors;
+    TArray<AActor*> ActorsToIgnore;
+    ActorsToIgnore.Add(this);
+    
+    // Utiliser SphereOverlapActors pour détecter tous les acteurs touchés
+    UKismetSystemLibrary::SphereOverlapActors(
+        GetWorld(),
+        ExplosionLocation,
+        ExplosionRadius,
+        TArray<TEnumAsByte<EObjectTypeQuery>>(),
+        AWormCharacter::StaticClass(),
+        ActorsToIgnore,
+        OverlappingActors
+    );
+    
+    UE_LOG(LogTemp, Warning, TEXT("Found %d actors in explosion radius"), OverlappingActors.Num());
+    
+    // Appliquer les dégâts aux personnages touchés
+    for (AActor* Actor : OverlappingActors)
+    {
+        AWormCharacter* WormChar = Cast<AWormCharacter>(Actor);
+        if (WormChar)
+        {
+            // Calculer la direction et la distance de l'impact
+            FVector ImpactDirection = WormChar->GetActorLocation() - ExplosionLocation;
+            float Distance = ImpactDirection.Size();
+            
+            if (Distance <= 0.0f)
+            {
+                Distance = 1.0f; // Éviter la division par zéro
+                ImpactDirection = FVector(0, 0, 1); // Direction par défaut
+            }
+            else
+            {
+                ImpactDirection.Normalize(); // S'assurer que c'est un vecteur unitaire
+            }
+            
+            // Calculer les dégâts basés sur la distance (plus proche = plus de dégâts)
+            float DamageRatio = 1.0f - FMath::Min(Distance / ExplosionRadius, 1.0f);
+            float DamageToApply = ExplosionDamage * DamageRatio;
+            
+            // Appliquer une impulsion plus forte aux personnages plus proches
+            float ImpulseStrength = 10000.0f * DamageRatio; // Ajuster cette valeur selon les besoins
+            
+            UE_LOG(LogTemp, Warning, TEXT("Applying %.1f damage to %s with impulse strength: %.1f"), 
+                DamageToApply, *WormChar->GetName(), ImpulseStrength);
+            
+            // Appliquer les dégâts et l'impulsion
+            WormChar->ApplyDamageToWorm(DamageToApply, ImpactDirection * ImpulseStrength);
+        }
+    }
+        
+    // Détruire le terrain dans la zone d'explosion
+    TArray<AActor*> TerrainActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ADestructibleTerrain::StaticClass(), TerrainActors);
+    
+    for (AActor* Actor : TerrainActors)
+    {
+        ADestructibleTerrain* Terrain = Cast<ADestructibleTerrain>(Actor);
+        if (Terrain)
+        {
+            // Transformation pour convertir les coordonnées mondiales en coordonnées locales
+            FVector LocalExplosion = Terrain->GetActorTransform().InverseTransformPosition(ExplosionLocation);
+            
+            // Utiliser les coordonnées appropriées pour le terrain 2D
+            float SafeX = FMath::Clamp(LocalExplosion.X, ExplosionRadius, Terrain->TerrainWidth - ExplosionRadius);
+            float SafeZ = FMath::Clamp(LocalExplosion.Z, ExplosionRadius, Terrain->TerrainHeight - ExplosionRadius);
+            
+            // Créer la zone de destruction centrée sur l'explosion
+            FVector2D Position2D(SafeX - ExplosionRadius, SafeZ - ExplosionRadius);
+            FVector2D Size2D(ExplosionRadius * 2.0f, ExplosionRadius * 2.0f);
+            
+            // Demander la destruction du terrain
+            Terrain->RequestDestroyTerrainAt(Position2D, Size2D);
+        }
+    }
+    
+    // Effets multicast d'explosion
+    Multicast_Explode(ExplosionLocation);
+    
+    // Détruire le projectile
+    Destroy();
+
 }
 
 void AWormProjectile::Multicast_Explode_Implementation(FVector Location)

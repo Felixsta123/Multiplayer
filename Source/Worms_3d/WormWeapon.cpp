@@ -437,7 +437,14 @@ void AWormWeapon::AdjustPower(float Delta)
     // Mettre à jour la puissance si elle a changé
     if (NewPower != FirePower)
     {
+        // Appliquer localement pour la prévisualisation
         FirePower = NewPower;
+        
+        // Si on est sur le client, envoyer au serveur
+        if (GetLocalRole() < ROLE_Authority)
+        {
+            Server_AdjustPower(NewPower);
+        }
         
         // Mettre à jour la trajectoire si elle est visible
         if (TrajectorySpline && TrajectorySpline->IsVisible())
@@ -449,7 +456,6 @@ void AWormWeapon::AdjustPower(float Delta)
         OnPowerChanged(FirePower, GetNormalizedPower());
         OnPowerChangedDelegate.Broadcast(FirePower, GetNormalizedPower());
     }
-    
 }
 
 void AWormWeapon::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -458,9 +464,17 @@ void AWormWeapon::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifet
     
     DOREPLIFETIME(AWormWeapon, bIsReloading);
     DOREPLIFETIME(AWormWeapon, AmmoCount);
-
+    DOREPLIFETIME(AWormWeapon, FirePower);
+}
+bool AWormWeapon::Server_AdjustPower_Validate(float NewPower)
+{
+    return NewPower >= MinFirePower && NewPower <= MaxFirePower;
 }
 
+void AWormWeapon::Server_AdjustPower_Implementation(float NewPower)
+{
+    FirePower = NewPower;
+}
 void AWormWeapon::Fire()
 {
     // Vérifier si on peut tirer
