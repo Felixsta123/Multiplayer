@@ -508,8 +508,8 @@ void AWormCharacter::LimitMovementWhenNotMyTurn()
         // Empêcher de marcher mais permettre la chute
         GetCharacterMovement()->MaxWalkSpeed = 0;
         
-        // S'assurer que la gravité reste active
-        GetCharacterMovement()->GravityScale = 1.5f;
+        // Augmenter légèrement la gravité pour retomber plus vite après une explosion
+        GetCharacterMovement()->GravityScale = 2.0f; // Augmenté de 1.5f à 2.0f
     }
     else
     {
@@ -517,6 +517,9 @@ void AWormCharacter::LimitMovementWhenNotMyTurn()
         {
             GetCharacterMovement()->MaxWalkSpeed = 600.0f;
         }
+        
+        // Rétablir la gravité normale pendant son tour
+        GetCharacterMovement()->GravityScale = 1.5f;
     }
 }
 
@@ -688,8 +691,9 @@ void AWormCharacter::ApplyDamageToWorm(float DamageAmount, FVector ImpactDirecti
     // Appliquer les dégâts
     Health = FMath::Max(0.0f, Health - DamageAmount);
         
-    // Appliquer une impulsion basée sur la direction d'impact
-    ApplyMovementImpulse(ImpactDirection.GetSafeNormal(), DamageAmount * 10.0f);
+    // L'impulsion est déjà incluse dans ImpactDirection, ne pas multiplier à nouveau
+    // Juste normaliser pour être sûr
+    ApplyMovementImpulse(ImpactDirection.GetSafeNormal(), ImpactDirection.Size());
         
     // Vérifier si le personnage est mort
     if (Health <= 0)
@@ -707,13 +711,23 @@ void AWormCharacter::ApplyDamageToWorm(float DamageAmount, FVector ImpactDirecti
         }
     }
 }
-
 void AWormCharacter::ApplyMovementImpulse(FVector Direction, float Strength)
 {
     if (HasAuthority())
     {
-        // Appliquer l'impulsion au mouvement
+        // S'assurer que la direction est normalisée
+        Direction = Direction.GetSafeNormal();
+        
+        // Log pour déboguer
+        UE_LOG(LogTemp, Warning, TEXT("Applying impulse to %s: Dir=%s, Strength=%.1f"), 
+            *GetName(), *Direction.ToString(), Strength);
+        
+        // Appliquer l'impulsion avec une force suffisante
+        // Utiliser bVelocityChange=true pour contourner la masse et appliquer directement un changement de vélocité
         GetCharacterMovement()->AddImpulse(Direction * Strength, true);
+        
+        // Assurer que le personnage soit en état de "falling" pour réagir à l'impulsion
+        GetCharacterMovement()->SetMovementMode(MOVE_Falling);
         
         // Multicast RPC pour la synchronisation visuelle
         Multicast_ApplyImpulse(Direction, Strength);
@@ -725,8 +739,14 @@ void AWormCharacter::Multicast_ApplyImpulse_Implementation(FVector Direction, fl
     // Cette fonction est appelée sur tous les clients et le serveur
     if (!HasAuthority())
     {
+        // S'assurer que la direction est normalisée
+        Direction = Direction.GetSafeNormal();
+        
         // Appliquer uniquement l'effet visuel sur les clients
         GetCharacterMovement()->AddImpulse(Direction * Strength, true);
+        
+        // Assurer que le personnage soit en état de "falling" pour réagir à l'impulsion
+        GetCharacterMovement()->SetMovementMode(MOVE_Falling);
     }
 }
 

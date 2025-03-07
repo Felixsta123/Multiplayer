@@ -272,17 +272,35 @@ void AWormProjectile::SetupIgnoredActors()
         }
     }
     
+    // Créer des TWeakObjectPtr pour la sécurité
+    TWeakObjectPtr<AWormProjectile> WeakThis(this);
+    TWeakObjectPtr<USphereComponent> WeakCollisionComp(CollisionComp);
+    TWeakObjectPtr<APawn> WeakInstigator(GetInstigator());
+    
+    // Tableau de pointeurs faibles
+    TArray<TWeakObjectPtr<AActor>> WeakWormCharacters;
+    for (AActor* Actor : AllWormCharacters)
+    {
+        WeakWormCharacters.Add(TWeakObjectPtr<AActor>(Actor));
+    }
+    
     // Après un certain délai, ne plus ignorer les autres Worms (seulement le tireur)
     FTimerHandle ResetIgnoreTimerHandle;
     GetWorldTimerManager().SetTimer(
         ResetIgnoreTimerHandle,
-        [this, AllWormCharacters]() {
-            // Ne plus ignorer les autres Worms sauf l'instigateur
-            for (AActor* Actor : AllWormCharacters)
+        [WeakThis, WeakCollisionComp, WeakInstigator, WeakWormCharacters]() {
+            // Vérifier que this et CollisionComp sont toujours valides
+            if (!WeakThis.IsValid() || !WeakCollisionComp.IsValid())
             {
-                if (Actor != GetInstigator())
+                return;
+            }
+            
+            // Ne plus ignorer les autres Worms sauf l'instigator
+            for (TWeakObjectPtr<AActor> WeakActor : WeakWormCharacters)
+            {
+                if (WeakActor.IsValid() && WeakActor.Get() != WeakInstigator.Get())
                 {
-                    CollisionComp->IgnoreActorWhenMoving(Actor, false);
+                    WeakCollisionComp->IgnoreActorWhenMoving(WeakActor.Get(), false);
                 }
             }
         },
@@ -290,7 +308,6 @@ void AWormProjectile::SetupIgnoredActors()
         false
     );
 }
-
 void AWormProjectile::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
@@ -431,10 +448,9 @@ void AWormProjectile::Explode()
         AWormCharacter* WormChar = Cast<AWormCharacter>(Actor);
         if (WormChar)
         {
-            // Calculer la direction et la distance de l'impact
             FVector ImpactDirection = WormChar->GetActorLocation() - ExplosionLocation;
             float Distance = ImpactDirection.Size();
-            
+
             if (Distance <= 0.0f)
             {
                 Distance = 1.0f; // Éviter la division par zéro
@@ -442,21 +458,50 @@ void AWormProjectile::Explode()
             }
             else
             {
-                ImpactDirection.Normalize(); // S'assurer que c'est un vecteur unitaire
+                // Normaliser AVANT d'ajuster
+                ImpactDirection.Normalize();
+                
+                // Ajuster la direction pour avoir une composante horizontale plus forte
+                // Si la distance est très courte, ajouter plus de composante horizontale
+                float HorizontalFactor = FMath::Clamp(1.0f - (Distance / ExplosionRadius), 0.3f, 0.8f);
+                
+                // Déterminer la direction horizontale dominante (vers l'extérieur de l'explosion)
+                FVector HorizontalDir = ImpactDirection;
+                HorizontalDir.Z = 0;
+                
+                if (HorizontalDir.IsNearlyZero())
+                {
+                    // Si la direction horizontale est presque nulle, choisir une direction aléatoire
+                    float RandomAngle = FMath::RandRange(0.0f, 2.0f * PI);
+                    HorizontalDir.X = FMath::Cos(RandomAngle);
+                    HorizontalDir.Y = FMath::Sin(RandomAngle);
+                }
+                else
+                {
+                    HorizontalDir.Normalize();
+                }
+                
+                // Mélanger la composante verticale et horizontale
+                ImpactDirection = FVector(
+                    HorizontalDir.X * HorizontalFactor,
+                    HorizontalDir.Y * HorizontalFactor,
+                    0.5f + (0.5f * (1.0f - HorizontalFactor))  // Plus proche = plus haut
+                ).GetSafeNormal();
             }
-            
-            // Calculer les dégâts basés sur la distance (plus proche = plus de dégâts)
+
+            // Calculer les dégâts basés sur la distance
             float DamageRatio = 1.0f - FMath::Min(Distance / ExplosionRadius, 1.0f);
             float DamageToApply = ExplosionDamage * DamageRatio;
-            
-            // Appliquer une impulsion plus forte aux personnages plus proches
-            float ImpulseStrength = 10000.0f * DamageRatio; // Ajuster cette valeur selon les besoins
-            
-            UE_LOG(LogTemp, Warning, TEXT("Applying %.1f damage to %s with impulse strength: %.1f"), 
-                DamageToApply, *WormChar->GetName(), ImpulseStrength);
-            
+
+            // Force d'impulsion proportionnelle aux dégâts, mais avec une valeur minimum
+            float ImpulseStrength = FMath::Max(1500.0f * DamageRatio, 500.0f);
+
+            UE_LOG(LogTemp, Warning, TEXT("Applying %.1f damage to %s with impulse dir: %s, strength: %.1f"), 
+                DamageToApply, *WormChar->GetName(), *ImpactDirection.ToString(), ImpulseStrength);
+
             // Appliquer les dégâts et l'impulsion
             WormChar->ApplyDamageToWorm(DamageToApply, ImpactDirection * ImpulseStrength);
+                        
         }
     }
         
