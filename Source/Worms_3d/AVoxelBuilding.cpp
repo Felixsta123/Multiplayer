@@ -2,6 +2,7 @@
 
 #include "VoxelDebrisSystem.h"
 #include "Kismet/GameplayStatics.h"
+#include "Net/UnrealNetwork.h"
 
 AImprovedVoxelBuilding::AImprovedVoxelBuilding()
 {
@@ -44,6 +45,14 @@ void AImprovedVoxelBuilding::BeginPlay()
     {
         GenerateBuilding();
     }
+}
+
+void AImprovedVoxelBuilding::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+    
+    // Replicate the destruction history
+    DOREPLIFETIME(AImprovedVoxelBuilding, DestructionHistory);
 }
 
 void AImprovedVoxelBuilding::OnConstruction(const FTransform& Transform)
@@ -480,38 +489,80 @@ void AImprovedVoxelBuilding::SmoothVertices(TArray<FVector>& Vertices, TArray<in
 }
 void AImprovedVoxelBuilding::DestroyVoxelsAt(FVector Location, FVector ImpactNormal, float Radius)
 {
-    // Additional debug info
-    UE_LOG(LogTemp, Warning, TEXT("DestroyVoxelsAt called: Location=%s, Normal=%s, Radius=%.1f"), 
-           *Location.ToString(), *ImpactNormal.ToString(), Radius);
-           
+    // This implementation doesn't actually destroy anything immediately
+    // It just prepares the destruction data and forwards it to the authoritative function
+    
+    if (HasAuthority())
+    {
+        // Generate a new random seed
+        int32 RandomSeed = FMath::Rand();
+        
+        // Create destruction data
+        FVoxelDestructionData DestructionData(Location, ImpactNormal, Radius, RandomSeed);
+        
+        // Add to history (this will trigger replication to clients)
+        DestructionHistory.Add(DestructionData);
+
+        // Ajoutez cette ligne pour forcer la mise à jour réseau :
+        ForceNetUpdate();
+
+        // Puis continuez avec l'application de la destruction
+        ApplyDeterministicDestruction(DestructionData);        
+    }
+    else
+    {
+        // On client, just request the server to destroy
+        Server_DestroyVoxelsAt(Location, ImpactNormal, Radius);
+    }
+}
+
+// Implement the modified Server RPC
+bool AImprovedVoxelBuilding::Server_DestroyVoxelsAt_Validate(FVector Location, FVector ImpactNormal, float Radius)
+{
+    return Radius > 0.0f;
+}
+
+void AImprovedVoxelBuilding::Server_DestroyVoxelsAt_Implementation(FVector Location, FVector ImpactNormal, float Radius)
+{
+    // Call the local method which will use authority to actually destroy
+    DestroyVoxelsAt(Location, ImpactNormal, Radius);
+    
+    // No need to call Multicast - the replication of DestructionHistory will handle this
+}
+
+// Remove the Multicast_DestroyVoxelsAt implementation - we won't be using it anymore
+
+// Add new function for deterministic destruction
+void AImprovedVoxelBuilding::ApplyDeterministicDestruction(const FVoxelDestructionData& DestructionData)
+{
+    // Initialize the random stream with the provided seed for deterministic results
+    RandomStream.Initialize(DestructionData.RandomSeed);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Applying deterministic destruction with seed: %d"), DestructionData.RandomSeed);
+    
+    // Local variables for easier access
+    FVector Location = DestructionData.Location;
+    FVector ImpactNormal = DestructionData.Normal;
+    float Radius = DestructionData.Radius;
+    
     // Ensure normal is normalized
     if (ImpactNormal.IsNearlyZero())
     {
         ImpactNormal = FVector(0, 0, 1); // Default to up if no valid normal
-        UE_LOG(LogTemp, Warning, TEXT("Impact normal was zero! Using default up vector."));
     }
     else
     {
         ImpactNormal = ImpactNormal.GetSafeNormal();
     }
     
-    // Convert to local coordinates
-    FVector LocalPosition = Location;
-    FVector LocalNormal = ImpactNormal;
-    
     // Use a more robust grid calculation for high-angle shots
     // Add a small offset in the direction of the normal to ensure we're inside the block
-    LocalPosition -= LocalNormal * VoxelSize * 0.1f;
+    Location -= ImpactNormal * VoxelSize * 0.1f;
     
     // Convert to grid coordinates with safeguards
-    int32 GridX = FMath::Clamp(FMath::Floor(LocalPosition.X / VoxelSize), 0, GridSizeX - 1);
-    int32 GridY = FMath::Clamp(FMath::Floor(LocalPosition.Y / VoxelSize), 0, GridSizeY - 1);
-    int32 GridZ = FMath::Clamp(FMath::Floor(LocalPosition.Z / VoxelSize), 0, GridSizeZ - 1);
-    
-    // Debug logging
-    UE_LOG(LogTemp, Warning, TEXT("Impact at local position: %s, Normal: %s"), 
-           *LocalPosition.ToString(), *LocalNormal.ToString());
-    UE_LOG(LogTemp, Warning, TEXT("Grid coordinates: (%d, %d, %d)"), GridX, GridY, GridZ);
+    int32 GridX = FMath::Clamp(FMath::Floor(Location.X / VoxelSize), 0, GridSizeX - 1);
+    int32 GridY = FMath::Clamp(FMath::Floor(Location.Y / VoxelSize), 0, GridSizeY - 1);
+    int32 GridZ = FMath::Clamp(FMath::Floor(Location.Z / VoxelSize), 0, GridSizeZ - 1);
     
     // Grid radius - increase for more reliable high-angle hits
     int32 GridRadius = FMath::CeilToInt(Radius / VoxelSize) + 1;
@@ -525,22 +576,22 @@ void AImprovedVoxelBuilding::DestroyVoxelsAt(FVector Location, FVector ImpactNor
 
     // Use the enhanced ray distribution algorithm
     TArray<FVector> RayDirections;
-    GenerateOptimizedRayDirections(RayDirections, LocalNormal, RayCount - 8); // Reserve 8 for special rays
+    GenerateOptimizedRayDirections(RayDirections, ImpactNormal, RayCount - 8); // Reserve 8 for special rays
 
     // Add special penetration rays for different scenarios
     // Extra ray directly backward for glancing hits
-    RayDirections.Add(LocalNormal); 
+    RayDirections.Add(ImpactNormal); 
 
     // Extra downward ray for high hits
-    if (LocalNormal.Z < -0.5f)
+    if (ImpactNormal.Z < -0.5f)
     {
         RayDirections.Add(FVector(0, 0, -1));
     }
 
     // Extra ray in horizontal plane for side hits
-    if (FMath::Abs(LocalNormal.Z) < 0.5f)
+    if (FMath::Abs(ImpactNormal.Z) < 0.5f)
     {
-        FVector HorizontalNormal = LocalNormal;
+        FVector HorizontalNormal = ImpactNormal;
         HorizontalNormal.Z = 0;
         if (!HorizontalNormal.IsNearlyZero())
         {
@@ -549,7 +600,7 @@ void AImprovedVoxelBuilding::DestroyVoxelsAt(FVector Location, FVector ImpactNor
         }
     }
 
-    // Now trace each ray
+    // Now trace each ray - using our deterministic random stream
     for (int32 RayIndex = 0; RayIndex < RayDirections.Num(); RayIndex++)
     {
         FVector RayDir = RayDirections[RayIndex];
@@ -558,11 +609,12 @@ void AImprovedVoxelBuilding::DestroyVoxelsAt(FVector Location, FVector ImpactNor
         float RayLength = MaxRayLength;
         if (RayIndex > 0) // Keep first ray at max length
         {
-            RayLength *= (0.7f + 0.3f * FMath::FRand()); // Randomize length somewhat
+            // Use our deterministic random stream instead of FMath::FRand()
+            RayLength *= (0.7f + 0.3f * RandomStream.GetFraction());
         }
         
         // Trace the ray through the voxels
-        FVector RayStart = LocalPosition;
+        FVector RayStart = Location;
         // Smaller step size for better accuracy
         float StepSize = VoxelSize * 0.15f; // Smaller than before for more precision
         FVector CurrentPos = RayStart;
@@ -596,14 +648,15 @@ void AImprovedVoxelBuilding::DestroyVoxelsAt(FVector Location, FVector ImpactNor
                     RayEnergy -= EnergyCostPerHit;
                     
                     // Ray might destroy the voxel based on energy and distance
-                    float DistanceFromImpact = FVector::Dist(CurrentPos, LocalPosition);
+                    float DistanceFromImpact = FVector::Dist(CurrentPos, Location);
                     
                     // Destruction priority is based on ray energy and distance from impact
                     float DestructionPriority = RayEnergy * (1.0f - FMath::Min(1.0f, DistanceFromImpact / RayLength));
                     
                     // ENHANCEMENT 5: Fuzzy edges - more randomness at edges of explosion
                     float EdgeRandomness = FMath::Lerp(0.1f, 0.7f, DistanceFromImpact / RayLength);
-                    DestructionPriority *= (1.0f - FMath::FRand() * EdgeRandomness);
+                    // Use our deterministic random stream
+                    DestructionPriority *= (1.0f - RandomStream.GetFraction() * EdgeRandomness);
                     
                     // Boost priority for first ray (direct hit direction)
                     if (RayIndex == 0)
@@ -724,7 +777,7 @@ void AImprovedVoxelBuilding::DestroyVoxelsAt(FVector Location, FVector ImpactNor
         return A.Value > B.Value;
     });
     
-   // Store list of destroyed voxels and their colors for debris creation
+    // Store list of destroyed voxels and their colors for debris creation
     TArray<TPair<FIntVector, FColor>> DestroyedVoxels;
     bool bAnyVoxelDestroyed = false;
     
@@ -741,7 +794,8 @@ void AImprovedVoxelBuilding::DestroyVoxelsAt(FVector Location, FVector ImpactNor
         // Higher priority voxels are more likely to be destroyed
         float DestructionThreshold = BaseDestructionThreshold * (1.0f - (Priority * 0.8f));
         
-        if (FMath::FRand() < (1.0f - DestructionThreshold))
+        // Use our deterministic random stream
+        if (RandomStream.GetFraction() < (1.0f - DestructionThreshold))
         {
             // Store the voxel color before destroying it
             if (bSpawnDebrisOnDestruction && DebrisSystem)
@@ -752,12 +806,6 @@ void AImprovedVoxelBuilding::DestroyVoxelsAt(FVector Location, FVector ImpactNor
             // Destroy the voxel
             VoxelGrid[X][Y][Z].bIsActive = false;
             bAnyVoxelDestroyed = true;
-            
-            // Log the central voxel destruction
-            if (X == GridX && Y == GridY && Z == GridZ)
-            {
-                UE_LOG(LogTemp, Warning, TEXT("Destroying central voxel at grid (%d, %d, %d)"), X, Y, Z);
-            }
         }
     }
     
@@ -794,13 +842,13 @@ void AImprovedVoxelBuilding::DestroyVoxelsAt(FVector Location, FVector ImpactNor
             int32 Index = i;
             if (DestroyedVoxels.Num() > MaxIndividualDebris)
             {
-                Index = FMath::RandRange(0, DestroyedVoxels.Num() - 1);
+                // Use our deterministic random stream
+                Index = RandomStream.RandRange(0, DestroyedVoxels.Num() - 1);
             }
     
             FIntVector VoxelCoord = DestroyedVoxels[Index].Key;
             FColor VoxelColor = DestroyedVoxels[Index].Value;
     
-            // CORRECTED:
             // Calculate the local space position of the voxel center
             FVector LocalVoxelPos = FVector(
                 (VoxelCoord.X + 0.5f) * VoxelSize,
@@ -829,26 +877,11 @@ void AImprovedVoxelBuilding::DestroyVoxelsAt(FVector Location, FVector ImpactNor
     // ENHANCEMENT 8: Batch mesh recreation for performance
     if (bAnyVoxelDestroyed)
     {
-        // In multiplayer, might want to delay this slightly to avoid too many mesh updates
+        // Recreate the mesh with updated voxels
         CreateMesh();
     }
 }
 
-
-bool AImprovedVoxelBuilding::Server_DestroyVoxelsAt_Validate(FVector Location, FVector ImpactNormal, float Radius)
-{
-    // Validation basique : s'assurer que le rayon est positif
-    return Radius > 0.0f;
-}
-
-void AImprovedVoxelBuilding::Server_DestroyVoxelsAt_Implementation(FVector Location, FVector ImpactNormal, float Radius)
-{
-    // Appliquer la destruction sur le serveur
-    DestroyVoxelsAt(Location, ImpactNormal, Radius);
-    
-    // Propager à tous les clients
-    Multicast_DestroyVoxelsAt(Location, ImpactNormal, Radius);
-}
 
 void AImprovedVoxelBuilding::Multicast_DestroyVoxelsAt_Implementation(FVector Location, FVector ImpactNormal, float Radius)
 {
@@ -858,7 +891,27 @@ void AImprovedVoxelBuilding::Multicast_DestroyVoxelsAt_Implementation(FVector Lo
         DestroyVoxelsAt(Location, ImpactNormal, Radius);
     }
 }
-
+void AImprovedVoxelBuilding::OnRep_DestructionHistory()
+{
+    if (!HasAuthority())
+    {
+        // Dans OnRep_DestructionHistory, ajoutez :
+        UE_LOG(LogTemp, Warning, TEXT("OnRep_DestructionHistory: Client a reçu %d opérations de destruction"), 
+            DestructionHistory.Num());
+        // When running on clients, apply any new destruction operations
+        // Get the count of operations we've already processed
+        static int32 LastProcessedCount = 0;
+        
+        // Process only new operations
+        for (int32 i = LastProcessedCount; i < DestructionHistory.Num(); i++)
+        {
+            ApplyDeterministicDestruction(DestructionHistory[i]);
+        }
+        
+        // Update our processed count
+        LastProcessedCount = DestructionHistory.Num();
+    }
+}
 
 TArray<AImprovedVoxelBuilding*> AImprovedVoxelBuilding::FindAllVoxelBuildings(const UObject* WorldContextObject)
 {

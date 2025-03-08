@@ -5,6 +5,30 @@
 #include "ProceduralMeshComponent.h"
 #include "AVoxelBuilding.generated.h"
 
+USTRUCT()
+struct FVoxelDestructionData
+{
+    GENERATED_BODY()
+    
+    UPROPERTY()
+    FVector Location;
+    
+    UPROPERTY()
+    FVector Normal;
+    
+    UPROPERTY()
+    float Radius;
+    
+    UPROPERTY()
+    int32 RandomSeed;
+    
+    FVoxelDestructionData() : Location(FVector::ZeroVector), Normal(FVector::UpVector), 
+                            Radius(0.0f), RandomSeed(0) {}
+    
+    FVoxelDestructionData(FVector InLocation, FVector InNormal, float InRadius, int32 InSeed)
+        : Location(InLocation), Normal(InNormal), Radius(InRadius), RandomSeed(InSeed) {}
+};
+
 // Structure to store voxel data
 USTRUCT(BlueprintType)
 struct FVoxelData
@@ -146,7 +170,17 @@ protected:
     
     // Function to get a random color
     FColor GetRandomColor();
+    UPROPERTY(ReplicatedUsing=OnRep_DestructionHistory)  // ✅ Correct
+    TArray<FVoxelDestructionData> DestructionHistory;
+    // Apply deterministic destruction using a seed
+    void ApplyDeterministicDestruction(const FVoxelDestructionData& DestructionData);
     
+    // Current random stream for deterministic randomization
+    FRandomStream RandomStream;
+    
+    // Handle newly received destruction history
+    UFUNCTION()
+    void OnRep_DestructionHistory();
     // Function to apply smoothing to vertices
     void SmoothVertices(TArray<FVector>& Vertices, TArray<int32>& Triangles);
 };
