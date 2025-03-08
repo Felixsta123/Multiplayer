@@ -1,5 +1,6 @@
 ﻿#include "AVoxelBuilding.h"
 
+#include "VoxelDebrisSystem.h"
 #include "Kismet/GameplayStatics.h"
 
 AImprovedVoxelBuilding::AImprovedVoxelBuilding()
@@ -10,7 +11,13 @@ AImprovedVoxelBuilding::AImprovedVoxelBuilding()
     BuildingMesh = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("BuildingMesh"));
     RootComponent = BuildingMesh;
     BuildingMesh->bUseAsyncCooking = true;
+    DebrisSystem = CreateDefaultSubobject<UVoxelDebrisSystem>(TEXT("DebrisSystem"));
+    DebrisSystem->SetupAttachment(RootComponent);
     
+    // Default values for debris
+    bSpawnDebrisOnDestruction = true;
+    DebrisAmountMultiplier = 1.0f;
+    bSpawnImpactCloud = true;
     // Default values
     GridSizeX = 10;
     GridSizeY = 10;
@@ -717,10 +724,11 @@ void AImprovedVoxelBuilding::DestroyVoxelsAt(FVector Location, FVector ImpactNor
         return A.Value > B.Value;
     });
     
-    // Apply destruction with probability based on priority
+   // Store list of destroyed voxels and their colors for debris creation
+    TArray<TPair<FIntVector, FColor>> DestroyedVoxels;
     bool bAnyVoxelDestroyed = false;
     
-    // ENHANCEMENT 7: Variable probability threshold based on explosion size
+    // Apply destruction with probability based on priority
     float BaseDestructionThreshold = FMath::Lerp(0.3f, 0.1f, FMath::Min(1.0f, Radius / 500.0f));
     
     for (const TPair<FIntVector, float>& VoxelData : VoxelsToDestroy)
@@ -731,11 +739,17 @@ void AImprovedVoxelBuilding::DestroyVoxelsAt(FVector Location, FVector ImpactNor
         float Priority = VoxelData.Value;
         
         // Higher priority voxels are more likely to be destroyed
-        // Formula: random threshold * base threshold, lower is more likely to be destroyed
         float DestructionThreshold = BaseDestructionThreshold * (1.0f - (Priority * 0.8f));
         
         if (FMath::FRand() < (1.0f - DestructionThreshold))
         {
+            // Store the voxel color before destroying it
+            if (bSpawnDebrisOnDestruction && DebrisSystem)
+            {
+                DestroyedVoxels.Add(TPair<FIntVector, FColor>(VoxelData.Key, VoxelGrid[X][Y][Z].Color));
+            }
+            
+            // Destroy the voxel
             VoxelGrid[X][Y][Z].bIsActive = false;
             bAnyVoxelDestroyed = true;
             
@@ -747,6 +761,71 @@ void AImprovedVoxelBuilding::DestroyVoxelsAt(FVector Location, FVector ImpactNor
         }
     }
     
+    // Spawn debris for destroyed voxels
+    if (bAnyVoxelDestroyed && bSpawnDebrisOnDestruction && DebrisSystem)
+    {
+        // First, spawn a debris cloud at the impact point if enabled
+        if (bSpawnImpactCloud)
+        {
+            // Convert Location to world space
+            FVector WorldImpactLocation = GetTransform().TransformPosition(Location);    
+            // Get average color of destroyed voxels
+            TArray<FColor> VoxelColors;
+            for (const TPair<FIntVector, FColor>& DestroyedVoxel : DestroyedVoxels)
+            {
+                VoxelColors.Add(DestroyedVoxel.Value);
+            }
+    
+            // Spawn a debris cloud at impact point
+            float ImpactVolume = FMath::Min(Radius * 0.5f, 200.0f);
+            DebrisSystem->SpawnDebrisInVolume(
+                WorldImpactLocation, 
+                FVector(ImpactVolume, ImpactVolume, ImpactVolume), 
+                ImpactNormal,
+                VoxelColors
+            );
+        }
+        
+        // Then spawn individual debris for each destroyed voxel
+        int32 MaxIndividualDebris = FMath::Min(DestroyedVoxels.Num(), 20); // Limit for performance
+        
+        for (int32 i = 0; i < MaxIndividualDebris; i++)
+        {
+            int32 Index = i;
+            if (DestroyedVoxels.Num() > MaxIndividualDebris)
+            {
+                Index = FMath::RandRange(0, DestroyedVoxels.Num() - 1);
+            }
+    
+            FIntVector VoxelCoord = DestroyedVoxels[Index].Key;
+            FColor VoxelColor = DestroyedVoxels[Index].Value;
+    
+            // CORRECTED:
+            // Calculate the local space position of the voxel center
+            FVector LocalVoxelPos = FVector(
+                (VoxelCoord.X + 0.5f) * VoxelSize,
+                (VoxelCoord.Y + 0.5f) * VoxelSize,
+                (VoxelCoord.Z + 0.5f) * VoxelSize
+            );
+    
+            // Transform this position to world space
+            FVector VoxelWorldLocation = GetTransform().TransformPosition(LocalVoxelPos);
+    
+            // Calculate debris count based on distance from impact
+            float DistanceFromImpact = FVector::Dist(VoxelWorldLocation, GetTransform().TransformPosition(Location));
+            float DistanceFactor = FMath::Clamp(1.0f - (DistanceFromImpact / (Radius * 1.5f)), 0.2f, 1.0f);
+    
+            // Spawn debris for this voxel
+            int32 DebrisCount = FMath::RoundToInt(DebrisSystem->DebrisParams.DebrisCountPerVoxel * 
+                                                 DistanceFactor * DebrisAmountMultiplier);
+                                         
+            if (DebrisCount > 0)
+            {
+                DebrisSystem->SpawnDebrisAtLocation(VoxelWorldLocation, ImpactNormal, VoxelColor, DebrisCount);
+            }
+        }
+    }
+    
     // ENHANCEMENT 8: Batch mesh recreation for performance
     if (bAnyVoxelDestroyed)
     {
@@ -754,6 +833,8 @@ void AImprovedVoxelBuilding::DestroyVoxelsAt(FVector Location, FVector ImpactNor
         CreateMesh();
     }
 }
+
+
 bool AImprovedVoxelBuilding::Server_DestroyVoxelsAt_Validate(FVector Location, FVector ImpactNormal, float Radius)
 {
     // Validation basique : s'assurer que le rayon est positif

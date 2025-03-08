@@ -8,7 +8,7 @@ public class Worms_3d : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 	
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "ProceduralMeshComponent", "NetCore", "Chaos",	"FieldSystemEngine",  
+		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "ProceduralMeshComponent", "NetCore", "Chaos","Niagara","FieldSystemEngine",  
 			"ChaosSolverEngine"  });
 
 		PrivateDependencyModuleNames.AddRange(new string[] { "ProceduralMeshComponent", "EnhancedInput", "AIModule" });

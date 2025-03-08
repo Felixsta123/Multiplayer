@@ -79,6 +79,21 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building|Rendering")
     float CubeMargin;
 
+    // Debris system component for visual effects when destroying voxels
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX")
+    class UVoxelDebrisSystem* DebrisSystem;
+
+    // Whether to spawn debris when destroying voxels
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    bool bSpawnDebrisOnDestruction;
+
+    // Multiplier for debris amount
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float DebrisAmountMultiplier;
+
+    // Whether to spawn larger debris cloud at the impact center
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    bool bSpawnImpactCloud;
 
 
     // Fonction statique pour localiser tous les buildings voxel
