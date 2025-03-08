@@ -1,23 +1,28 @@
-// Fichier AWormGameMode.cpp
+// WormGameMode.cpp
 #include "WormGameMode.h"
 
 #include "AIController.h"
 #include "Blueprint/UserWidget.h"
 #include "Kismet/GameplayStatics.h"
 #include "WormGameState.h"
+#include "Worms_3d/AVoxelBuilding.h"
 
 AWormGameMode::AWormGameMode()
 {
     PrimaryActorTick.bCanEverTick = true;
     
-    // Valeurs par défaut
+    // Default values
     TurnDuration = 30.0f;
     CurrentPlayerIndex = 0;
     NewVar = 0;
     local = false;
     
-    // Définir explicitement la classe du GameState
+    // Define GameState class explicitly
     GameStateClass = AWormGameState::StaticClass();
+    
+    // Default values for voxel buildings
+    NumberOfBuildings = 3;
+    SpawnAreaSize = 2000.0f;
     
     UE_LOG(LogTemp, Log, TEXT("WormGameMode constructor - Setting GameStateClass to: %s"), 
         *GameStateClass->GetName());
@@ -27,30 +32,32 @@ void AWormGameMode::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Collecter tous les controllers
+    // Collect all controllers
     GatherAllPlayerControllers();
     
-    // Collecter les points de spawn
+    // Collect spawn points
     UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), SpawnPoints);
     
-    GetWorldTimerManager().SetTimer(TerrainSpawnTimerHandle, this, &AWormGameMode::SpawnDestructibleTerrain, 2.0f, false);
-    // Initialiser les armes pour tous les joueurs
-    GetWorldTimerManager().SetTimer(WeaponSpawnTimerHandle, this, &AWormGameMode::InitializeWeaponsForAllPlayers, 1.0f, false);
+    // Initialize voxel buildings first (changed order to prioritize voxel buildings)
+    GetWorldTimerManager().SetTimer(VoxelBuildingsSpawnTimerHandle, this, &AWormGameMode::GenerateVoxelBuildings, 1.0f, false);
+
+    // Initialize weapons for all players
+    GetWorldTimerManager().SetTimer(WeaponSpawnTimerHandle, this, &AWormGameMode::InitializeWeaponsForAllPlayers, 1.5f, false);
  
-    // Démarrer le premier tour après un délai
-    GetWorldTimerManager().SetTimer(TurnTimerHandle, this, &AWormGameMode::StartNextTurn, 2.0f, false);
+    // Start first turn after a delay
+    GetWorldTimerManager().SetTimer(TurnTimerHandle, this, &AWormGameMode::StartNextTurn, 2.5f, false);
 }
 
 void AWormGameMode::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
     
-    // Mettre à jour le temps restant
+    // Update remaining time
     if (GetWorldTimerManager().IsTimerActive(TurnTimerHandle))
     {
         RemainingTurnTime = GetWorldTimerManager().GetTimerRemaining(TurnTimerHandle);
         
-        // Mettre à jour le GameState pour la réplication
+        // Update GameState for replication
         AWormGameState* WormGS = GetGameState<AWormGameState>();
         if (WormGS)
         {
@@ -59,13 +66,12 @@ void AWormGameMode::Tick(float DeltaTime)
     }
 }
 
-
 void AWormGameMode::GatherAllPlayerControllers()
 {
-    // Vider le tableau existant
+    // Empty existing array
     AllPlayerControllers.Empty();
     
-    // Trouver tous les player controllers
+    // Find all player controllers
     for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
     {
         APlayerController* PlayerController = It->Get();
@@ -75,7 +81,7 @@ void AWormGameMode::GatherAllPlayerControllers()
         }
     }
     
-    // Trouver tous les AI controllers si nécessaire
+    // Find all AI controllers if needed
     TArray<AActor*> AIControllers;
     UGameplayStatics::GetAllActorsOfClass(GetWorld(), AAIController::StaticClass(), AIControllers);
     for (AActor* Actor : AIControllers)
@@ -86,13 +92,13 @@ void AWormGameMode::GatherAllPlayerControllers()
             AllPlayerControllers.Add(AIController);
         }
     }
+    
     AWormGameState* WormGS = GetGameState<AWormGameState>();
     if (WormGS)
     {
         WormGS->UpdatePlayerList(AllPlayerControllers);
     }
 }
-
 
 AWormCharacter* AWormGameMode::GetWormCharacterFromController(AController* Controller)
 {
@@ -104,42 +110,43 @@ AWormCharacter* AWormGameMode::GetWormCharacterFromController(AController* Contr
     APawn* ControlledPawn = Controller->GetPawn();
     return Cast<AWormCharacter>(ControlledPawn);
 }
+
 void AWormGameMode::StartNextTurn()
 {
-    // Vérifier qu'il y a des controllers actifs
+    // Check if there are active controllers
     if (AllPlayerControllers.Num() == 0)
     {
         UE_LOG(LogTemp, Warning, TEXT("No active controllers found!"));
         return;
     }
 
-    // D'abord, recollectons les controllers pour être sûr que notre liste est à jour
+    // First, recollect controllers to ensure our list is up to date
     GatherAllPlayerControllers();
 
-    // Vérifier si la partie est terminée
+    // Check if the game is over
     if (CheckGameEndCondition())
     {
-        // Gérer la fin de partie
+        // Handle game end
         return;
     }
 
-    // Mise à jour du GameState - IMPORTANT: faire ceci AVANT de changer le joueur actif
+    // Update GameState - IMPORTANT: do this BEFORE changing active player
     AWormGameState* WormGS = GetGameState<AWormGameState>();
     if (WormGS)
     {
-        // D'abord, mettre à jour la liste des joueurs avec la liste fraîchement collectée
+        // First, update player list with freshly collected list
         WormGS->UpdatePlayerList(AllPlayerControllers);
     }
     
-    // Trouver le prochain joueur valide
+    // Find next valid player
     int32 OriginalIndex = CurrentPlayerIndex;
     bool FoundValidPlayer = false;
 
     do {
-        // Passer au joueur suivant
+        // Move to next player
         CurrentPlayerIndex = (CurrentPlayerIndex + 1) % AllPlayerControllers.Num();
 
-        // Vérifier si ce joueur est valide (en vie)
+        // Check if this player is valid (alive)
         AController* Controller = AllPlayerControllers[CurrentPlayerIndex];
         AWormCharacter* Character = GetWormCharacterFromController(Controller);
 
@@ -149,7 +156,7 @@ void AWormGameMode::StartNextTurn()
             break;
         }
 
-        // Si on a fait un tour complet et qu'on n'a pas trouvé de joueur valide
+        // If we've done a full loop and haven't found a valid player
         if (CurrentPlayerIndex == OriginalIndex)
         {
             UE_LOG(LogTemp, Warning, TEXT("No valid players found for next turn!"));
@@ -158,12 +165,12 @@ void AWormGameMode::StartNextTurn()
 
     } while (!FoundValidPlayer);
 
-    // Récupérer le controller actif
+    // Get active controller
     AController* ActiveController = AllPlayerControllers[CurrentPlayerIndex];
     UE_LOG(LogTemp, Log, TEXT("Starting turn for player index %d: %s"),
         CurrentPlayerIndex, *ActiveController->GetName());
 
-    // Assurez-vous d'utiliser le nom du pawn et non du controller
+    // Make sure to use pawn name and not controller
     FString PlayerName;
     AWormCharacter* ActiveCharacter = GetWormCharacterFromController(ActiveController);
     if (ActiveCharacter)
@@ -175,18 +182,18 @@ void AWormGameMode::StartNextTurn()
         PlayerName = ActiveController->GetName();
     }
 
-    // IMPORTANT: Utiliser la nouvelle fonction pour définir le joueur actif avec le bon nom
+    // IMPORTANT: Use new function to define active player with correct name
     if (WormGS)
     {
         WormGS->SetCurrentPlayerByIndex(CurrentPlayerIndex);
         WormGS->TurnDuration = TurnDuration;
 
-        // Logging supplémentaire
+        // Additional logging
         UE_LOG(LogTemp, Log, TEXT("Turn duration set to %.1f seconds, player name: %s"),
             TurnDuration, *WormGS->CurrentPlayerName);
     }
 
-    // Désactiver tous les personnages
+    // Deactivate all characters
     for (AController* Controller : AllPlayerControllers)
     {
         AWormCharacter* Character = GetWormCharacterFromController(Controller);
@@ -196,42 +203,42 @@ void AWormGameMode::StartNextTurn()
         }
         if (Character && Character->CurrentWeapon)
         {
-            // Forcer une synchronisation de l'arme pour chaque joueur
+            // Force weapon synchronization for each player
              Character->AttachWeaponToSocket(Character->CurrentWeapon);
         }
     }
 
-    // Activer le personnage du controller actif
+    // Activate character of active controller
     ActiveCharacter = GetWormCharacterFromController(ActiveController);
     if (ActiveCharacter)
     {
         ActiveCharacter->SetIsMyTurn(true);
 
-        // Log pour vérifier que le personnage est bien activé
+        // Log to verify character is activated
         UE_LOG(LogTemp, Log, TEXT("Activated character: %s (Is it local: %s)"),
             *ActiveCharacter->GetName(),
             ActiveController->IsLocalController() ? TEXT("Yes") : TEXT("No"));
     }
 
-    // Appeler l'événement de début de tour
+    // Call turn start event
     OnTurnStarted(ActiveController);
 
-    // Démarrer le timer pour ce tour
+    // Start timer for this turn
     GetWorldTimerManager().SetTimer(TurnTimerHandle, this, &AWormGameMode::OnTurnTimeExpired, TurnDuration, false);
 }
 
 void AWormGameMode::EndCurrentTurn()
 {
-    // Annuler le timer actuel
+    // Cancel current timer
     GetWorldTimerManager().ClearTimer(TurnTimerHandle);
     
-    // Récupérer le controller actif
+    // Get active controller
     AController* ActiveController = nullptr;
     if (AllPlayerControllers.IsValidIndex(CurrentPlayerIndex))
     {
         ActiveController = AllPlayerControllers[CurrentPlayerIndex];
         
-        // Désactiver le personnage actif
+        // Deactivate active character
         AWormCharacter* ActiveCharacter = GetWormCharacterFromController(ActiveController);
         if (ActiveCharacter)
         {
@@ -239,22 +246,22 @@ void AWormGameMode::EndCurrentTurn()
         }
     }
     
-    // Appeler l'événement de fin de tour
+    // Call turn end event
     OnTurnEnded(ActiveController);
     
-    // Démarrer le prochain tour après un délai
+    // Start next turn after a delay
     GetWorldTimerManager().SetTimer(TurnTimerHandle, this, &AWormGameMode::StartNextTurn, 2.0f, false);
 }
 
 void AWormGameMode::OnTurnTimeExpired()
 {
-    // Le temps est écoulé, terminer le tour
+    // Time is up, end turn
     EndCurrentTurn();
 }
 
 bool AWormGameMode::CheckGameEndCondition()
 {
-    // Compter les équipes actives
+    // Count active teams
     TSet<int32> ActiveTeams;
     int32 AlivePlayerCount = 0;
     
@@ -265,16 +272,16 @@ bool AWormGameMode::CheckGameEndCondition()
         {
             AlivePlayerCount++;
             
-            // Si vous avez un système d'équipes, vous pouvez ajouter:
+            // If you have a team system, you can add:
             // int32 TeamID = Character->GetTeamID();
             // ActiveTeams.Add(TeamID);
         }
     }
     
-    // Si un seul joueur reste (ou une seule équipe), la partie est terminée
+    // If only one player remains (or one team), the game is over
     if (AlivePlayerCount <= 1)
     {
-        // Gérer la fin de partie
+        // Handle game end
         return true;
     }
     
@@ -283,7 +290,7 @@ bool AWormGameMode::CheckGameEndCondition()
 
 void AWormGameMode::OnTurnStarted_Implementation(AController* ActiveController)
 {
-    // Cette fonction peut être override en Blueprint
+    // This function can be overridden in Blueprint
     if (ActiveController)
     {
         AWormCharacter* Character = GetWormCharacterFromController(ActiveController);
@@ -297,7 +304,7 @@ void AWormGameMode::OnTurnStarted_Implementation(AController* ActiveController)
 
 void AWormGameMode::OnTurnEnded_Implementation(AController* PreviousController)
 {
-    // Cette fonction peut être override en Blueprint
+    // This function can be overridden in Blueprint
     if (PreviousController)
     {
         AWormCharacter* Character = GetWormCharacterFromController(PreviousController);
@@ -309,113 +316,75 @@ void AWormGameMode::OnTurnEnded_Implementation(AController* PreviousController)
     }
 }
 
-void AWormGameMode::SpawnTestTerrain()
+TArray<AImprovedVoxelBuilding*> AWormGameMode::GetAllVoxelBuildings()
 {
-    // Vérifier que la classe de test est définie
-    if (!TestTerrainClass)
-    {
-        UE_LOG(LogTemp, Error, TEXT("TestTerrainClass non défini dans GameMode!"));
-        return;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Génération du terrain de test..."));
-
-    FActorSpawnParameters SpawnParams;
-    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-    
-    // Position et rotation au centre de la carte, mais légèrement décalé par rapport au terrain normal
-    FVector Location = FVector(0.0f, 200.0f, 0.0f);  // 200 unités devant le terrain normal
-    FRotator Rotation = FRotator::ZeroRotator;
-    
-    // Spawner l'acteur
-    TestTerrain = GetWorld()->SpawnActor<ATestVisibleTerrain>(
-        TestTerrainClass, 
-        Location, 
-        Rotation, 
-        SpawnParams
-    );
-    
-    if (TestTerrain)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Terrain de test généré avec succès: %s"), *TestTerrain->GetName());
-        
-        // Définir les dimensions
-        TestTerrain->SetDimensions(2000.0f, 1000.0f, 100.0f);
-        
-        // Mettre à jour le GameState avec la référence
-        AWormGameState* WormGS = GetGameState<AWormGameState>();
-        if (WormGS)
-        {
-            WormGS->TestTerrain = TestTerrain;
-            UE_LOG(LogTemp, Warning, TEXT("Référence au terrain de test stockée dans GameState"));
-        }
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("Échec de la génération du terrain de test!"));
-    }
+    return AImprovedVoxelBuilding::FindAllVoxelBuildings(this);
 }
 
-void AWormGameMode::SpawnDestructibleTerrain()
+void AWormGameMode::GenerateVoxelBuildings()
 {
-    // Vérifier que la classe de terrain destructible est définie
-    if (!DestructibleTerrainClass)
+    if (!VoxelBuildingClass)
     {
-        UE_LOG(LogTemp, Error, TEXT("DestructibleTerrainClass non défini dans GameMode!"));
+        UE_LOG(LogTemp, Error, TEXT("VoxelBuildingClass not specified in WormGameMode!"));
         return;
     }
 
-    UE_LOG(LogTemp, Warning, TEXT("Génération du terrain destructible..."));
+    UE_LOG(LogTemp, Warning, TEXT("Generating %d voxel buildings..."), NumberOfBuildings);
 
     FActorSpawnParameters SpawnParams;
-    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
 
-    // Position et rotation au centre de la carte
-    FVector Location = FVector(-1000.0f, -100.0f, -2250.0f);
-    FRotator Rotation = FRotator::ZeroRotator;
-
-    // Spawner l'acteur
-    DestructibleTerrain = GetWorld()->SpawnActor<ADestructibleTerrain>(
-        DestructibleTerrainClass,
-        Location,
-        Rotation,
-        SpawnParams
-    );
-
-    if (DestructibleTerrain)
+    // Use fixed values for consistency
+    for (int32 i = 0; i < NumberOfBuildings; i++)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Terrain destructible généré avec succès: %s"), *DestructibleTerrain->GetName());
+        // Calculate random position in area
+        float X = FMath::RandRange(-SpawnAreaSize, SpawnAreaSize);
+        float Y = FMath::RandRange(-SpawnAreaSize, SpawnAreaSize);
+        float Z = 0.0f; // Position buildings at ground level
 
-        // Mettre à jour le GameState avec la référence
-        AWormGameState* WormGS = GetGameState<AWormGameState>();
-        if (WormGS)
-        {
-            WormGS->DestructibleTerrain = DestructibleTerrain;
-            UE_LOG(LogTemp, Warning, TEXT("Référence au terrain destructible stockée dans GameState"));
-        }
+        FVector Location = FVector(X, Y, Z);
+        FRotator Rotation = FRotator(0.0f, FMath::RandRange(0.0f, 360.0f), 0.0f);
 
-        // Ajouter un appel forcé à la mise à jour visuelle après un délai
-        FTimerHandle UpdateTimerHandle;
-        GetWorld()->GetTimerManager().SetTimer(
-            UpdateTimerHandle,
-            [this]() { 
-                if (DestructibleTerrain) {
-                    DestructibleTerrain->Multicast_ForceVisualUpdate();
-                }
-            },
-            2.0f,
-            false
+        // Spawn voxel building
+        AImprovedVoxelBuilding* Building = GetWorld()->SpawnActor<AImprovedVoxelBuilding>(
+            VoxelBuildingClass,
+            Location,
+            Rotation,
+            SpawnParams
         );
+        
+        if (Building)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Voxel building %d generated at %s"), i, *Location.ToString());
+
+            // Configure with fixed values
+            Building->GridSizeX = 10;
+            Building->GridSizeY = 10;
+            Building->GridSizeZ = 10;
+            Building->VoxelSize = 100.0f;
+            Building->SmoothingFactor = 0.01f;
+            Building->bUseRandomColors = true;
+            Building->CubeMargin = 0.02f;
+            Building->bUseDoubleSidedGeometry = true;
+
+            // Generate building
+            Building->GenerateBuilding();
+        }
     }
-    else
+    
+    // Update GameState with reference to buildings
+    AWormGameState* WormGS = GetGameState<AWormGameState>();
+    if (WormGS)
     {
-        UE_LOG(LogTemp, Error, TEXT("Échec de la génération du terrain destructible!"));
+        // If needed, you can expose a property in GameState to store buildings
+        // For now, just log success
+        UE_LOG(LogTemp, Warning, TEXT("Voxel buildings generated and available through Game Mode"));
     }
 }
 
 void AWormGameMode::InitializeWeaponsForAllPlayers()
 {
-    // Vérifier qu'on a des armes définies
+    // Check if we have defined weapons
     if (AvailableWeaponTypes.Num() == 0)
     {
         UE_LOG(LogTemp, Error, TEXT("❌ No weapon types defined in GameMode!"));
@@ -425,18 +394,18 @@ void AWormGameMode::InitializeWeaponsForAllPlayers()
     UE_LOG(LogTemp, Warning, TEXT("✅ Initializing weapons for all players (%d weapon types available)"), 
         AvailableWeaponTypes.Num());
 
-    // Recollectons les controllers pour plus de sécurité
+    // Recollect controllers for safety
     GatherAllPlayerControllers();
 
-    // Distribuer les armes à tous les personnages un par un avec un léger délai
+    // Distribute weapons to all characters one by one with slight delay
     for (int32 i = 0; i < AllPlayerControllers.Num(); i++)
     {
         AController* Controller = AllPlayerControllers[i];
         
-        // Créer une capture locale des variables pour le lambda
+        // Create local capture of variables for lambda
         int32 PlayerIndex = i;
         
-        // Ajouter un léger délai pour chaque joueur pour éviter les conflits
+        // Add slight delay for each player to avoid conflicts
         GetWorld()->GetTimerManager().SetTimer(
             WeaponSpawnTimerHandle,
             [this, Controller, PlayerIndex]() {
@@ -453,17 +422,17 @@ void AWormGameMode::InitializeWeaponsForAllPlayers()
                         Controller ? *Controller->GetName() : TEXT("NULL"));
                 }
             },
-            0.5f + (0.2f * i),  // Délai progressif pour chaque joueur
+            0.5f + (0.2f * i),  // Progressive delay for each player
             false
         );
     }
 
-    // Programmer une vérification retardée pour s'assurer que tous les personnages ont bien leurs armes
+    // Schedule delayed check to ensure all characters have their weapons
     FTimerHandle WeaponCheckTimer;
     GetWorld()->GetTimerManager().SetTimer(
         WeaponCheckTimer,
         [this]() {
-            UE_LOG(LogTemp, Warning, TEXT("Verification des armes pour tous les joueurs..."));
+            UE_LOG(LogTemp, Warning, TEXT("Verifying weapons for all players..."));
             for (AController* Controller : AllPlayerControllers)
             {
                 AWormCharacter* Character = GetWormCharacterFromController(Controller);
@@ -474,12 +443,12 @@ void AWormGameMode::InitializeWeaponsForAllPlayers()
                 }
                 else if (Character && Character->CurrentWeapon)
                 {
-                    UE_LOG(LogTemp, Warning, TEXT("Verification: %s a déjà l'arme %s"), 
+                    UE_LOG(LogTemp, Warning, TEXT("Verification: %s already has weapon %s"), 
                         *Character->GetName(), *Character->CurrentWeapon->GetName());
                 }
             }
         },
-        3.0f,  // Vérification après 3 secondes
+        3.0f,  // Check after 3 seconds
         false
     );
 }

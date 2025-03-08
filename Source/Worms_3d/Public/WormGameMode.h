@@ -1,4 +1,4 @@
-// Fichier AWormGameMode.h
+// WormGameMode.h
 #pragma once
 
 #include "CoreMinimal.h"
@@ -6,6 +6,7 @@
 #include "TestVisibleTerrain.h"
 #include "../AWormCharacter.h"
 #include "ADestructibleTerrain.h"
+#include "Worms_3d/AVoxelBuilding.h" // Added VoxelBuilding include
 #include "WormGameMode.generated.h"
 
 UCLASS()
@@ -16,11 +17,11 @@ class WORMS_3D_API AWormGameMode : public AGameMode
 public:
     AWormGameMode();
 
-    // Override des fonctions standard de GameMode
+    // Override standard GameMode functions
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
     
-    // Fonctions pour la gestion des tours
+    // Turn management functions
     UFUNCTION(BlueprintCallable, Category = "Turns")
     void StartNextTurn();
     
@@ -33,87 +34,84 @@ public:
     UFUNCTION(BlueprintNativeEvent, Category = "Turns")
     void OnTurnEnded(AController* PreviousController);
 
-    // Tableau des controllers actifs (comme dans le BP)
+    // Array of active controllers
     UPROPERTY(BlueprintReadWrite, Category = "Turns")
     TArray<AController*> AllPlayerControllers;
     
-    // Points de spawn
+    // Spawn points
     UPROPERTY(BlueprintReadWrite, Category = "Game")
     TArray<AActor*> SpawnPoints;
 
-    // Fonction utilitaire pour obtenir le personnage contrôlé par un controller
+    // Utility function to get character controlled by a controller
     UFUNCTION(BlueprintCallable, Category = "Helpers")
     AWormCharacter* GetWormCharacterFromController(AController* Controller);
 
-    // Index du controller actif
+    // Index of active controller
     UPROPERTY(BlueprintReadWrite, Category = "Turns")
     int32 CurrentPlayerIndex;
     
-    // Durée du tour en secondes
+    // Turn duration in seconds
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Turns")
     float TurnDuration;
     
-    // Temps restant pour le tour actuel
+    // Remaining time for current turn
     UPROPERTY(BlueprintReadWrite, Category = "Turns")
     float RemainingTurnTime;
-    // Ajoutez ces propriétés dans la classe AWormGameMode:
-    UPROPERTY(EditDefaultsOnly, Category = "Test")
-    TSubclassOf<ATestVisibleTerrain> TestTerrainClass;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Test")
-    ATestVisibleTerrain* TestTerrain;
-
-    // Ajoutez cette fonction:
-    UFUNCTION(BlueprintCallable, Category = "Test")
-    void SpawnTestTerrain();
-
+    
+    // Available weapon types for distribution to players
     UPROPERTY(EditDefaultsOnly, Category = "Weapons")
     TArray<TSubclassOf<AWormWeapon>> AvailableWeaponTypes;
 
-    // Fonction pour distribuer les armes aux personnages
+    // Function to distribute weapons to characters
     UFUNCTION(BlueprintCallable, Category = "Game")
     void InitializeWeaponsForAllPlayers();
     
-protected:
+    // Voxel building properties
+    UPROPERTY(EditDefaultsOnly, Category = "Voxel Building")
+    TSubclassOf<AImprovedVoxelBuilding> VoxelBuildingClass;
+    
+    UPROPERTY(EditDefaultsOnly, Category = "Voxel Building")
+    int32 NumberOfBuildings;
+    
+    UPROPERTY(EditDefaultsOnly, Category = "Voxel Building")
+    float SpawnAreaSize;
 
-    // Variables diverses comme dans votre BP
+    // Function to generate voxel buildings
+    UFUNCTION(BlueprintCallable, Category = "Voxel Building")
+    void GenerateVoxelBuildings();
+    
+    // Function to find all voxel buildings in the level
+    UFUNCTION(BlueprintCallable, Category = "Voxel Building")
+    TArray<AImprovedVoxelBuilding*> GetAllVoxelBuildings();
+    
+protected:
+    // Miscellaneous variables 
     UPROPERTY(BlueprintReadWrite, Category = "Game")
     int32 NewVar;
     
     UPROPERTY(BlueprintReadWrite, Category = "Game")
     bool local;
     
-    UPROPERTY(BlueprintReadWrite, Category = "Game")
-    TArray<AActor*> Terrain;
-    
 
-    // Timer handle pour le tour
+    // Turn timer handle
     FTimerHandle TurnTimerHandle;
-    // Timer handle pour le spawn retardé
+    
+    // Delayed spawn timer handles
     FTimerHandle TerrainSpawnTimerHandle;
-
+    FTimerHandle VoxelBuildingsSpawnTimerHandle;
     FTimerHandle WeaponSpawnTimerHandle;
-    // Fonction pour collecter tous les controllers
+
+    // Function to collect all controllers
     UFUNCTION(BlueprintCallable, Category = "Game")
     void GatherAllPlayerControllers();
     
-    // Fonction appelée quand le temps est écoulé
+    // Function called when time expires
     UFUNCTION()
     void OnTurnTimeExpired();
     
-    // Fonction pour vérifier la condition de fin de partie
+    // Function to check game end condition
     UFUNCTION(BlueprintCallable, Category = "Game")
     bool CheckGameEndCondition();
     
-    UPROPERTY(EditDefaultsOnly, Category = "Terrain")
-    TSubclassOf<ADestructibleTerrain> DestructibleTerrainClass;
-    
-    // Instance du terrain destructible
-    UPROPERTY(BlueprintReadOnly, Category = "Terrain")
-    ADestructibleTerrain* DestructibleTerrain;
-    
-    // Fonction pour spawner le terrain destructible
-    UFUNCTION(BlueprintCallable, Category = "Terrain")
-    void SpawnDestructibleTerrain();
-
 };
