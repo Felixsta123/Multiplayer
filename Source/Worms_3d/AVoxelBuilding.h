@@ -118,8 +118,9 @@ protected:
     
     // Add only visible faces to reduce polygon count
     void AddVisibleFacesToMesh(int32 X, int32 Y, int32 Z, TArray<FVector>& Vertices, TArray<int32>& Triangles, 
-                        TArray<FVector>& Normals, TArray<FVector2D>& UVs, TArray<FColor>& Colors, TArray<FProcMeshTangent>& Tangents);
-    
+                          TArray<FVector>& Normals, TArray<FVector2D>& UVs, TArray<FColor>& Colors, TArray<FProcMeshTangent>& Tangents,
+                          bool bBottomFaceVisible, bool bTopFaceVisible, bool bLeftFaceVisible, bool bRightFaceVisible,
+                          bool bBackFaceVisible, bool bFrontFaceVisible);   
     // Helper functions for mesh creation
     void AddFaceTriangles(TArray<int32>& Triangles, int32 BaseIndex, bool bReversed);
     void AddFaceNormals(TArray<FVector>& Normals, FVector Normal, int32 Count);

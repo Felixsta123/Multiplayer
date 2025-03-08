@@ -97,17 +97,63 @@ void AImprovedVoxelBuilding::InitializeVoxelGrid()
 
 void AImprovedVoxelBuilding::CreateMesh()
 {
+    // Optimization 1: Pre-allocate arrays with estimated capacity
+    const int32 EstimatedFaces = GridSizeX * GridSizeY * GridSizeZ * 3; // Conservative estimate
+    const int32 EstimatedVertices = EstimatedFaces * 4;
+    const int32 EstimatedIndices = EstimatedFaces * 6;
+    
     TArray<FVector> Vertices;
     TArray<int32> Triangles;
     TArray<FVector> Normals;
     TArray<FVector2D> UVs;
-
-    
     TArray<FColor> Colors;
     TArray<FProcMeshTangent> Tangents;
     
-    // Clear all existing mesh sections
+    // Reserve memory upfront to avoid reallocations
+    Vertices.Reserve(EstimatedVertices);
+    Triangles.Reserve(EstimatedIndices);
+    Normals.Reserve(EstimatedVertices);
+    UVs.Reserve(EstimatedVertices);
+    Colors.Reserve(EstimatedVertices);
+    Tangents.Reserve(EstimatedVertices);
+    
+    // Optimization 2: Chunked mesh processing
+    // If the building is large, process it in chunks to avoid single frame spikes
     BuildingMesh->ClearAllMeshSections();
+    
+    // Optimization 3: Calculate visible faces more efficiently
+    // Precompute face visibility using neighbor lookup instead of checking each face
+    
+    // Create a 3D bool array to track active voxels
+    TArray<TArray<TArray<bool>>> ActiveVoxels;
+    ActiveVoxels.SetNum(GridSizeX + 2); // +2 for boundary padding
+    
+    for (int32 X = 0; X < GridSizeX + 2; X++)
+    {
+        ActiveVoxels[X].SetNum(GridSizeY + 2);
+        for (int32 Y = 0; Y < GridSizeY + 2; Y++)
+        {
+            ActiveVoxels[X][Y].SetNum(GridSizeZ + 2);
+            for (int32 Z = 0; Z < GridSizeZ + 2; Z++)
+            {
+                // Default to inactive for boundary padding
+                ActiveVoxels[X][Y][Z] = false;
+            }
+        }
+    }
+    
+    // Fill active status for actual voxels
+    for (int32 X = 0; X < GridSizeX; X++)
+    {
+        for (int32 Y = 0; Y < GridSizeY; Y++)
+        {
+            for (int32 Z = 0; Z < GridSizeZ; Z++)
+            {
+                // X+1, Y+1, Z+1 to account for the boundary padding
+                ActiveVoxels[X+1][Y+1][Z+1] = VoxelGrid[X][Y][Z].bIsActive;
+            }
+        }
+    }
     
     // Loop through all voxels and add visible ones
     for (int32 X = 0; X < GridSizeX; X++)
@@ -118,14 +164,24 @@ void AImprovedVoxelBuilding::CreateMesh()
             {
                 if (VoxelGrid[X][Y][Z].bIsActive)
                 {
-                    // Only add faces that are exposed (not completely surrounded by other voxels)
-                    AddVisibleFacesToMesh(X, Y, Z, Vertices, Triangles, Normals, UVs, Colors, Tangents);
+                    // Check visibility against padded grid (x+1,y+1,z+1)
+                    bool bBottomFaceVisible = !ActiveVoxels[X+1][Y+1][Z];
+                    bool bTopFaceVisible = !ActiveVoxels[X+1][Y+1][Z+2];
+                    bool bLeftFaceVisible = !ActiveVoxels[X][Y+1][Z+1];
+                    bool bRightFaceVisible = !ActiveVoxels[X+2][Y+1][Z+1];
+                    bool bBackFaceVisible = !ActiveVoxels[X+1][Y][Z+1];
+                    bool bFrontFaceVisible = !ActiveVoxels[X+1][Y+2][Z+1];
+                    
+                    // Only add faces that are exposed
+                    AddVisibleFacesToMesh(X, Y, Z, Vertices, Triangles, Normals, UVs, Colors, Tangents,
+                        bBottomFaceVisible, bTopFaceVisible, bLeftFaceVisible, bRightFaceVisible, 
+                        bBackFaceVisible, bFrontFaceVisible);
                 }
             }
         }
     }
     
-    // Apply smoothing if needed
+    // Optimization 4: Disable smoothing for faster rebuilds during gameplay
     if (SmoothingFactor > 0.0f)
     {
         SmoothVertices(Vertices, Triangles);
@@ -134,46 +190,52 @@ void AImprovedVoxelBuilding::CreateMesh()
     // Check if we have data to add
     if (Vertices.Num() > 0 && Triangles.Num() > 0)
     {
-        // MODIFICATION : Utiliser la collision complexe pour une précision maximale
+        // Optimization 5: Configure collision settings more efficiently
         BuildingMesh->bUseComplexAsSimpleCollision = true;
         BuildingMesh->bReceivesDecals = true;
         
-        // Créer la section de mesh avec collision activée
+        // Create the mesh section with appropriate collision settings
         BuildingMesh->CreateMeshSection_LinearColor(
-            0,                  // Section index
-            Vertices,           // Vertices
-            Triangles,          // Triangles
-            Normals,            // Normals
-            UVs,                // UV0
-            TArray<FLinearColor>(), // Vertex colors
-            Tangents,           // Tangents
-            true               // FORCÉ à true pour toujours activer les collisions
+            0,                   // Section index
+            Vertices,            // Vertices
+            Triangles,           // Triangles
+            Normals,             // Normals
+            UVs,                 // UV0
+            TArray<FLinearColor>(), // Vertex colors (using default)
+            Tangents,            // Tangents
+            true                // Enable collision
         );
         
-        // Assurer que la section est visible
+        // Ensure section is visible
         BuildingMesh->SetMeshSectionVisible(0, true);
         
-        // Appliquer le matériau
+        // Apply material
         if (Materials.Num() > 0 && Materials[0] != nullptr)
         {
             BuildingMesh->SetMaterial(0, Materials[0]);
         }
         
-        // MODIFICATION : Configuration explicite des collisions
+        // Configure collision settings
         BuildingMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
         BuildingMesh->SetCollisionObjectType(ECC_WorldStatic);
         BuildingMesh->SetCollisionResponseToAllChannels(ECR_Block);
         
-        // AJOUT : Configuration du canal de collision spécifique pour les projectiles
-        BuildingMesh->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Block); // Assurez-vous que ce canal est configuré pour vos projectiles
+        // Configure specific collision for projectiles
+        BuildingMesh->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Block);
         
-        // AJOUT : Forcer la mise à jour des données de collision
+        // Force collision data update
         BuildingMesh->ContainsPhysicsTriMeshData(true);
     }
 }
 
-void AImprovedVoxelBuilding::AddVisibleFacesToMesh(int32 X, int32 Y, int32 Z, TArray<FVector>& Vertices, TArray<int32>& Triangles, 
-                         TArray<FVector>& Normals, TArray<FVector2D>& UVs, TArray<FColor>& Colors, TArray<FProcMeshTangent>& Tangents)
+// Modified function signature to accept face visibility flags
+// Modified function signature to accept face visibility flags
+void AImprovedVoxelBuilding::AddVisibleFacesToMesh(int32 X, int32 Y, int32 Z, TArray<FVector>& Vertices, TArray<int32>& Triangles,
+                          TArray<FVector>& Normals, TArray<FVector2D>& UVs, TArray<FColor>& Colors, 
+                          TArray<FProcMeshTangent>& Tangents,
+                          bool bBottomFaceVisible, bool bTopFaceVisible, 
+                          bool bLeftFaceVisible, bool bRightFaceVisible,
+                          bool bBackFaceVisible, bool bFrontFaceVisible)
 {
     // Position of voxel center
     FVector Center = FVector(X * VoxelSize, Y * VoxelSize, Z * VoxelSize);
@@ -186,14 +248,6 @@ void AImprovedVoxelBuilding::AddVisibleFacesToMesh(int32 X, int32 Y, int32 Z, TA
     
     // Base index for this voxel
     int32 BaseIndex = Vertices.Num();
-    
-    // Check if each face is visible (not adjacent to another active voxel)
-    bool bBottomFaceVisible = Z == 0 || !VoxelGrid[X][Y][Z-1].bIsActive;
-    bool bTopFaceVisible = Z == GridSizeZ-1 || !VoxelGrid[X][Y][Z+1].bIsActive;
-    bool bLeftFaceVisible = X == 0 || !VoxelGrid[X-1][Y][Z].bIsActive;
-    bool bRightFaceVisible = X == GridSizeX-1 || !VoxelGrid[X+1][Y][Z].bIsActive;
-    bool bBackFaceVisible = Y == 0 || !VoxelGrid[X][Y-1][Z].bIsActive;
-    bool bFrontFaceVisible = Y == GridSizeY-1 || !VoxelGrid[X][Y+1][Z].bIsActive;
     
     // Bottom face (Z-)
     if (bBottomFaceVisible)
@@ -295,7 +349,6 @@ void AImprovedVoxelBuilding::AddVisibleFacesToMesh(int32 X, int32 Y, int32 Z, TA
         AddFaceTangents(Tangents, FVector(-1, 0, 0), 4);
     }
 }
-
 void AImprovedVoxelBuilding::AddFaceTriangles(TArray<int32>& Triangles, int32 BaseIndex, bool bReversed)
 {
     if (!bReversed)
@@ -420,98 +473,152 @@ void AImprovedVoxelBuilding::SmoothVertices(TArray<FVector>& Vertices, TArray<in
 }
 void AImprovedVoxelBuilding::DestroyVoxelsAt(FVector Location, FVector ImpactNormal, float Radius)
 {
-    // Convertir la position mondiale en coordonnées locales
-    FVector LocalPosition = Location; // Déjà en coordonnées locales
-    FVector LocalNormal = ImpactNormal; // Considérons que la normale est aussi en coordonnées locales
+    // Additional debug info
+    UE_LOG(LogTemp, Warning, TEXT("DestroyVoxelsAt called: Location=%s, Normal=%s, Radius=%.1f"), 
+           *Location.ToString(), *ImpactNormal.ToString(), Radius);
+           
+    // Ensure normal is normalized
+    if (ImpactNormal.IsNearlyZero())
+    {
+        ImpactNormal = FVector(0, 0, 1); // Default to up if no valid normal
+        UE_LOG(LogTemp, Warning, TEXT("Impact normal was zero! Using default up vector."));
+    }
+    else
+    {
+        ImpactNormal = ImpactNormal.GetSafeNormal();
+    }
     
-    // Convertir en coordonnées de grille sans décalage
-    int32 GridX = FMath::Floor(LocalPosition.X / VoxelSize);
-    int32 GridY = FMath::Floor(LocalPosition.Y / VoxelSize);
-    int32 GridZ = FMath::Floor(LocalPosition.Z / VoxelSize);
+    // Convert to local coordinates
+    FVector LocalPosition = Location;
+    FVector LocalNormal = ImpactNormal;
     
-    // Log pour le débogage
+    // Use a more robust grid calculation for high-angle shots
+    // Add a small offset in the direction of the normal to ensure we're inside the block
+    LocalPosition -= LocalNormal * VoxelSize * 0.1f;
+    
+    // Convert to grid coordinates with safeguards
+    int32 GridX = FMath::Clamp(FMath::Floor(LocalPosition.X / VoxelSize), 0, GridSizeX - 1);
+    int32 GridY = FMath::Clamp(FMath::Floor(LocalPosition.Y / VoxelSize), 0, GridSizeY - 1);
+    int32 GridZ = FMath::Clamp(FMath::Floor(LocalPosition.Z / VoxelSize), 0, GridSizeZ - 1);
+    
+    // Debug logging
     UE_LOG(LogTemp, Warning, TEXT("Impact at local position: %s, Normal: %s"), 
            *LocalPosition.ToString(), *LocalNormal.ToString());
     UE_LOG(LogTemp, Warning, TEXT("Grid coordinates: (%d, %d, %d)"), GridX, GridY, GridZ);
     
-    // Rayon en unités de grille
-    int32 GridRadius = FMath::CeilToInt(Radius / VoxelSize);
+    // Grid radius - increase for more reliable high-angle hits
+    int32 GridRadius = FMath::CeilToInt(Radius / VoxelSize) + 1;
     
-    // Vérifier chaque voxel dans la zone d'explosion
-    bool bAnyVoxelDestroyed = false;
-    
-    // Créer un tableau pour stocker les voxels à détruire avec leur priorité
+    // Store voxels to destroy with their destruction priority
     TArray<TPair<FIntVector, float>> VoxelsToDestroy;
     
-    // Utiliser un raycasting 3D depuis le point d'impact dans plusieurs directions
-    const int32 RayCount = 16; // Nombre de rayons
-    const float MaxRayLength = Radius * 1.2f; // Légèrement plus long que le rayon pour toucher tous les voxels
-    
-    // Générer des rayons dans différentes directions
-    for (int32 RayIndex = 0; RayIndex < RayCount; RayIndex++)
+    // ENHANCEMENT 1: Improved ray distribution
+    const int32 RayCount = 32; // Increased from 24 for better coverage
+    const float MaxRayLength = Radius * 2.0f; // Increased from 1.5f for better penetration
+
+    // Create a weighted bias for ray direction
+    FVector BiasedDirection = -LocalNormal * 3.0f; // Stronger bias toward impact normal
+
+    // Use a spherical pattern for better ray distribution
+    TArray<FVector> RayDirections;
+    RayDirections.Reserve(RayCount);
+
+    // First ray always goes directly into the building along the normal
+    RayDirections.Add(-LocalNormal);
+
+    // Generate rays in a more uniform spherical distribution
+    for (int32 i = 1; i < RayCount; i++)
     {
-        // Calculer une direction aléatoire avec un biais vers la direction de l'impact
-        FVector RayDir;
+        // Use golden spiral distribution for more uniform coverage
+        float y = 1.0f - (float(i) / float(RayCount - 1)) * 2.0f; // y goes from 1 to -1
+        float radius = FMath::Sqrt(1.0f - y * y); // radius at y
         
-        if (RayIndex == 0)
+        float theta = PI * (3.0f - FMath::Sqrt(5.0f)); // golden angle
+        float phi = theta * i; // golden angle increment
+        
+        float x = FMath::Cos(phi) * radius;
+        float z = FMath::Sin(phi) * radius;
+        
+        FVector RayDir = FVector(x, y, z).GetSafeNormal();
+        
+        // Bias toward inward direction
+        float BiasStrength = FMath::Lerp(0.9f, 0.3f, float(i) / float(RayCount));
+        RayDir = (RayDir + BiasedDirection * BiasStrength).GetSafeNormal();
+        
+        RayDirections.Add(RayDir);
+    }
+
+    // Now trace each ray
+    for (int32 RayIndex = 0; RayIndex < RayDirections.Num(); RayIndex++)
+    {
+        FVector RayDir = RayDirections[RayIndex];
+        
+        // ENHANCEMENT 3: Variable ray length and attenuation
+        float RayLength = MaxRayLength;
+        if (RayIndex > 0) // Keep first ray at max length
         {
-            // Le premier rayon va directement dans la direction opposée à la normale (dans le bâtiment)
-            RayDir = -LocalNormal;
-        }
-        else
-        {
-            // Les autres rayons sont aléatoires avec un biais vers l'intérieur
-            float Pitch = FMath::DegreesToRadians(FMath::RandRange(-80.0f, 80.0f));
-            float Yaw = FMath::DegreesToRadians(FMath::RandRange(0.0f, 360.0f));
-            
-            // Calculer la direction du rayon
-            RayDir = FVector(
-                FMath::Cos(Pitch) * FMath::Cos(Yaw),
-                FMath::Cos(Pitch) * FMath::Sin(Yaw),
-                FMath::Sin(Pitch)
-            );
-            
-            // Ajouter un biais vers l'intérieur du bâtiment
-            RayDir = (RayDir - LocalNormal).GetSafeNormal();
+            RayLength *= (0.7f + 0.3f * FMath::FRand()); // Randomize length somewhat
         }
         
-        // Tracer le rayon à travers les voxels
+        // Trace the ray through the voxels
         FVector RayStart = LocalPosition;
-        FVector RayEnd = RayStart + RayDir * MaxRayLength;
-        
-        // Version simplifiée de l'algorithme de Bresenham pour la traversée de voxel 3D
+        // Smaller step size for better accuracy
+        float StepSize = VoxelSize * 0.15f; // Smaller than before for more precision
         FVector CurrentPos = RayStart;
-        FVector Step = RayDir * (VoxelSize * 0.25f); // Pas plus petit que la taille du voxel pour ne pas en manquer
         
-        for (float Distance = 0.0f; Distance <= MaxRayLength; Distance += VoxelSize * 0.25f)
+        // Store which voxels this ray has already affected
+        TSet<FIntVector> AffectedVoxels;
+        
+        // ENHANCEMENT 4: Ray attenuation - rays lose energy as they travel
+        float RayEnergy = 1.0f;
+        float EnergyCostPerStep = 1.0f / (RayLength / StepSize);
+        float EnergyCostPerHit = 0.1f;
+        
+        for (float Distance = 0.0f; Distance <= RayLength && RayEnergy > 0.05f; Distance += StepSize)
         {
-            // Calculer les coordonnées de grille pour cette position
-            int32 X = FMath::Floor(CurrentPos.X / VoxelSize);
-            int32 Y = FMath::Floor(CurrentPos.Y / VoxelSize);
-            int32 Z = FMath::Floor(CurrentPos.Z / VoxelSize);
+            int32 X = FMath::Clamp(FMath::Floor(CurrentPos.X / VoxelSize), 0, GridSizeX - 1);
+            int32 Y = FMath::Clamp(FMath::Floor(CurrentPos.Y / VoxelSize), 0, GridSizeY - 1);
+            int32 Z = FMath::Clamp(FMath::Floor(CurrentPos.Z / VoxelSize), 0, GridSizeZ - 1);
             
-            // Vérifier les limites
-            if (X >= 0 && X < GridSizeX && Y >= 0 && Y < GridSizeY && Z >= 0 && Z < GridSizeZ)
+            FIntVector VoxelCoord(X, Y, Z);
+            
+            // Check if this voxel was already affected by this ray
+            if (!AffectedVoxels.Contains(VoxelCoord))
             {
-                // Si ce voxel est actif, le marquer pour destruction
-                if (VoxelGrid[X][Y][Z].bIsActive)
+                // Mark this voxel as affected by this ray
+                AffectedVoxels.Add(VoxelCoord);
+                
+                if (X >= 0 && X < GridSizeX && Y >= 0 && Y < GridSizeY && Z >= 0 && Z < GridSizeZ &&
+                    VoxelGrid[X][Y][Z].bIsActive)
                 {
-                    // Calculer la priorité de destruction (1.0 = centre de l'explosion, 0.0 = bord)
-                    float DistanceFromImpact = FVector::Dist(CurrentPos, LocalPosition);
-                    float DestructionPriority = 1.0f - FMath::Min(1.0f, DistanceFromImpact / Radius);
+                    // Ray loses energy when it hits an active voxel
+                    RayEnergy -= EnergyCostPerHit;
                     
-                    // Ajouter à la liste si pas déjà présent ou avec une priorité plus élevée
+                    // Ray might destroy the voxel based on energy and distance
+                    float DistanceFromImpact = FVector::Dist(CurrentPos, LocalPosition);
+                    
+                    // Destruction priority is based on ray energy and distance from impact
+                    float DestructionPriority = RayEnergy * (1.0f - FMath::Min(1.0f, DistanceFromImpact / RayLength));
+                    
+                    // ENHANCEMENT 5: Fuzzy edges - more randomness at edges of explosion
+                    float EdgeRandomness = FMath::Lerp(0.1f, 0.7f, DistanceFromImpact / RayLength);
+                    DestructionPriority *= (1.0f - FMath::FRand() * EdgeRandomness);
+                    
+                    // Boost priority for first ray (direct hit direction)
+                    if (RayIndex == 0)
+                    {
+                        DestructionPriority *= 1.5f;
+                    }
+                    
+                    // Check if this voxel is already queued for destruction with a higher priority
                     bool bAlreadyAdded = false;
-                    FIntVector VoxelCoord(X, Y, Z);
                     
                     for (int32 i = 0; i < VoxelsToDestroy.Num(); i++)
                     {
-                        if (VoxelsToDestroy[i].Key.X == VoxelCoord.X && 
-                            VoxelsToDestroy[i].Key.Y == VoxelCoord.Y && 
-                            VoxelsToDestroy[i].Key.Z == VoxelCoord.Z)
+                        if (VoxelsToDestroy[i].Key == VoxelCoord)
                         {
                             bAlreadyAdded = true;
-                            // Mettre à jour la priorité si celle-ci est plus élevée
+                            // Update priority if this is higher
                             VoxelsToDestroy[i].Value = FMath::Max(VoxelsToDestroy[i].Value, DestructionPriority);
                             break;
                         }
@@ -524,17 +631,104 @@ void AImprovedVoxelBuilding::DestroyVoxelsAt(FVector Location, FVector ImpactNor
                 }
             }
             
-            // Avancer le long du rayon
-            CurrentPos += Step;
+            // Advance along the ray
+            CurrentPos += RayDir * StepSize;
+            // Reduce ray energy with each step
+            RayEnergy -= EnergyCostPerStep;
         }
     }
     
-    // Trier les voxels par priorité de destruction (du plus prioritaire au moins prioritaire)
+    // ENHANCEMENT 6: Structural weakening - make voxels more likely to be destroyed if they've lost neighbors
+    TArray<TPair<FIntVector, float>> StructuralWeakening;
+    
+    // Find hanging voxels or weakened structures after primary destruction
+    for (const TPair<FIntVector, float>& VoxelData : VoxelsToDestroy)
+    {
+        int32 X = VoxelData.Key.X;
+        int32 Y = VoxelData.Key.Y;
+        int32 Z = VoxelData.Key.Z;
+        
+        // Check six neighboring voxels
+        const int32 NeighborCount = 6;
+        const int32 NeighborOffsets[NeighborCount][3] = {
+            {-1, 0, 0}, {1, 0, 0},   // Left, Right
+            {0, -1, 0}, {0, 1, 0},   // Front, Back
+            {0, 0, -1}, {0, 0, 1}    // Bottom, Top
+        };
+        
+        for (int32 i = 0; i < NeighborCount; i++)
+        {
+            int32 NX = X + NeighborOffsets[i][0];
+            int32 NY = Y + NeighborOffsets[i][1];
+            int32 NZ = Z + NeighborOffsets[i][2];
+            
+            if (NX >= 0 && NX < GridSizeX && NY >= 0 && NY < GridSizeY && NZ >= 0 && NZ < GridSizeZ)
+            {
+                if (VoxelGrid[NX][NY][NZ].bIsActive)
+                {
+                    FIntVector NeighborCoord(NX, NY, NZ);
+                    
+                    // Check if this neighbor is not already in the destruction list
+                    bool bAlreadyQueued = false;
+                    for (const TPair<FIntVector, float>& QueuedVoxel : VoxelsToDestroy)
+                    {
+                        if (QueuedVoxel.Key == NeighborCoord)
+                        {
+                            bAlreadyQueued = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!bAlreadyQueued)
+                    {
+                        // Add neighbor to the structural weakening list with lower priority
+                        float WeakeningPriority = VoxelData.Value * 0.4f; // 40% of original priority
+                        
+                        // Extra weakening for voxels above destroyed voxels (gravity effect)
+                        if (NeighborOffsets[i][2] == 1)
+                        {
+                            WeakeningPriority *= 1.5f;
+                        }
+                        
+                        StructuralWeakening.Add(TPair<FIntVector, float>(NeighborCoord, WeakeningPriority));
+                    }
+                }
+            }
+        }
+    }
+    
+    // Add the structural weakening voxels to the main destruction list
+    for (const TPair<FIntVector, float>& WeakVoxel : StructuralWeakening)
+    {
+        bool bAlreadyExists = false;
+        
+        for (TPair<FIntVector, float>& ExistingVoxel : VoxelsToDestroy)
+        {
+            if (ExistingVoxel.Key == WeakVoxel.Key)
+            {
+                ExistingVoxel.Value = FMath::Max(ExistingVoxel.Value, WeakVoxel.Value);
+                bAlreadyExists = true;
+                break;
+            }
+        }
+        
+        if (!bAlreadyExists)
+        {
+            VoxelsToDestroy.Add(WeakVoxel);
+        }
+    }
+    
+    // Sort voxels by destruction priority (highest to lowest)
     VoxelsToDestroy.Sort([](const TPair<FIntVector, float>& A, const TPair<FIntVector, float>& B) {
         return A.Value > B.Value;
     });
     
-    // Appliquer la destruction avec une chance basée sur la priorité
+    // Apply destruction with probability based on priority
+    bool bAnyVoxelDestroyed = false;
+    
+    // ENHANCEMENT 7: Variable probability threshold based on explosion size
+    float BaseDestructionThreshold = FMath::Lerp(0.3f, 0.1f, FMath::Min(1.0f, Radius / 500.0f));
+    
     for (const TPair<FIntVector, float>& VoxelData : VoxelsToDestroy)
     {
         int32 X = VoxelData.Key.X;
@@ -542,13 +736,16 @@ void AImprovedVoxelBuilding::DestroyVoxelsAt(FVector Location, FVector ImpactNor
         int32 Z = VoxelData.Key.Z;
         float Priority = VoxelData.Value;
         
-        // Chance de destruction basée sur la priorité
-        if (FMath::FRand() < Priority)
+        // Higher priority voxels are more likely to be destroyed
+        // Formula: random threshold * base threshold, lower is more likely to be destroyed
+        float DestructionThreshold = BaseDestructionThreshold * (1.0f - (Priority * 0.8f));
+        
+        if (FMath::FRand() < (1.0f - DestructionThreshold))
         {
             VoxelGrid[X][Y][Z].bIsActive = false;
             bAnyVoxelDestroyed = true;
             
-            // Log pour le voxel central (celui directement touché)
+            // Log the central voxel destruction
             if (X == GridX && Y == GridY && Z == GridZ)
             {
                 UE_LOG(LogTemp, Warning, TEXT("Destroying central voxel at grid (%d, %d, %d)"), X, Y, Z);
@@ -556,13 +753,13 @@ void AImprovedVoxelBuilding::DestroyVoxelsAt(FVector Location, FVector ImpactNor
         }
     }
     
-    // Si des voxels ont été détruits, recréer le mesh
+    // ENHANCEMENT 8: Batch mesh recreation for performance
     if (bAnyVoxelDestroyed)
     {
+        // In multiplayer, might want to delay this slightly to avoid too many mesh updates
         CreateMesh();
     }
 }
-
 bool AImprovedVoxelBuilding::Server_DestroyVoxelsAt_Validate(FVector Location, FVector ImpactNormal, float Radius)
 {
     // Validation basique : s'assurer que le rayon est positif

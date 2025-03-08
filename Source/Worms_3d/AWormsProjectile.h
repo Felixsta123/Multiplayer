@@ -29,14 +29,7 @@ public:
     // Initialiser le projectile avec une direction et une puissance
     UFUNCTION(BlueprintCallable, Category = "Projectile")
     void InitializeProjectile(FVector Direction, float Power);
-    UFUNCTION(Server, Reliable, WithValidation)
-    void Server_SpawnDestructionField(FVector Location);
-    
-    UFUNCTION(NetMulticast, Reliable)
-    void Multicast_SpawnDestructionField(FVector Location);
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Field System")
-    TSubclassOf<AFieldSystemActor> FieldSystemActorClass;
-    // Dans la section public:
+       // Dans la section public:
     UFUNCTION()
     void RecordTrailPosition();
 
@@ -128,4 +121,5 @@ protected:
     void SetupIgnoredActors();
     FVector LastHitLocation;
     FVector LastHitNormal;
+    
 };

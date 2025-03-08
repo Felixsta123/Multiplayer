@@ -353,53 +353,90 @@ void AWormProjectile::Tick(float DeltaTime)
 void AWormProjectile::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp,
                              FVector NormalImpulse, const FHitResult& Hit)
 {
-    // Arrêter d'enregistrer les positions du tracé
+    // Stop recording trail positions
     if (bDebugTrail)
     {
         GetWorldTimerManager().ClearTimer(TrailTimerHandle);
         
-        UE_LOG(LogTemp, Warning, TEXT("%s Projectile hit: %s at %s"),
+        UE_LOG(LogTemp, Warning, TEXT("%s Projectile hit: %s at %s, Normal: %s"),
             HasAuthority() ? TEXT("[SERVER]") : TEXT("[CLIENT]"),
             OtherActor ? *OtherActor->GetName() : TEXT("NULL"),
-            *Hit.Location.ToString()
+            *Hit.Location.ToString(),
+            *Hit.ImpactNormal.ToString()
         );
     }
     
-    // Sauvegarder les informations d'impact pour utilisation dans Explode
-    LastHitLocation = Hit.Location;
-    LastHitNormal = Hit.ImpactNormal;
+    // Ensure we have a valid hit normal - this is critical!
+    if (Hit.ImpactNormal.IsZero())
+    {
+        // In case of zero normal, use reverse of projectile velocity
+        FVector SafeNormal = ProjectileMovement ? -ProjectileMovement->Velocity.GetSafeNormal() : FVector(0, 0, 1);
+        LastHitNormal = SafeNormal;
+        UE_LOG(LogTemp, Warning, TEXT("Zero impact normal detected, using velocity direction instead"));
+    }
+    else
+    {
+        LastHitNormal = Hit.ImpactNormal;
+    }
     
-    // Ne traiter les collisions que sur le serveur
+    // Save the exact hit location
+    LastHitLocation = Hit.Location;
+    
+    // Only process collisions on the server
     if (HasAuthority())
     {
-        // Déclencher une explosion
-        Explode();
+        // Add a small delay before explosion to ensure client/server sync
+        FTimerHandle ExplosionTimerHandle;
+        GetWorldTimerManager().SetTimer(
+            ExplosionTimerHandle,
+            this,
+            &AWormProjectile::Explode,
+            0.02f,  // Very small delay
+            false
+        );
     }
 }
 
+// Modify the Explode function in AWormsProjectile.cpp
 void AWormProjectile::Explode()
 {
     if (!HasAuthority())
     {
-        return; // Ne s'exécute que sur le serveur
+        return; // Only execute on server
     }
     
-    // Position de l'explosion
+    // Position of the explosion
     FVector ExplosionLocation = GetActorLocation();
     
     UE_LOG(LogTemp, Warning, TEXT("Explosion at location: %s with radius: %.1f and damage: %.1f"), 
         *ExplosionLocation.ToString(), ExplosionRadius, ExplosionDamage);
     
-    // Chercher les personnages dans le rayon d'explosion
+    // Use the saved hit normal if available, otherwise default to a direction
+    FVector HitNormal = LastHitNormal;
+    if (HitNormal.IsZero())
+    {
+        // If no normal is available, use a direction toward up by default
+        HitNormal = FVector(0, 0, 1);
+    }
+    
+    // ENHANCEMENT 1: Scale the explosion radius based on the projectile's velocity
+    float VelocityMagnitude = ProjectileMovement ? ProjectileMovement->Velocity.Size() : 0.0f;
+    float DynamicExplosionRadius = ExplosionRadius * FMath::Lerp(0.8f, 1.2f, FMath::Min(1.0f, VelocityMagnitude / 3000.0f));
+    
+    // ENHANCEMENT 2: Create more pronounced explosion effects
+    // Play explosion effects and sound with better visual feedback
+    Multicast_Explode(ExplosionLocation);
+    
+    // ENHANCEMENT 4: Improved character damage with better physics feedback
     TArray<AActor*> OverlappingActors;
     TArray<AActor*> ActorsToIgnore;
     ActorsToIgnore.Add(this);
     
-    // Utiliser SphereOverlapActors pour détecter tous les acteurs touchés
+    // Use SphereOverlapActors for better detection
     UKismetSystemLibrary::SphereOverlapActors(
         GetWorld(),
         ExplosionLocation,
-        ExplosionRadius,
+        DynamicExplosionRadius,
         TArray<TEnumAsByte<EObjectTypeQuery>>(),
         AWormCharacter::StaticClass(),
         ActorsToIgnore,
@@ -408,7 +445,7 @@ void AWormProjectile::Explode()
     
     UE_LOG(LogTemp, Warning, TEXT("Found %d actors in explosion radius"), OverlappingActors.Num());
     
-    // Appliquer les dégâts aux personnages touchés
+    // Apply damage to characters with improved physics
     for (AActor* Actor : OverlappingActors)
     {
         AWormCharacter* WormChar = Cast<AWormCharacter>(Actor);
@@ -419,25 +456,24 @@ void AWormProjectile::Explode()
 
             if (Distance <= 0.0f)
             {
-                Distance = 1.0f; // Éviter la division par zéro
-                ImpactDirection = FVector(0, 0, 1); // Direction par défaut
+                Distance = 1.0f; // Avoid division by zero
+                ImpactDirection = FVector(0, 0, 1); // Default direction
             }
             else
             {
-                // Normaliser AVANT d'ajuster
+                // Normalize BEFORE adjusting
                 ImpactDirection.Normalize();
                 
-                // Ajuster la direction pour avoir une composante horizontale plus forte
-                // Si la distance est très courte, ajouter plus de composante horizontale
-                float HorizontalFactor = FMath::Clamp(1.0f - (Distance / ExplosionRadius), 0.3f, 0.8f);
+                // Create a more natural explosion impulse
+                float HorizontalFactor = FMath::Lerp(0.8f, 0.3f, Distance / DynamicExplosionRadius);
                 
-                // Déterminer la direction horizontale dominante (vers l'extérieur de l'explosion)
+                // Determine horizontal direction (outward from explosion)
                 FVector HorizontalDir = ImpactDirection;
                 HorizontalDir.Z = 0;
                 
                 if (HorizontalDir.IsNearlyZero())
                 {
-                    // Si la direction horizontale est presque nulle, choisir une direction aléatoire
+                    // Random direction if horizontal component is negligible
                     float RandomAngle = FMath::RandRange(0.0f, 2.0f * PI);
                     HorizontalDir.X = FMath::Cos(RandomAngle);
                     HorizontalDir.Y = FMath::Sin(RandomAngle);
@@ -447,67 +483,77 @@ void AWormProjectile::Explode()
                     HorizontalDir.Normalize();
                 }
                 
-                // Mélanger la composante verticale et horizontale
+                // More vertical impulse for closer hits (launches characters upward)
+                float VerticalFactor = FMath::Lerp(0.8f, 0.4f, Distance / DynamicExplosionRadius);
+                
+                // Blend horizontal and vertical components for a more natural explosion
                 ImpactDirection = FVector(
                     HorizontalDir.X * HorizontalFactor,
                     HorizontalDir.Y * HorizontalFactor,
-                    0.5f + (0.5f * (1.0f - HorizontalFactor))  // Plus proche = plus haut
+                    VerticalFactor  // Higher upward component
                 ).GetSafeNormal();
             }
 
-            // Calculer les dégâts basés sur la distance
-            float DamageRatio = 1.0f - FMath::Min(Distance / ExplosionRadius, 1.0f);
-            float DamageToApply = ExplosionDamage * DamageRatio;
+            // More dramatic damage falloff curve
+            float DistanceRatio = Distance / DynamicExplosionRadius;
+            float DamageCurve = FMath::Pow(1.0f - FMath::Min(1.0f, DistanceRatio), 1.5f); // Sharper falloff
+            float DamageToApply = ExplosionDamage * DamageCurve;
 
-            // Force d'impulsion proportionnelle aux dégâts, mais avec une valeur minimum
-            float ImpulseStrength = FMath::Max(1500.0f * DamageRatio, 500.0f);
+            // More dramatic impulse for gameplay feel
+            float ImpulseStrength = FMath::Max(2000.0f * DamageCurve, 800.0f);
+            
+            // Add randomness to impulse for variety
+            ImpulseStrength *= FMath::RandRange(0.9f, 1.1f);
 
             UE_LOG(LogTemp, Warning, TEXT("Applying %.1f damage to %s with impulse dir: %s, strength: %.1f"), 
                 DamageToApply, *WormChar->GetName(), *ImpactDirection.ToString(), ImpulseStrength);
 
-            // Appliquer les dégâts et l'impulsion
+            // Apply damage and impulse
             WormChar->ApplyDamageToWorm(DamageToApply, ImpactDirection * ImpulseStrength);
-                        
         }
     }
-        
-    // Détruire le terrain dans la zone d'explosion
+    
+    // ENHANCEMENT 5: Improved terrain destruction with better normal handling
     TArray<AImprovedVoxelBuilding*> NearbyBuildings = AImprovedVoxelBuilding::FindAllVoxelBuildings(this);
-
-    // Utiliser la normale d'impact sauvegardée, ou une valeur par défaut si non disponible
-    FVector HitNormal = LastHitNormal;
-    if (HitNormal.IsZero())
-    {
-        // Si pas de normale d'impact disponible, utiliser une direction vers le haut par défaut
-        HitNormal = FVector(0, 0, 1);
-    }
 
     for (AImprovedVoxelBuilding* Building : NearbyBuildings)
     {
         if (Building)
         {
-            // Vérifier si le bâtiment est dans le rayon d'explosion
-            float Distance = FVector::Dist(ExplosionLocation, Building->GetActorLocation());
-            if (Distance <= ExplosionRadius * 2.0f) // Rayon un peu plus grand pour les vérifications
+            // Use AABB check for better hit detection
+            FVector BuildingExtent(
+                Building->GridSizeX * Building->VoxelSize * 0.5f,
+                Building->GridSizeY * Building->VoxelSize * 0.5f,
+                Building->GridSizeZ * Building->VoxelSize * 0.5f
+            );
+        
+            FVector BuildingCenter = Building->GetActorLocation() + BuildingExtent;
+            FBox BuildingBox(BuildingCenter - BuildingExtent, BuildingCenter + BuildingExtent);
+            float DistanceToBuilding = BuildingBox.ComputeSquaredDistanceToPoint(ExplosionLocation);
+            DistanceToBuilding = FMath::Sqrt(DistanceToBuilding);  // Convert to actual distance
+            if (DistanceToBuilding <= DynamicExplosionRadius * 3.0f)
             {
-                // Appeler la fonction serveur pour détruire les voxels
-                // Convertir en coordonnées locales du bâtiment
+                // Convert to local coordinates of the building
                 FVector LocalExplosion = Building->GetActorTransform().InverseTransformPosition(ExplosionLocation);
-                Building->Server_DestroyVoxelsAt(LocalExplosion, HitNormal, ExplosionRadius);
+            
+                // ENHANCEMENT: Use a larger radius for terrain destruction than character damage
+                // This creates more dramatic terrain effects
+                float TerrainDestructionRadius = DynamicExplosionRadius * 1.5f;
+            
+                UE_LOG(LogTemp, Warning, TEXT("Triggering building destruction: Building=%s, LocalPos=%s, Radius=%.1f"),
+                    *Building->GetName(), *LocalExplosion.ToString(), TerrainDestructionRadius);
+            
+                // Call the server RPC to destroy voxels with the enhanced radius
+                Building->Server_DestroyVoxelsAt(LocalExplosion, HitNormal, TerrainDestructionRadius);
             }
         }
     }
     
-    // Effets multicast d'explosion
-    Multicast_Explode(ExplosionLocation);
-    
-    // Détruire le projectile
+    // Destroy the projectile
     Destroy();
 }
-void AWormProjectile::Server_SpawnDestructionField_Implementation(FVector Location)
-{
-    Multicast_SpawnDestructionField(Location);
-}
+
+
 void AWormProjectile::Multicast_SpawnDestructionField_Implementation(FVector Location)
 {
     if (!GetWorld()) return;
@@ -537,11 +583,6 @@ void AWormProjectile::Multicast_SpawnDestructionField_Implementation(FVector Loc
 
     // Détruire après quelques secondes
     FieldActor->SetLifeSpan(2.0f);
-}
-
-bool AWormProjectile::Server_SpawnDestructionField_Validate(FVector Location)
-{
-    return true; // Toujours valide
 }
 
 
