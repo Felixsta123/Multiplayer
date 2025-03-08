@@ -115,7 +115,8 @@ protected:
     
     // Create mesh from voxel grid
     void CreateMesh();
-    
+    void GenerateOptimizedRayDirections(TArray<FVector>& RayDirections, const FVector& ImpactNormal, int32 NumRays);
+
     // Add only visible faces to reduce polygon count
     void AddVisibleFacesToMesh(int32 X, int32 Y, int32 Z, TArray<FVector>& Vertices, TArray<int32>& Triangles, 
                           TArray<FVector>& Normals, TArray<FVector2D>& UVs, TArray<FColor>& Colors, TArray<FProcMeshTangent>& Tangents,

@@ -358,18 +358,19 @@ void AWormProjectile::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UP
     {
         GetWorldTimerManager().ClearTimer(TrailTimerHandle);
         
-        UE_LOG(LogTemp, Warning, TEXT("%s Projectile hit: %s at %s, Normal: %s"),
+        UE_LOG(LogTemp, Warning, TEXT("%s Projectile hit: %s at %s, Normal: %s, Velocity: %s"),
             HasAuthority() ? TEXT("[SERVER]") : TEXT("[CLIENT]"),
             OtherActor ? *OtherActor->GetName() : TEXT("NULL"),
             *Hit.Location.ToString(),
-            *Hit.ImpactNormal.ToString()
+            *Hit.ImpactNormal.ToString(),
+            ProjectileMovement ? *ProjectileMovement->Velocity.ToString() : TEXT("NULL")
         );
     }
     
-    // Ensure we have a valid hit normal - this is critical!
+    // IMPROVEMENT 1: Enhanced hit normal calculation
     if (Hit.ImpactNormal.IsZero())
     {
-        // In case of zero normal, use reverse of projectile velocity
+        // If normal is zero, use reverse of projectile velocity
         FVector SafeNormal = ProjectileMovement ? -ProjectileMovement->Velocity.GetSafeNormal() : FVector(0, 0, 1);
         LastHitNormal = SafeNormal;
         UE_LOG(LogTemp, Warning, TEXT("Zero impact normal detected, using velocity direction instead"));
@@ -379,24 +380,37 @@ void AWormProjectile::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UP
         LastHitNormal = Hit.ImpactNormal;
     }
     
-    // Save the exact hit location
+    // IMPROVEMENT 2: Store more hit information
     LastHitLocation = Hit.Location;
+    LastHitActor = OtherActor;
+    LastHitComponent = OtherComp;
     
     // Only process collisions on the server
     if (HasAuthority())
     {
-        // Add a small delay before explosion to ensure client/server sync
+        // IMPROVEMENT 3: Verify if we hit a voxel building before triggering explosion
+        AImprovedVoxelBuilding* VoxelBuilding = Cast<AImprovedVoxelBuilding>(OtherActor);
+        if (VoxelBuilding)
+        {
+            // Direct hit on a voxel building detected - mark for more reliable detection
+            bDirectVoxelHit = true;
+            DirectHitLocation = Hit.Location;
+            DirectHitNormal = LastHitNormal;
+            DirectHitBuilding = VoxelBuilding;
+        }
+        
+        // IMPROVEMENT 4: Small delay before explosion to ensure client/server sync
+        // and provide time for physics update
         FTimerHandle ExplosionTimerHandle;
         GetWorldTimerManager().SetTimer(
             ExplosionTimerHandle,
             this,
             &AWormProjectile::Explode,
-            0.02f,  // Very small delay
+            0.05f,  // Increased from 0.02 for better reliability
             false
         );
     }
 }
-
 // Modify the Explode function in AWormsProjectile.cpp
 void AWormProjectile::Explode()
 {
@@ -419,15 +433,151 @@ void AWormProjectile::Explode()
         HitNormal = FVector(0, 0, 1);
     }
     
-    // ENHANCEMENT 1: Scale the explosion radius based on the projectile's velocity
+    // Scale the explosion radius based on the projectile's velocity
     float VelocityMagnitude = ProjectileMovement ? ProjectileMovement->Velocity.Size() : 0.0f;
     float DynamicExplosionRadius = ExplosionRadius * FMath::Lerp(0.8f, 1.2f, FMath::Min(1.0f, VelocityMagnitude / 3000.0f));
     
-    // ENHANCEMENT 2: Create more pronounced explosion effects
-    // Play explosion effects and sound with better visual feedback
+    // Play explosion effects and sound
     Multicast_Explode(ExplosionLocation);
     
-    // ENHANCEMENT 4: Improved character damage with better physics feedback
+    // Handle character damage
+    ApplyDamageToCharacters(ExplosionLocation, DynamicExplosionRadius);
+    
+    // IMPROVEMENT 5: Prioritize direct voxel hit detection
+    bool hitProcessed = false;
+    
+    if (bDirectVoxelHit && DirectHitBuilding)
+    {
+        // Direct hit on a voxel building - use exact hit information
+        FVector LocalExplosion = DirectHitBuilding->GetActorTransform().InverseTransformPosition(DirectHitLocation);
+        float TerrainDestructionRadius = DynamicExplosionRadius * 1.5f;
+        
+        UE_LOG(LogTemp, Warning, TEXT("DIRECT HIT: Building=%s, LocalPos=%s, Radius=%.1f"),
+            *DirectHitBuilding->GetName(), *LocalExplosion.ToString(), TerrainDestructionRadius);
+        
+        // Force stronger destruction at direct hit point
+        DirectHitBuilding->Server_DestroyVoxelsAt(LocalExplosion, DirectHitNormal, TerrainDestructionRadius);
+        hitProcessed = true;
+    }
+    
+    // IMPROVEMENT 6: Always scan for buildings in range as backup
+    // This ensures even glancing hits or near misses still cause destruction
+    TArray<AImprovedVoxelBuilding*> NearbyBuildings = AImprovedVoxelBuilding::FindAllVoxelBuildings(this);
+
+    for (AImprovedVoxelBuilding* Building : NearbyBuildings)
+    {
+        if (Building)
+        {
+            // Skip if this is the building we directly hit and already processed
+            if (hitProcessed && Building == DirectHitBuilding)
+                continue;
+                
+            // Use AABB check for better hit detection
+            FVector BuildingExtent(
+                Building->GridSizeX * Building->VoxelSize * 0.5f,
+                Building->GridSizeY * Building->VoxelSize * 0.5f,
+                Building->GridSizeZ * Building->VoxelSize * 0.5f
+            );
+            
+            FVector BuildingCenter = Building->GetActorLocation() + BuildingExtent;
+            FBox BuildingBox(BuildingCenter - BuildingExtent, BuildingCenter + BuildingExtent);
+            float DistanceToBuilding = BuildingBox.ComputeSquaredDistanceToPoint(ExplosionLocation);
+            DistanceToBuilding = FMath::Sqrt(DistanceToBuilding);  // Convert to actual distance
+            
+            // IMPROVEMENT 7: Larger detection radius for high shots
+            float DetectionMultiplier = 3.0f;
+            
+            // Increase multiplier for high-angle shots
+            if (ProjectileMovement && FMath::Abs(ProjectileMovement->Velocity.Z) > 1000.0f)
+            {
+                DetectionMultiplier = 4.0f;  // Increase detection range for high arcs
+            }
+            
+            if (DistanceToBuilding <= DynamicExplosionRadius * DetectionMultiplier)
+            {
+                // Convert to local coordinates of the building
+                FVector LocalExplosion = Building->GetActorTransform().InverseTransformPosition(ExplosionLocation);
+                
+                // Use a larger radius for terrain destruction 
+                float TerrainDestructionRadius = DynamicExplosionRadius * 1.5f;
+                
+                // IMPROVEMENT 8: For nearby but not direct hits, use a stronger normal vector
+                // This ensures better penetration for glancing shots
+                FVector EffectiveNormal = HitNormal;
+                if (DistanceToBuilding > 0)
+                {
+                    // Calculate direction toward building center
+                    FVector DirectionToBuilding = (BuildingCenter - ExplosionLocation).GetSafeNormal();
+                    
+                    // Blend between hit normal and direction to building center
+                    float BlendFactor = FMath::Min(DistanceToBuilding / (DynamicExplosionRadius * 2.0f), 1.0f);
+                    EffectiveNormal = FMath::Lerp(HitNormal, DirectionToBuilding, BlendFactor);
+                    EffectiveNormal.Normalize();
+                }
+                
+                UE_LOG(LogTemp, Warning, TEXT("Triggering building destruction: Building=%s, LocalPos=%s, Radius=%.1f, EffectiveNormal=%s"),
+                    *Building->GetName(), *LocalExplosion.ToString(), TerrainDestructionRadius, *EffectiveNormal.ToString());
+                
+                // Call the server RPC to destroy voxels with the enhanced radius
+                Building->Server_DestroyVoxelsAt(LocalExplosion, EffectiveNormal, TerrainDestructionRadius);
+            }
+        }
+    }
+    
+    // Destroy the projectile
+    Destroy();
+}
+
+
+void AWormProjectile::Multicast_SpawnDestructionField_Implementation(FVector Location)
+{
+    if (!GetWorld()) return;
+
+    // Spawn un Field System Actor
+    AFieldSystemActor* FieldActor = GetWorld()->SpawnActor<AFieldSystemActor>(AFieldSystemActor::StaticClass(), Location, FRotator::ZeroRotator);
+    if (!FieldActor) return;
+
+    UFieldSystemComponent* FieldSystem = FieldActor->GetFieldSystemComponent();
+    if (!FieldSystem) return;
+
+    // Création d'un Radial Falloff Field
+    URadialFalloff* RadialFalloff = NewObject<URadialFalloff>();
+    RadialFalloff->Magnitude = -5000.0f;   // Force de destruction (doit être négative)
+    RadialFalloff->Radius = 300.0f;       // Rayon d'affectation
+    RadialFalloff->Position = Location;
+    RadialFalloff->Falloff = EFieldFalloffType::Field_FallOff_None;
+
+    // Création d'une force linéaire
+    UUniformVector* LinearForce = NewObject<UUniformVector>();
+    LinearForce->Magnitude = 2000.0f;
+    LinearForce->Direction = FVector(0, 0, 1); // Force vers le haut
+
+    // Application au Field System
+    FieldSystem->ApplyPhysicsField(true, EFieldPhysicsType::Field_LinearForce, nullptr, LinearForce);
+    FieldSystem->ApplyPhysicsField(true, EFieldPhysicsType::Field_ExternalClusterStrain, nullptr, RadialFalloff);
+
+    // Détruire après quelques secondes
+    FieldActor->SetLifeSpan(2.0f);
+}
+
+
+void AWormProjectile::Multicast_Explode_Implementation(FVector Location)
+{
+    // Jouer l'effet d'explosion
+    if (ExplosionEffect)
+    {
+        UGameplayStatics::SpawnEmitterAtLocation(GetWorld(), ExplosionEffect, Location);
+    }
+    
+    // Jouer le son d'explosion
+    if (ExplosionSound)
+    {
+        UGameplayStatics::PlaySoundAtLocation(GetWorld(), ExplosionSound, Location);
+    }
+}
+
+void AWormProjectile::ApplyDamageToCharacters(const FVector& ExplosionLocation, float DynamicExplosionRadius)
+{
     TArray<AActor*> OverlappingActors;
     TArray<AActor*> ActorsToIgnore;
     ActorsToIgnore.Add(this);
@@ -511,92 +661,5 @@ void AWormProjectile::Explode()
             // Apply damage and impulse
             WormChar->ApplyDamageToWorm(DamageToApply, ImpactDirection * ImpulseStrength);
         }
-    }
-    
-    // ENHANCEMENT 5: Improved terrain destruction with better normal handling
-    TArray<AImprovedVoxelBuilding*> NearbyBuildings = AImprovedVoxelBuilding::FindAllVoxelBuildings(this);
-
-    for (AImprovedVoxelBuilding* Building : NearbyBuildings)
-    {
-        if (Building)
-        {
-            // Use AABB check for better hit detection
-            FVector BuildingExtent(
-                Building->GridSizeX * Building->VoxelSize * 0.5f,
-                Building->GridSizeY * Building->VoxelSize * 0.5f,
-                Building->GridSizeZ * Building->VoxelSize * 0.5f
-            );
-        
-            FVector BuildingCenter = Building->GetActorLocation() + BuildingExtent;
-            FBox BuildingBox(BuildingCenter - BuildingExtent, BuildingCenter + BuildingExtent);
-            float DistanceToBuilding = BuildingBox.ComputeSquaredDistanceToPoint(ExplosionLocation);
-            DistanceToBuilding = FMath::Sqrt(DistanceToBuilding);  // Convert to actual distance
-            if (DistanceToBuilding <= DynamicExplosionRadius * 3.0f)
-            {
-                // Convert to local coordinates of the building
-                FVector LocalExplosion = Building->GetActorTransform().InverseTransformPosition(ExplosionLocation);
-            
-                // ENHANCEMENT: Use a larger radius for terrain destruction than character damage
-                // This creates more dramatic terrain effects
-                float TerrainDestructionRadius = DynamicExplosionRadius * 1.5f;
-            
-                UE_LOG(LogTemp, Warning, TEXT("Triggering building destruction: Building=%s, LocalPos=%s, Radius=%.1f"),
-                    *Building->GetName(), *LocalExplosion.ToString(), TerrainDestructionRadius);
-            
-                // Call the server RPC to destroy voxels with the enhanced radius
-                Building->Server_DestroyVoxelsAt(LocalExplosion, HitNormal, TerrainDestructionRadius);
-            }
-        }
-    }
-    
-    // Destroy the projectile
-    Destroy();
-}
-
-
-void AWormProjectile::Multicast_SpawnDestructionField_Implementation(FVector Location)
-{
-    if (!GetWorld()) return;
-
-    // Spawn un Field System Actor
-    AFieldSystemActor* FieldActor = GetWorld()->SpawnActor<AFieldSystemActor>(AFieldSystemActor::StaticClass(), Location, FRotator::ZeroRotator);
-    if (!FieldActor) return;
-
-    UFieldSystemComponent* FieldSystem = FieldActor->GetFieldSystemComponent();
-    if (!FieldSystem) return;
-
-    // Création d'un Radial Falloff Field
-    URadialFalloff* RadialFalloff = NewObject<URadialFalloff>();
-    RadialFalloff->Magnitude = -5000.0f;   // Force de destruction (doit être négative)
-    RadialFalloff->Radius = 300.0f;       // Rayon d'affectation
-    RadialFalloff->Position = Location;
-    RadialFalloff->Falloff = EFieldFalloffType::Field_FallOff_None;
-
-    // Création d'une force linéaire
-    UUniformVector* LinearForce = NewObject<UUniformVector>();
-    LinearForce->Magnitude = 2000.0f;
-    LinearForce->Direction = FVector(0, 0, 1); // Force vers le haut
-
-    // Application au Field System
-    FieldSystem->ApplyPhysicsField(true, EFieldPhysicsType::Field_LinearForce, nullptr, LinearForce);
-    FieldSystem->ApplyPhysicsField(true, EFieldPhysicsType::Field_ExternalClusterStrain, nullptr, RadialFalloff);
-
-    // Détruire après quelques secondes
-    FieldActor->SetLifeSpan(2.0f);
-}
-
-
-void AWormProjectile::Multicast_Explode_Implementation(FVector Location)
-{
-    // Jouer l'effet d'explosion
-    if (ExplosionEffect)
-    {
-        UGameplayStatics::SpawnEmitterAtLocation(GetWorld(), ExplosionEffect, Location);
-    }
-    
-    // Jouer le son d'explosion
-    if (ExplosionSound)
-    {
-        UGameplayStatics::PlaySoundAtLocation(GetWorld(), ExplosionSound, Location);
     }
 }

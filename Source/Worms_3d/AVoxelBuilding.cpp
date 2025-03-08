@@ -513,39 +513,33 @@ void AImprovedVoxelBuilding::DestroyVoxelsAt(FVector Location, FVector ImpactNor
     TArray<TPair<FIntVector, float>> VoxelsToDestroy;
     
     // ENHANCEMENT 1: Improved ray distribution
-    const int32 RayCount = 32; // Increased from 24 for better coverage
-    const float MaxRayLength = Radius * 2.0f; // Increased from 1.5f for better penetration
+    const int32 RayCount = 48; // Increased from 32 for better coverage
+    const float MaxRayLength = Radius * 2.5f; // Increased from 2.0f for better penetration
 
-    // Create a weighted bias for ray direction
-    FVector BiasedDirection = -LocalNormal * 3.0f; // Stronger bias toward impact normal
-
-    // Use a spherical pattern for better ray distribution
+    // Use the enhanced ray distribution algorithm
     TArray<FVector> RayDirections;
-    RayDirections.Reserve(RayCount);
+    GenerateOptimizedRayDirections(RayDirections, LocalNormal, RayCount - 8); // Reserve 8 for special rays
 
-    // First ray always goes directly into the building along the normal
-    RayDirections.Add(-LocalNormal);
+    // Add special penetration rays for different scenarios
+    // Extra ray directly backward for glancing hits
+    RayDirections.Add(LocalNormal); 
 
-    // Generate rays in a more uniform spherical distribution
-    for (int32 i = 1; i < RayCount; i++)
+    // Extra downward ray for high hits
+    if (LocalNormal.Z < -0.5f)
     {
-        // Use golden spiral distribution for more uniform coverage
-        float y = 1.0f - (float(i) / float(RayCount - 1)) * 2.0f; // y goes from 1 to -1
-        float radius = FMath::Sqrt(1.0f - y * y); // radius at y
-        
-        float theta = PI * (3.0f - FMath::Sqrt(5.0f)); // golden angle
-        float phi = theta * i; // golden angle increment
-        
-        float x = FMath::Cos(phi) * radius;
-        float z = FMath::Sin(phi) * radius;
-        
-        FVector RayDir = FVector(x, y, z).GetSafeNormal();
-        
-        // Bias toward inward direction
-        float BiasStrength = FMath::Lerp(0.9f, 0.3f, float(i) / float(RayCount));
-        RayDir = (RayDir + BiasedDirection * BiasStrength).GetSafeNormal();
-        
-        RayDirections.Add(RayDir);
+        RayDirections.Add(FVector(0, 0, -1));
+    }
+
+    // Extra ray in horizontal plane for side hits
+    if (FMath::Abs(LocalNormal.Z) < 0.5f)
+    {
+        FVector HorizontalNormal = LocalNormal;
+        HorizontalNormal.Z = 0;
+        if (!HorizontalNormal.IsNearlyZero())
+        {
+            HorizontalNormal.Normalize();
+            RayDirections.Add(-HorizontalNormal);
+        }
     }
 
     // Now trace each ray
@@ -808,4 +802,69 @@ TArray<AImprovedVoxelBuilding*> AImprovedVoxelBuilding::FindAllVoxelBuildings(co
     }
     
     return Result;
+}
+void AImprovedVoxelBuilding::GenerateOptimizedRayDirections(TArray<FVector>& RayDirections, const FVector& ImpactNormal, int32 NumRays)
+{
+    RayDirections.Empty(NumRays);
+    
+    // Bias the ray distribution toward the impact normal
+    FVector BiasedDirection = -ImpactNormal * 3.0f;
+    
+    // First ray always goes directly into the building along the normal with extra length
+    RayDirections.Add(-ImpactNormal);
+    
+    // Create a coordinate system based on the impact normal
+    FVector UpVector = FVector(0, 0, 1);
+    FVector RightVector = FVector::CrossProduct(ImpactNormal, UpVector);
+    
+    // Handle case where normal is parallel to up vector
+    if (RightVector.IsNearlyZero())
+    {
+        RightVector = FVector(1, 0, 0);
+    }
+    
+    RightVector.Normalize();
+    FVector ForwardVector = FVector::CrossProduct(RightVector, ImpactNormal).GetSafeNormal();
+    
+    // Add additional rays with high angle concentration around impact normal
+    // and increasing spread based on distance from initial ray
+    for (int32 i = 1; i < NumRays; i++)
+    {
+        float NormalizedIndex = float(i) / float(NumRays - 1);
+        
+        // Golden spiral distribution for better coverage
+        float Phi = 2.0f * PI * fmod(i * 0.618033988749895f, 1.0f); // Golden ratio spiral
+        
+        // More rays concentrated near the center (impact point)
+        float Radius = FMath::Sqrt(NormalizedIndex);
+        
+        // Calculate position on unit circle
+        float X = FMath::Cos(Phi) * Radius;
+        float Y = FMath::Sin(Phi) * Radius;
+        
+        // Transform to ray direction in 3D
+        FVector RayDir = (-ImpactNormal) + (RightVector * X * 0.9f) + (ForwardVector * Y * 0.9f);
+        RayDir.Normalize();
+        
+        // Add bias based on distance from center ray
+        float BiasStrength = FMath::Lerp(0.9f, 0.3f, Radius);
+        RayDir = (RayDir + BiasedDirection * BiasStrength).GetSafeNormal();
+        
+        RayDirections.Add(RayDir);
+    }
+    
+    // Add additional rays specifically for high-angle impacts
+    if (FMath::Abs(ImpactNormal.Z) > 0.7f)
+    {
+        // For high angle impacts (coming from above/below), add more horizontal penetration
+        for (int32 i = 0; i < 8; i++)
+        {
+            float Angle = (float)i * (2.0f * PI / 8.0f);
+            FVector HorizontalDir = RightVector * FMath::Cos(Angle) + ForwardVector * FMath::Sin(Angle);
+            
+            // Mix horizontal direction with a bit of normal direction
+            FVector MixedDir = (HorizontalDir * 0.9f - ImpactNormal * 0.1f).GetSafeNormal();
+            RayDirections.Add(MixedDir);
+        }
+    }
 }

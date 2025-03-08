@@ -121,5 +121,25 @@ protected:
     void SetupIgnoredActors();
     FVector LastHitLocation;
     FVector LastHitNormal;
-    
+    UPROPERTY()
+    AActor* LastHitActor;
+
+    UPROPERTY()
+    UPrimitiveComponent* LastHitComponent;
+
+    // Enhanced direct hit detection
+    UPROPERTY()
+    bool bDirectVoxelHit;
+
+    UPROPERTY()
+    FVector DirectHitLocation;
+
+    UPROPERTY()
+    FVector DirectHitNormal;
+
+    UPROPERTY()
+    class AImprovedVoxelBuilding* DirectHitBuilding;
+
+    // Helper function for applying character damage
+    void ApplyDamageToCharacters(const FVector& ExplosionLocation, float DynamicExplosionRadius);
 };
