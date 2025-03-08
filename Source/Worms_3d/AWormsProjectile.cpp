@@ -1,4 +1,6 @@
 ﻿#include "AWormsProjectile.h"
+
+#include "AVoxelBuilding.h"
 #include "Components/SphereComponent.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
@@ -363,52 +365,16 @@ void AWormProjectile::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UP
         );
     }
     
+    // Sauvegarder les informations d'impact pour utilisation dans Explode
+    LastHitLocation = Hit.Location;
+    LastHitNormal = Hit.ImpactNormal;
+    
     // Ne traiter les collisions que sur le serveur
     if (HasAuthority())
     {
         // Déclencher une explosion
         Explode();
     }
-}
-
-void AWormProjectile::Server_SpawnDestructionField_Implementation(FVector Location)
-{
-    Multicast_SpawnDestructionField(Location);
-}
-void AWormProjectile::Multicast_SpawnDestructionField_Implementation(FVector Location)
-{
-    if (!GetWorld()) return;
-
-    // Spawn un Field System Actor
-    AFieldSystemActor* FieldActor = GetWorld()->SpawnActor<AFieldSystemActor>(AFieldSystemActor::StaticClass(), Location, FRotator::ZeroRotator);
-    if (!FieldActor) return;
-
-    UFieldSystemComponent* FieldSystem = FieldActor->GetFieldSystemComponent();
-    if (!FieldSystem) return;
-
-    // Création d'un Radial Falloff Field
-    URadialFalloff* RadialFalloff = NewObject<URadialFalloff>();
-    RadialFalloff->Magnitude = -5000.0f;   // Force de destruction (doit être négative)
-    RadialFalloff->Radius = 300.0f;       // Rayon d'affectation
-    RadialFalloff->Position = Location;
-    RadialFalloff->Falloff = EFieldFalloffType::Field_FallOff_None;
-
-    // Création d'une force linéaire
-    UUniformVector* LinearForce = NewObject<UUniformVector>();
-    LinearForce->Magnitude = 2000.0f;
-    LinearForce->Direction = FVector(0, 0, 1); // Force vers le haut
-
-    // Application au Field System
-    FieldSystem->ApplyPhysicsField(true, EFieldPhysicsType::Field_LinearForce, nullptr, LinearForce);
-    FieldSystem->ApplyPhysicsField(true, EFieldPhysicsType::Field_ExternalClusterStrain, nullptr, RadialFalloff);
-
-    // Détruire après quelques secondes
-    FieldActor->SetLifeSpan(2.0f);
-}
-
-bool AWormProjectile::Server_SpawnDestructionField_Validate(FVector Location)
-{
-    return true; // Toujours valide
 }
 
 void AWormProjectile::Explode()
@@ -506,27 +472,29 @@ void AWormProjectile::Explode()
     }
         
     // Détruire le terrain dans la zone d'explosion
-    TArray<AActor*> TerrainActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ADestructibleTerrain::StaticClass(), TerrainActors);
-    
-    for (AActor* Actor : TerrainActors)
+    TArray<AImprovedVoxelBuilding*> NearbyBuildings = AImprovedVoxelBuilding::FindAllVoxelBuildings(this);
+
+    // Utiliser la normale d'impact sauvegardée, ou une valeur par défaut si non disponible
+    FVector HitNormal = LastHitNormal;
+    if (HitNormal.IsZero())
     {
-        ADestructibleTerrain* Terrain = Cast<ADestructibleTerrain>(Actor);
-        if (Terrain)
+        // Si pas de normale d'impact disponible, utiliser une direction vers le haut par défaut
+        HitNormal = FVector(0, 0, 1);
+    }
+
+    for (AImprovedVoxelBuilding* Building : NearbyBuildings)
+    {
+        if (Building)
         {
-            // Transformation pour convertir les coordonnées mondiales en coordonnées locales
-            FVector LocalExplosion = Terrain->GetActorTransform().InverseTransformPosition(ExplosionLocation);
-            
-            // Utiliser les coordonnées appropriées pour le terrain 2D
-            float SafeX = FMath::Clamp(LocalExplosion.X, ExplosionRadius, Terrain->TerrainWidth - ExplosionRadius);
-            float SafeZ = FMath::Clamp(LocalExplosion.Z, ExplosionRadius, Terrain->TerrainHeight - ExplosionRadius);
-            
-            // Créer la zone de destruction centrée sur l'explosion
-            FVector2D Position2D(SafeX - ExplosionRadius, SafeZ - ExplosionRadius);
-            FVector2D Size2D(ExplosionRadius * 2.0f, ExplosionRadius * 2.0f);
-            
-            // Demander la destruction du terrain
-            Terrain->RequestDestroyTerrainAt(Position2D, Size2D);
+            // Vérifier si le bâtiment est dans le rayon d'explosion
+            float Distance = FVector::Dist(ExplosionLocation, Building->GetActorLocation());
+            if (Distance <= ExplosionRadius * 2.0f) // Rayon un peu plus grand pour les vérifications
+            {
+                // Appeler la fonction serveur pour détruire les voxels
+                // Convertir en coordonnées locales du bâtiment
+                FVector LocalExplosion = Building->GetActorTransform().InverseTransformPosition(ExplosionLocation);
+                Building->Server_DestroyVoxelsAt(LocalExplosion, HitNormal, ExplosionRadius);
+            }
         }
     }
     
@@ -535,8 +503,47 @@ void AWormProjectile::Explode()
     
     // Détruire le projectile
     Destroy();
-
 }
+void AWormProjectile::Server_SpawnDestructionField_Implementation(FVector Location)
+{
+    Multicast_SpawnDestructionField(Location);
+}
+void AWormProjectile::Multicast_SpawnDestructionField_Implementation(FVector Location)
+{
+    if (!GetWorld()) return;
+
+    // Spawn un Field System Actor
+    AFieldSystemActor* FieldActor = GetWorld()->SpawnActor<AFieldSystemActor>(AFieldSystemActor::StaticClass(), Location, FRotator::ZeroRotator);
+    if (!FieldActor) return;
+
+    UFieldSystemComponent* FieldSystem = FieldActor->GetFieldSystemComponent();
+    if (!FieldSystem) return;
+
+    // Création d'un Radial Falloff Field
+    URadialFalloff* RadialFalloff = NewObject<URadialFalloff>();
+    RadialFalloff->Magnitude = -5000.0f;   // Force de destruction (doit être négative)
+    RadialFalloff->Radius = 300.0f;       // Rayon d'affectation
+    RadialFalloff->Position = Location;
+    RadialFalloff->Falloff = EFieldFalloffType::Field_FallOff_None;
+
+    // Création d'une force linéaire
+    UUniformVector* LinearForce = NewObject<UUniformVector>();
+    LinearForce->Magnitude = 2000.0f;
+    LinearForce->Direction = FVector(0, 0, 1); // Force vers le haut
+
+    // Application au Field System
+    FieldSystem->ApplyPhysicsField(true, EFieldPhysicsType::Field_LinearForce, nullptr, LinearForce);
+    FieldSystem->ApplyPhysicsField(true, EFieldPhysicsType::Field_ExternalClusterStrain, nullptr, RadialFalloff);
+
+    // Détruire après quelques secondes
+    FieldActor->SetLifeSpan(2.0f);
+}
+
+bool AWormProjectile::Server_SpawnDestructionField_Validate(FVector Location)
+{
+    return true; // Toujours valide
+}
+
 
 void AWormProjectile::Multicast_Explode_Implementation(FVector Location)
 {

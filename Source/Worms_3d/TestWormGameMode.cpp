@@ -73,14 +73,13 @@ void ATestWormGameMode::GenerateVoxelBuildings()
         FVector Location = FVector(X, Y, Z);
         FRotator Rotation = FRotator(0.0f, FMath::RandRange(0.0f, 360.0f), 0.0f);
 
-        // Spawner le bâtiment
-        AVoxelBuilding* Building = GetWorld()->SpawnActor<AVoxelBuilding>(
+        // Spawner le bâtiment voxel
+        AImprovedVoxelBuilding* Building = GetWorld()->SpawnActor<AImprovedVoxelBuilding>(
             BuildingClass,
             Location,
             Rotation,
             SpawnParams
         );
-
         if (Building)
         {
             UE_LOG(LogTemp, Warning, TEXT("Voxel building %d generated at %s"), i, *Location.ToString());

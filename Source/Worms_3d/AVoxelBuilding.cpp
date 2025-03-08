@@ -1,15 +1,17 @@
 ﻿#include "AVoxelBuilding.h"
 
-AVoxelBuilding::AVoxelBuilding()
+#include "Kismet/GameplayStatics.h"
+
+AImprovedVoxelBuilding::AImprovedVoxelBuilding()
 {
     PrimaryActorTick.bCanEverTick = false;
     
-    // Créer le composant de mesh procédural
+    // Create procedural mesh component
     BuildingMesh = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("BuildingMesh"));
     RootComponent = BuildingMesh;
     BuildingMesh->bUseAsyncCooking = true;
     
-    // Valeurs par défaut
+    // Default values
     GridSizeX = 10;
     GridSizeY = 10;
     GridSizeZ = 10;
@@ -18,16 +20,16 @@ AVoxelBuilding::AVoxelBuilding()
     bUseRandomColors = false;
     BuildingColor = FLinearColor(0.5f, 0.5f, 1.0f, 1.0f);
     bGenerateOnBeginPlay = true;
-    bUseDoubleSidedGeometry = true;
+    bUseDoubleSidedGeometry = false; // Changed to false for better rendering
     bEnableCollision = true;
-    CubeMargin = 0.02f;
+    CubeMargin = 0.01f; // Reduced margin for tighter fitting
     
-    // Rendre l'acteur réplicable
+    // Make actor replicable
     bReplicates = true;
     BuildingMesh->SetIsReplicated(true);
 }
 
-void AVoxelBuilding::BeginPlay()
+void AImprovedVoxelBuilding::BeginPlay()
 {
     Super::BeginPlay();
     
@@ -37,26 +39,26 @@ void AVoxelBuilding::BeginPlay()
     }
 }
 
-void AVoxelBuilding::OnConstruction(const FTransform& Transform)
+void AImprovedVoxelBuilding::OnConstruction(const FTransform& Transform)
 {
     Super::OnConstruction(Transform);
     
-    // Générer le bâtiment dans l'éditeur pour prévisualisation
+    // Generate building in editor for preview
     #if WITH_EDITOR
         GenerateBuilding();
     #endif
 }
 
-void AVoxelBuilding::GenerateBuilding()
+void AImprovedVoxelBuilding::GenerateBuilding()
 {
-    // Initialiser la grille de voxels
+    // Initialize voxel grid
     InitializeVoxelGrid();
     
-    // Créer le mesh du bâtiment
+    // Create building mesh
     CreateMesh();
 }
 
-void AVoxelBuilding::InitializeVoxelGrid()
+void AImprovedVoxelBuilding::InitializeVoxelGrid()
 {
     VoxelGrid.Empty();
     VoxelGrid.SetNum(GridSizeX);
@@ -73,10 +75,10 @@ void AVoxelBuilding::InitializeVoxelGrid()
             {
                 FVoxelData& Voxel = VoxelGrid[X][Y][Z];
                 
-                // Tous les voxels sont actifs par défaut pour créer un cube plein
+                // All voxels are active by default to create a full cube
                 Voxel.bIsActive = true;
                 
-                // Définir la couleur du voxel
+                // Set voxel color
                 if (bUseRandomColors)
                 {
                     Voxel.Color = GetRandomColor();
@@ -86,380 +88,302 @@ void AVoxelBuilding::InitializeVoxelGrid()
                     Voxel.Color = BuildingColor.ToFColor(true);
                 }
                 
-                // Ajouter un peu de variation pour les matériaux
+                // Add slight variation for materials
                 Voxel.MaterialIndex = FMath::RandRange(0, FMath::Max(0, Materials.Num() - 1));
             }
         }
     }
 }
 
-void AVoxelBuilding::CreateMesh()
+void AImprovedVoxelBuilding::CreateMesh()
 {
     TArray<FVector> Vertices;
     TArray<int32> Triangles;
     TArray<FVector> Normals;
     TArray<FVector2D> UVs;
+
+    
     TArray<FColor> Colors;
     TArray<FProcMeshTangent> Tangents;
     
-    // Nettoyer d'abord toutes les sections de mesh existantes
+    // Clear all existing mesh sections
     BuildingMesh->ClearAllMeshSections();
     
-    // Parcourir tous les voxels et ajouter ceux qui sont visibles
+    // Loop through all voxels and add visible ones
     for (int32 X = 0; X < GridSizeX; X++)
     {
         for (int32 Y = 0; Y < GridSizeY; Y++)
         {
             for (int32 Z = 0; Z < GridSizeZ; Z++)
             {
-                if (VoxelGrid[X][Y][Z].bIsActive && IsVoxelVisible(X, Y, Z))
+                if (VoxelGrid[X][Y][Z].bIsActive)
                 {
-                    AddVoxelToMesh(X, Y, Z, Vertices, Triangles, Normals, UVs, Colors, Tangents);
+                    // Only add faces that are exposed (not completely surrounded by other voxels)
+                    AddVisibleFacesToMesh(X, Y, Z, Vertices, Triangles, Normals, UVs, Colors, Tangents);
                 }
             }
         }
     }
     
-    // Appliquer le lissage si nécessaire
+    // Apply smoothing if needed
     if (SmoothingFactor > 0.0f)
     {
         SmoothVertices(Vertices, Triangles);
     }
     
-    // Vérifier que nous avons des données à ajouter
+    // Check if we have data to add
     if (Vertices.Num() > 0 && Triangles.Num() > 0)
     {
-        // Configurer les propriétés du mesh procédural
-        BuildingMesh->bUseComplexAsSimpleCollision = false;
+        // MODIFICATION : Utiliser la collision complexe pour une précision maximale
+        BuildingMesh->bUseComplexAsSimpleCollision = true;
         BuildingMesh->bReceivesDecals = true;
         
-        // Activer la géométrie double face
-        if (bUseDoubleSidedGeometry)
-        {
-            BuildingMesh->SetMaterial(0, Materials.IsValidIndex(0) ? Materials[0] : nullptr);
-        }
-        
-        // Créer la section de mesh
+        // Créer la section de mesh avec collision activée
         BuildingMesh->CreateMeshSection_LinearColor(
             0,                  // Section index
             Vertices,           // Vertices
             Triangles,          // Triangles
             Normals,            // Normals
             UVs,                // UV0
-            TArray<FVector2D>(), // UV1
-            TArray<FVector2D>(), // UV2
-            TArray<FVector2D>(), // UV3
-            TArray<FLinearColor>(), // Vertex colors (empty, will set later)
+            TArray<FLinearColor>(), // Vertex colors
             Tangents,           // Tangents
-            bEnableCollision    // Enable collision
+            true               // FORCÉ à true pour toujours activer les collisions
         );
         
-        // Définir les propriétés de la section
+        // Assurer que la section est visible
         BuildingMesh->SetMeshSectionVisible(0, true);
-//        BuildingMesh->SetMeshSectionVertexColor(0, Colors);
-
+        
         // Appliquer le matériau
         if (Materials.Num() > 0 && Materials[0] != nullptr)
         {
             BuildingMesh->SetMaterial(0, Materials[0]);
         }
         
-        // S'assurer que les collisions sont correctement configurées
-        if (bEnableCollision)
-        {
-            BuildingMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-            BuildingMesh->SetCollisionObjectType(ECC_WorldStatic);
-            BuildingMesh->SetCollisionResponseToAllChannels(ECR_Block);
-        }
-        else
-        {
-            BuildingMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-        }
+        // MODIFICATION : Configuration explicite des collisions
+        BuildingMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        BuildingMesh->SetCollisionObjectType(ECC_WorldStatic);
+        BuildingMesh->SetCollisionResponseToAllChannels(ECR_Block);
+        
+        // AJOUT : Configuration du canal de collision spécifique pour les projectiles
+        BuildingMesh->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Block); // Assurez-vous que ce canal est configuré pour vos projectiles
+        
+        // AJOUT : Forcer la mise à jour des données de collision
+        BuildingMesh->ContainsPhysicsTriMeshData(true);
     }
 }
 
-bool AVoxelBuilding::IsVoxelVisible(int32 X, int32 Y, int32 Z)
-{
-    // Un voxel est visible s'il a au moins une face exposée
-    
-    // Vérifier les limites de la grille
-    bool bXMinBorder = (X == 0);
-    bool bXMaxBorder = (X == GridSizeX - 1);
-    bool bYMinBorder = (Y == 0);
-    bool bYMaxBorder = (Y == GridSizeY - 1);
-    bool bZMinBorder = (Z == 0);
-    bool bZMaxBorder = (Z == GridSizeZ - 1);
-    
-    // Si le voxel est sur la bordure, il est visible
-    if (bXMinBorder || bXMaxBorder || bYMinBorder || bYMaxBorder || bZMinBorder || bZMaxBorder)
-    {
-        return true;
-    }
-    
-    // Vérifier les six voisins
-    bool bXMinEmpty = !VoxelGrid[X-1][Y][Z].bIsActive;
-    bool bXMaxEmpty = !VoxelGrid[X+1][Y][Z].bIsActive;
-    bool bYMinEmpty = !VoxelGrid[X][Y-1][Z].bIsActive;
-    bool bYMaxEmpty = !VoxelGrid[X][Y+1][Z].bIsActive;
-    bool bZMinEmpty = !VoxelGrid[X][Y][Z-1].bIsActive;
-    bool bZMaxEmpty = !VoxelGrid[X][Y][Z+1].bIsActive;
-    
-    // Si au moins un voisin est vide, le voxel est visible
-    return bXMinEmpty || bXMaxEmpty || bYMinEmpty || bYMaxEmpty || bZMinEmpty || bZMaxEmpty;
-}
-
-void AVoxelBuilding::AddVoxelToMesh(int32 X, int32 Y, int32 Z, TArray<FVector>& Vertices, TArray<int32>& Triangles, 
+void AImprovedVoxelBuilding::AddVisibleFacesToMesh(int32 X, int32 Y, int32 Z, TArray<FVector>& Vertices, TArray<int32>& Triangles, 
                          TArray<FVector>& Normals, TArray<FVector2D>& UVs, TArray<FColor>& Colors, TArray<FProcMeshTangent>& Tangents)
 {
-    // Position du centre du voxel
+    // Position of voxel center
     FVector Center = FVector(X * VoxelSize, Y * VoxelSize, Z * VoxelSize);
     
-    // Taille du demi-voxel - légère réduction pour créer une séparation visuelle entre les cubes
+    // Half size of voxel - slight reduction to create visual separation between cubes
     float HalfSize = VoxelSize * (0.5f - CubeMargin);
     
-    // Couleur du voxel
+    // Voxel color
     FColor VoxelColor = VoxelGrid[X][Y][Z].Color;
     
-    // Index de base pour ce voxel
+    // Base index for this voxel
     int32 BaseIndex = Vertices.Num();
     
-    // Définir les 8 sommets du cube
-    Vertices.Add(Center + FVector(-HalfSize, -HalfSize, -HalfSize)); // 0: Bas Gauche Arrière
-    Vertices.Add(Center + FVector(HalfSize, -HalfSize, -HalfSize));  // 1: Bas Droite Arrière
-    Vertices.Add(Center + FVector(HalfSize, HalfSize, -HalfSize));   // 2: Bas Droite Avant
-    Vertices.Add(Center + FVector(-HalfSize, HalfSize, -HalfSize));  // 3: Bas Gauche Avant
-    Vertices.Add(Center + FVector(-HalfSize, -HalfSize, HalfSize));  // 4: Haut Gauche Arrière
-    Vertices.Add(Center + FVector(HalfSize, -HalfSize, HalfSize));   // 5: Haut Droite Arrière
-    Vertices.Add(Center + FVector(HalfSize, HalfSize, HalfSize));    // 6: Haut Droite Avant
-    Vertices.Add(Center + FVector(-HalfSize, HalfSize, HalfSize));   // 7: Haut Gauche Avant
+    // Check if each face is visible (not adjacent to another active voxel)
+    bool bBottomFaceVisible = Z == 0 || !VoxelGrid[X][Y][Z-1].bIsActive;
+    bool bTopFaceVisible = Z == GridSizeZ-1 || !VoxelGrid[X][Y][Z+1].bIsActive;
+    bool bLeftFaceVisible = X == 0 || !VoxelGrid[X-1][Y][Z].bIsActive;
+    bool bRightFaceVisible = X == GridSizeX-1 || !VoxelGrid[X+1][Y][Z].bIsActive;
+    bool bBackFaceVisible = Y == 0 || !VoxelGrid[X][Y-1][Z].bIsActive;
+    bool bFrontFaceVisible = Y == GridSizeY-1 || !VoxelGrid[X][Y+1][Z].bIsActive;
     
-    // Ajouter les couleurs pour chaque sommet
-    for (int32 i = 0; i < 8; i++)
+    // Bottom face (Z-)
+    if (bBottomFaceVisible)
     {
-        Colors.Add(VoxelColor);
+        Vertices.Add(Center + FVector(-HalfSize, -HalfSize, -HalfSize)); // 0
+        Vertices.Add(Center + FVector(HalfSize, -HalfSize, -HalfSize));  // 1
+        Vertices.Add(Center + FVector(HalfSize, HalfSize, -HalfSize));   // 2
+        Vertices.Add(Center + FVector(-HalfSize, HalfSize, -HalfSize));  // 3
+        
+        AddFaceTriangles(Triangles, BaseIndex, false);
+        AddFaceNormals(Normals, FVector(0, 0, -1), 4);
+        AddFaceUVs(UVs);
+        AddFaceColors(Colors, VoxelColor, 4);
+        AddFaceTangents(Tangents, FVector(1, 0, 0), 4);
+        
+        BaseIndex += 4;
     }
     
-    // Pour ce rendu, nous allons créer toutes les faces pour chaque cube
-    // Face bas (Z-)
-    Triangles.Add(BaseIndex + 0);
-    Triangles.Add(BaseIndex + 2);
-    Triangles.Add(BaseIndex + 1);
-    
-    Triangles.Add(BaseIndex + 0);
-    Triangles.Add(BaseIndex + 3);
-    Triangles.Add(BaseIndex + 2);
-    
-    // Ajouter les normales pour la face du bas (toutes vers le bas)
-    for (int32 i = 0; i < 2; i++)
+    // Top face (Z+)
+    if (bTopFaceVisible)
     {
-        Normals.Add(FVector(0, 0, -1));
-        Normals.Add(FVector(0, 0, -1));
-        Normals.Add(FVector(0, 0, -1));
+        Vertices.Add(Center + FVector(-HalfSize, -HalfSize, HalfSize)); // 4
+        Vertices.Add(Center + FVector(HalfSize, -HalfSize, HalfSize));  // 5
+        Vertices.Add(Center + FVector(HalfSize, HalfSize, HalfSize));   // 6
+        Vertices.Add(Center + FVector(-HalfSize, HalfSize, HalfSize));  // 7
+        
+        AddFaceTriangles(Triangles, BaseIndex, true);
+        AddFaceNormals(Normals, FVector(0, 0, 1), 4);
+        AddFaceUVs(UVs);
+        AddFaceColors(Colors, VoxelColor, 4);
+        AddFaceTangents(Tangents, FVector(1, 0, 0), 4);
+        
+        BaseIndex += 4;
     }
     
-    // Ajouter les coordonnées UV pour la face du bas
-    UVs.Add(FVector2D(0, 0));
-    UVs.Add(FVector2D(1, 1));
-    UVs.Add(FVector2D(1, 0));
-    
-    UVs.Add(FVector2D(0, 0));
-    UVs.Add(FVector2D(0, 1));
-    UVs.Add(FVector2D(1, 1));
-    
-    // Ajouter les tangentes
-    for (int32 i = 0; i < 6; i++)
+    // Left face (X-)
+    if (bLeftFaceVisible)
     {
-        Tangents.Add(FProcMeshTangent(1, 0, 0));
+        Vertices.Add(Center + FVector(-HalfSize, -HalfSize, -HalfSize)); // 0
+        Vertices.Add(Center + FVector(-HalfSize, HalfSize, -HalfSize));  // 3
+        Vertices.Add(Center + FVector(-HalfSize, HalfSize, HalfSize));   // 7
+        Vertices.Add(Center + FVector(-HalfSize, -HalfSize, HalfSize));  // 4
+        
+        AddFaceTriangles(Triangles, BaseIndex, false);
+        AddFaceNormals(Normals, FVector(-1, 0, 0), 4);
+        AddFaceUVs(UVs);
+        AddFaceColors(Colors, VoxelColor, 4);
+        AddFaceTangents(Tangents, FVector(0, 1, 0), 4);
+        
+        BaseIndex += 4;
     }
     
-    // Face haut (Z+)
-    Triangles.Add(BaseIndex + 4);
-    Triangles.Add(BaseIndex + 5);
-    Triangles.Add(BaseIndex + 6);
-    
-    Triangles.Add(BaseIndex + 4);
-    Triangles.Add(BaseIndex + 6);
-    Triangles.Add(BaseIndex + 7);
-    
-    // Ajouter les normales pour la face du haut (toutes vers le haut)
-    for (int32 i = 0; i < 2; i++)
+    // Right face (X+)
+    if (bRightFaceVisible)
     {
-        Normals.Add(FVector(0, 0, 1));
-        Normals.Add(FVector(0, 0, 1));
-        Normals.Add(FVector(0, 0, 1));
+        Vertices.Add(Center + FVector(HalfSize, -HalfSize, -HalfSize)); // 1
+        Vertices.Add(Center + FVector(HalfSize, -HalfSize, HalfSize));  // 5
+        Vertices.Add(Center + FVector(HalfSize, HalfSize, HalfSize));   // 6
+        Vertices.Add(Center + FVector(HalfSize, HalfSize, -HalfSize));  // 2
+        
+        AddFaceTriangles(Triangles, BaseIndex, false);
+        AddFaceNormals(Normals, FVector(1, 0, 0), 4);
+        AddFaceUVs(UVs);
+        AddFaceColors(Colors, VoxelColor, 4);
+        AddFaceTangents(Tangents, FVector(0, -1, 0), 4);
+        
+        BaseIndex += 4;
     }
     
-    // Ajouter les coordonnées UV pour la face du haut
-    UVs.Add(FVector2D(0, 0));
-    UVs.Add(FVector2D(1, 0));
-    UVs.Add(FVector2D(1, 1));
-    
-    UVs.Add(FVector2D(0, 0));
-    UVs.Add(FVector2D(1, 1));
-    UVs.Add(FVector2D(0, 1));
-    
-    // Ajouter les tangentes
-    for (int32 i = 0; i < 6; i++)
+    // Back face (Y-)
+    if (bBackFaceVisible)
     {
-        Tangents.Add(FProcMeshTangent(1, 0, 0));
+        Vertices.Add(Center + FVector(-HalfSize, -HalfSize, -HalfSize)); // 0
+        Vertices.Add(Center + FVector(-HalfSize, -HalfSize, HalfSize));  // 4
+        Vertices.Add(Center + FVector(HalfSize, -HalfSize, HalfSize));   // 5
+        Vertices.Add(Center + FVector(HalfSize, -HalfSize, -HalfSize));  // 1
+        
+        AddFaceTriangles(Triangles, BaseIndex, false);
+        AddFaceNormals(Normals, FVector(0, -1, 0), 4);
+        AddFaceUVs(UVs);
+        AddFaceColors(Colors, VoxelColor, 4);
+        AddFaceTangents(Tangents, FVector(1, 0, 0), 4);
+        
+        BaseIndex += 4;
     }
     
-    // Face gauche (X-)
-    Triangles.Add(BaseIndex + 0);
-    Triangles.Add(BaseIndex + 4);
-    Triangles.Add(BaseIndex + 7);
-    
-    Triangles.Add(BaseIndex + 0);
-    Triangles.Add(BaseIndex + 7);
-    Triangles.Add(BaseIndex + 3);
-    
-    // Ajouter les normales pour la face gauche (toutes vers la gauche)
-    for (int32 i = 0; i < 2; i++)
+    // Front face (Y+)
+    if (bFrontFaceVisible)
     {
-        Normals.Add(FVector(-1, 0, 0));
-        Normals.Add(FVector(-1, 0, 0));
-        Normals.Add(FVector(-1, 0, 0));
-    }
-    
-    // Ajouter les coordonnées UV pour la face gauche
-    UVs.Add(FVector2D(0, 0));
-    UVs.Add(FVector2D(1, 0));
-    UVs.Add(FVector2D(1, 1));
-    
-    UVs.Add(FVector2D(0, 0));
-    UVs.Add(FVector2D(1, 1));
-    UVs.Add(FVector2D(0, 1));
-    
-    // Ajouter les tangentes
-    for (int32 i = 0; i < 6; i++)
-    {
-        Tangents.Add(FProcMeshTangent(0, 1, 0));
-    }
-    
-    // Face droite (X+)
-    Triangles.Add(BaseIndex + 1);
-    Triangles.Add(BaseIndex + 2);
-    Triangles.Add(BaseIndex + 6);
-    
-    Triangles.Add(BaseIndex + 1);
-    Triangles.Add(BaseIndex + 6);
-    Triangles.Add(BaseIndex + 5);
-    
-    // Ajouter les normales pour la face droite (toutes vers la droite)
-    for (int32 i = 0; i < 2; i++)
-    {
-        Normals.Add(FVector(1, 0, 0));
-        Normals.Add(FVector(1, 0, 0));
-        Normals.Add(FVector(1, 0, 0));
-    }
-    
-    // Ajouter les coordonnées UV pour la face droite
-    UVs.Add(FVector2D(0, 0));
-    UVs.Add(FVector2D(1, 0));
-    UVs.Add(FVector2D(1, 1));
-    
-    UVs.Add(FVector2D(0, 0));
-    UVs.Add(FVector2D(1, 1));
-    UVs.Add(FVector2D(0, 1));
-    
-    // Ajouter les tangentes
-    for (int32 i = 0; i < 6; i++)
-    {
-        Tangents.Add(FProcMeshTangent(0, -1, 0));
-    }
-    
-    // Face arrière (Y-)
-    Triangles.Add(BaseIndex + 0);
-    Triangles.Add(BaseIndex + 1);
-    Triangles.Add(BaseIndex + 5);
-    
-    Triangles.Add(BaseIndex + 0);
-    Triangles.Add(BaseIndex + 5);
-    Triangles.Add(BaseIndex + 4);
-    
-    // Ajouter les normales pour la face arrière (toutes vers l'arrière)
-    for (int32 i = 0; i < 2; i++)
-    {
-        Normals.Add(FVector(0, -1, 0));
-        Normals.Add(FVector(0, -1, 0));
-        Normals.Add(FVector(0, -1, 0));
-    }
-    
-    // Ajouter les coordonnées UV pour la face arrière
-    UVs.Add(FVector2D(0, 0));
-    UVs.Add(FVector2D(1, 0));
-    UVs.Add(FVector2D(1, 1));
-    
-    UVs.Add(FVector2D(0, 0));
-    UVs.Add(FVector2D(1, 1));
-    UVs.Add(FVector2D(0, 1));
-    
-    // Ajouter les tangentes
-    for (int32 i = 0; i < 6; i++)
-    {
-        Tangents.Add(FProcMeshTangent(1, 0, 0));
-    }
-    
-    // Face avant (Y+)
-    Triangles.Add(BaseIndex + 3);
-    Triangles.Add(BaseIndex + 7);
-    Triangles.Add(BaseIndex + 6);
-    
-    Triangles.Add(BaseIndex + 3);
-    Triangles.Add(BaseIndex + 6);
-    Triangles.Add(BaseIndex + 2);
-    
-    // Ajouter les normales pour la face avant (toutes vers l'avant)
-    for (int32 i = 0; i < 2; i++)
-    {
-        Normals.Add(FVector(0, 1, 0));
-        Normals.Add(FVector(0, 1, 0));
-        Normals.Add(FVector(0, 1, 0));
-    }
-    
-    // Ajouter les coordonnées UV pour la face avant
-    UVs.Add(FVector2D(0, 0));
-    UVs.Add(FVector2D(1, 0));
-    UVs.Add(FVector2D(1, 1));
-    
-    UVs.Add(FVector2D(0, 0));
-    UVs.Add(FVector2D(1, 1));
-    UVs.Add(FVector2D(0, 1));
-    
-    // Ajouter les tangentes
-    for (int32 i = 0; i < 6; i++)
-    {
-        Tangents.Add(FProcMeshTangent(-1, 0, 0));
+        Vertices.Add(Center + FVector(-HalfSize, HalfSize, -HalfSize)); // 3
+        Vertices.Add(Center + FVector(HalfSize, HalfSize, -HalfSize));  // 2
+        Vertices.Add(Center + FVector(HalfSize, HalfSize, HalfSize));   // 6
+        Vertices.Add(Center + FVector(-HalfSize, HalfSize, HalfSize));  // 7
+        
+        AddFaceTriangles(Triangles, BaseIndex, false);
+        AddFaceNormals(Normals, FVector(0, 1, 0), 4);
+        AddFaceUVs(UVs);
+        AddFaceColors(Colors, VoxelColor, 4);
+        AddFaceTangents(Tangents, FVector(-1, 0, 0), 4);
     }
 }
 
-FColor AVoxelBuilding::GetRandomColor()
+void AImprovedVoxelBuilding::AddFaceTriangles(TArray<int32>& Triangles, int32 BaseIndex, bool bReversed)
 {
-    // Générer une couleur aléatoire plus vive
+    if (!bReversed)
+    {
+        // First triangle (0,1,2)
+        Triangles.Add(BaseIndex);
+        Triangles.Add(BaseIndex + 1);
+        Triangles.Add(BaseIndex + 2);
+        
+        // Second triangle (0,2,3)
+        Triangles.Add(BaseIndex);
+        Triangles.Add(BaseIndex + 2);
+        Triangles.Add(BaseIndex + 3);
+    }
+    else
+    {
+        // First triangle (reversed: 0,2,1)
+        Triangles.Add(BaseIndex);
+        Triangles.Add(BaseIndex + 2);
+        Triangles.Add(BaseIndex + 1);
+        
+        // Second triangle (reversed: 0,3,2)
+        Triangles.Add(BaseIndex);
+        Triangles.Add(BaseIndex + 3);
+        Triangles.Add(BaseIndex + 2);
+    }
+}
+
+void AImprovedVoxelBuilding::AddFaceNormals(TArray<FVector>& Normals, FVector Normal, int32 Count)
+{
+    for (int32 i = 0; i < Count; ++i)
+    {
+        Normals.Add(Normal);
+    }
+}
+
+void AImprovedVoxelBuilding::AddFaceUVs(TArray<FVector2D>& UVs)
+{
+    // Standard UV mapping for a quad
+    UVs.Add(FVector2D(0, 0)); // Bottom-left
+    UVs.Add(FVector2D(1, 0)); // Bottom-right
+    UVs.Add(FVector2D(1, 1)); // Top-right
+    UVs.Add(FVector2D(0, 1)); // Top-left
+}
+
+void AImprovedVoxelBuilding::AddFaceColors(TArray<FColor>& Colors, FColor Color, int32 Count)
+{
+    for (int32 i = 0; i < Count; ++i)
+    {
+        Colors.Add(Color);
+    }
+}
+
+void AImprovedVoxelBuilding::AddFaceTangents(TArray<FProcMeshTangent>& Tangents, FVector Tangent, int32 Count)
+{
+    for (int32 i = 0; i < Count; ++i)
+    {
+        Tangents.Add(FProcMeshTangent(Tangent.X, Tangent.Y, Tangent.Z));
+    }
+}
+
+FColor AImprovedVoxelBuilding::GetRandomColor()
+{
+    // Generate a more vibrant random color
     float Hue = FMath::FRand() * 360.0f;
-    float Saturation = 0.8f + FMath::FRand() * 0.2f; // Plus saturé
-    float Value = 0.7f + FMath::FRand() * 0.3f;      // Plus lumineux
+    float Saturation = 0.8f + FMath::FRand() * 0.2f; // More saturated
+    float Value = 0.7f + FMath::FRand() * 0.3f;      // Brighter
     
-    // Convertir HSV en RGB
+    // Convert HSV to RGB
     FLinearColor LinearColor = FLinearColor::MakeFromHSV8(Hue, Saturation * 255.0f, Value * 255.0f);
     
-    // Assurer une couleur opaque
+    // Ensure full opacity
     LinearColor.A = 1.0f;
     
-    // Convertir en FColor avec opacité complète
+    // Convert to FColor with full opacity
     return LinearColor.ToFColor(true);
 }
 
-void AVoxelBuilding::SmoothVertices(TArray<FVector>& Vertices, TArray<int32>& Triangles)
+void AImprovedVoxelBuilding::SmoothVertices(TArray<FVector>& Vertices, TArray<int32>& Triangles)
 {
-    // Créer une copie des sommets originaux
+    // Create a copy of original vertices
     TArray<FVector> OriginalVertices = Vertices;
     
-    // Créer une structure pour stocker les sommets connectés
+    // Create a structure to store connected vertices
     TArray<TArray<int32>> VertexConnections;
     VertexConnections.SetNum(Vertices.Num());
     
-    // Parcourir tous les triangles et construire les connexions
+    // Loop through all triangles and build connections
     for (int32 i = 0; i < Triangles.Num(); i += 3)
     {
         int32 V1 = Triangles[i];
@@ -476,12 +400,12 @@ void AVoxelBuilding::SmoothVertices(TArray<FVector>& Vertices, TArray<int32>& Tr
         VertexConnections[V3].AddUnique(V2);
     }
     
-    // Appliquer le lissage
+    // Apply smoothing
     for (int32 i = 0; i < Vertices.Num(); i++)
     {
         if (VertexConnections[i].Num() > 0)
         {
-            // Calculer la position moyenne des sommets connectés
+            // Calculate average position of connected vertices
             FVector AveragePosition = FVector::ZeroVector;
             for (int32 j = 0; j < VertexConnections[i].Num(); j++)
             {
@@ -489,22 +413,26 @@ void AVoxelBuilding::SmoothVertices(TArray<FVector>& Vertices, TArray<int32>& Tr
             }
             AveragePosition /= VertexConnections[i].Num();
             
-            // Appliquer le lissage avec la pondération du facteur
+            // Apply smoothing with weighting factor
             Vertices[i] = FMath::Lerp(OriginalVertices[i], AveragePosition, SmoothingFactor);
         }
     }
 }
-
-void AVoxelBuilding::DestroyVoxelsAt(FVector Location, float Radius)
+void AImprovedVoxelBuilding::DestroyVoxelsAt(FVector Location, FVector ImpactNormal, float Radius)
 {
-    // Cette fonction sera implémentée dans une future mise à jour
-    // Elle permettra de détruire les voxels dans un rayon donné
+    // Convertir la position mondiale en coordonnées locales
+    FVector LocalPosition = Location; // Déjà en coordonnées locales
+    FVector LocalNormal = ImpactNormal; // Considérons que la normale est aussi en coordonnées locales
     
-    // Convertir la position du monde en coordonnées de la grille
-    FVector LocalPosition = GetActorTransform().InverseTransformPosition(Location);
-    int32 GridX = FMath::Floor(LocalPosition.X / VoxelSize) + GridSizeX / 2;
-    int32 GridY = FMath::Floor(LocalPosition.Y / VoxelSize) + GridSizeY / 2;
-    int32 GridZ = FMath::Floor(LocalPosition.Z / VoxelSize) + GridSizeZ / 2;
+    // Convertir en coordonnées de grille sans décalage
+    int32 GridX = FMath::Floor(LocalPosition.X / VoxelSize);
+    int32 GridY = FMath::Floor(LocalPosition.Y / VoxelSize);
+    int32 GridZ = FMath::Floor(LocalPosition.Z / VoxelSize);
+    
+    // Log pour le débogage
+    UE_LOG(LogTemp, Warning, TEXT("Impact at local position: %s, Normal: %s"), 
+           *LocalPosition.ToString(), *LocalNormal.ToString());
+    UE_LOG(LogTemp, Warning, TEXT("Grid coordinates: (%d, %d, %d)"), GridX, GridY, GridZ);
     
     // Rayon en unités de grille
     int32 GridRadius = FMath::CeilToInt(Radius / VoxelSize);
@@ -512,23 +440,118 @@ void AVoxelBuilding::DestroyVoxelsAt(FVector Location, float Radius)
     // Vérifier chaque voxel dans la zone d'explosion
     bool bAnyVoxelDestroyed = false;
     
-    for (int32 X = FMath::Max(0, GridX - GridRadius); X <= FMath::Min(GridSizeX - 1, GridX + GridRadius); X++)
+    // Créer un tableau pour stocker les voxels à détruire avec leur priorité
+    TArray<TPair<FIntVector, float>> VoxelsToDestroy;
+    
+    // Utiliser un raycasting 3D depuis le point d'impact dans plusieurs directions
+    const int32 RayCount = 16; // Nombre de rayons
+    const float MaxRayLength = Radius * 1.2f; // Légèrement plus long que le rayon pour toucher tous les voxels
+    
+    // Générer des rayons dans différentes directions
+    for (int32 RayIndex = 0; RayIndex < RayCount; RayIndex++)
     {
-        for (int32 Y = FMath::Max(0, GridY - GridRadius); Y <= FMath::Min(GridSizeY - 1, GridY + GridRadius); Y++)
+        // Calculer une direction aléatoire avec un biais vers la direction de l'impact
+        FVector RayDir;
+        
+        if (RayIndex == 0)
         {
-            for (int32 Z = FMath::Max(0, GridZ - GridRadius); Z <= FMath::Min(GridSizeZ - 1, GridZ + GridRadius); Z++)
+            // Le premier rayon va directement dans la direction opposée à la normale (dans le bâtiment)
+            RayDir = -LocalNormal;
+        }
+        else
+        {
+            // Les autres rayons sont aléatoires avec un biais vers l'intérieur
+            float Pitch = FMath::DegreesToRadians(FMath::RandRange(-80.0f, 80.0f));
+            float Yaw = FMath::DegreesToRadians(FMath::RandRange(0.0f, 360.0f));
+            
+            // Calculer la direction du rayon
+            RayDir = FVector(
+                FMath::Cos(Pitch) * FMath::Cos(Yaw),
+                FMath::Cos(Pitch) * FMath::Sin(Yaw),
+                FMath::Sin(Pitch)
+            );
+            
+            // Ajouter un biais vers l'intérieur du bâtiment
+            RayDir = (RayDir - LocalNormal).GetSafeNormal();
+        }
+        
+        // Tracer le rayon à travers les voxels
+        FVector RayStart = LocalPosition;
+        FVector RayEnd = RayStart + RayDir * MaxRayLength;
+        
+        // Version simplifiée de l'algorithme de Bresenham pour la traversée de voxel 3D
+        FVector CurrentPos = RayStart;
+        FVector Step = RayDir * (VoxelSize * 0.25f); // Pas plus petit que la taille du voxel pour ne pas en manquer
+        
+        for (float Distance = 0.0f; Distance <= MaxRayLength; Distance += VoxelSize * 0.25f)
+        {
+            // Calculer les coordonnées de grille pour cette position
+            int32 X = FMath::Floor(CurrentPos.X / VoxelSize);
+            int32 Y = FMath::Floor(CurrentPos.Y / VoxelSize);
+            int32 Z = FMath::Floor(CurrentPos.Z / VoxelSize);
+            
+            // Vérifier les limites
+            if (X >= 0 && X < GridSizeX && Y >= 0 && Y < GridSizeY && Z >= 0 && Z < GridSizeZ)
             {
-                // Calculer la distance au centre de l'explosion
-                FVector VoxelCenter = FVector(X * VoxelSize, Y * VoxelSize, Z * VoxelSize);
-                float Distance = FVector::Dist(VoxelCenter, LocalPosition);
-                
-                // Si le voxel est dans le rayon et qu'il est actif
-                if (Distance <= Radius && VoxelGrid[X][Y][Z].bIsActive)
+                // Si ce voxel est actif, le marquer pour destruction
+                if (VoxelGrid[X][Y][Z].bIsActive)
                 {
-                    // Désactiver le voxel
-                    VoxelGrid[X][Y][Z].bIsActive = false;
-                    bAnyVoxelDestroyed = true;
+                    // Calculer la priorité de destruction (1.0 = centre de l'explosion, 0.0 = bord)
+                    float DistanceFromImpact = FVector::Dist(CurrentPos, LocalPosition);
+                    float DestructionPriority = 1.0f - FMath::Min(1.0f, DistanceFromImpact / Radius);
+                    
+                    // Ajouter à la liste si pas déjà présent ou avec une priorité plus élevée
+                    bool bAlreadyAdded = false;
+                    FIntVector VoxelCoord(X, Y, Z);
+                    
+                    for (int32 i = 0; i < VoxelsToDestroy.Num(); i++)
+                    {
+                        if (VoxelsToDestroy[i].Key.X == VoxelCoord.X && 
+                            VoxelsToDestroy[i].Key.Y == VoxelCoord.Y && 
+                            VoxelsToDestroy[i].Key.Z == VoxelCoord.Z)
+                        {
+                            bAlreadyAdded = true;
+                            // Mettre à jour la priorité si celle-ci est plus élevée
+                            VoxelsToDestroy[i].Value = FMath::Max(VoxelsToDestroy[i].Value, DestructionPriority);
+                            break;
+                        }
+                    }
+                    
+                    if (!bAlreadyAdded)
+                    {
+                        VoxelsToDestroy.Add(TPair<FIntVector, float>(VoxelCoord, DestructionPriority));
+                    }
                 }
+            }
+            
+            // Avancer le long du rayon
+            CurrentPos += Step;
+        }
+    }
+    
+    // Trier les voxels par priorité de destruction (du plus prioritaire au moins prioritaire)
+    VoxelsToDestroy.Sort([](const TPair<FIntVector, float>& A, const TPair<FIntVector, float>& B) {
+        return A.Value > B.Value;
+    });
+    
+    // Appliquer la destruction avec une chance basée sur la priorité
+    for (const TPair<FIntVector, float>& VoxelData : VoxelsToDestroy)
+    {
+        int32 X = VoxelData.Key.X;
+        int32 Y = VoxelData.Key.Y;
+        int32 Z = VoxelData.Key.Z;
+        float Priority = VoxelData.Value;
+        
+        // Chance de destruction basée sur la priorité
+        if (FMath::FRand() < Priority)
+        {
+            VoxelGrid[X][Y][Z].bIsActive = false;
+            bAnyVoxelDestroyed = true;
+            
+            // Log pour le voxel central (celui directement touché)
+            if (X == GridX && Y == GridY && Z == GridZ)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("Destroying central voxel at grid (%d, %d, %d)"), X, Y, Z);
             }
         }
     }
@@ -538,4 +561,54 @@ void AVoxelBuilding::DestroyVoxelsAt(FVector Location, float Radius)
     {
         CreateMesh();
     }
+}
+
+bool AImprovedVoxelBuilding::Server_DestroyVoxelsAt_Validate(FVector Location, FVector ImpactNormal, float Radius)
+{
+    // Validation basique : s'assurer que le rayon est positif
+    return Radius > 0.0f;
+}
+
+void AImprovedVoxelBuilding::Server_DestroyVoxelsAt_Implementation(FVector Location, FVector ImpactNormal, float Radius)
+{
+    // Appliquer la destruction sur le serveur
+    DestroyVoxelsAt(Location, ImpactNormal, Radius);
+    
+    // Propager à tous les clients
+    Multicast_DestroyVoxelsAt(Location, ImpactNormal, Radius);
+}
+
+void AImprovedVoxelBuilding::Multicast_DestroyVoxelsAt_Implementation(FVector Location, FVector ImpactNormal, float Radius)
+{
+    // Ne pas exécuter à nouveau sur le serveur, uniquement sur les clients
+    if (!HasAuthority())
+    {
+        DestroyVoxelsAt(Location, ImpactNormal, Radius);
+    }
+}
+
+
+TArray<AImprovedVoxelBuilding*> AImprovedVoxelBuilding::FindAllVoxelBuildings(const UObject* WorldContextObject)
+{
+    TArray<AImprovedVoxelBuilding*> Result;
+    if (!WorldContextObject)
+        return Result;
+        
+    UWorld* World = WorldContextObject->GetWorld();
+    if (!World)
+        return Result;
+        
+    TArray<AActor*> FoundActors;
+    UGameplayStatics::GetAllActorsOfClass(World, AImprovedVoxelBuilding::StaticClass(), FoundActors);
+    
+    for (AActor* Actor : FoundActors)
+    {
+        AImprovedVoxelBuilding* Building = Cast<AImprovedVoxelBuilding>(Actor);
+        if (Building)
+        {
+            Result.Add(Building);
+        }
+    }
+    
+    return Result;
 }

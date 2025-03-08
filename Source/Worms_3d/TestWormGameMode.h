@@ -20,8 +20,7 @@ public:
     virtual void Tick(float DeltaTime) override;
     // Classe de bâtiment à spawner
     UPROPERTY(EditDefaultsOnly, Category = "Voxel Building")
-    TSubclassOf<AVoxelBuilding> BuildingClass;
-
+    TSubclassOf<AImprovedVoxelBuilding> BuildingClass;
     // Nombre de bâtiments à générer
     UPROPERTY(EditDefaultsOnly, Category = "Voxel Building")
     int32 NumberOfBuildings;

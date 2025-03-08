@@ -126,4 +126,6 @@ protected:
     
     // Fonction pour configurer les acteurs à ignorer
     void SetupIgnoredActors();
+    FVector LastHitLocation;
+    FVector LastHitNormal;
 };
