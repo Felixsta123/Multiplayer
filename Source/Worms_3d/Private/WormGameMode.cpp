@@ -6,6 +6,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "WormGameState.h"
 #include "Worms_3d/AVoxelBuilding.h"
+#include "Worms_3d/VoxelTerrainSettings.h"
 
 AWormGameMode::AWormGameMode()
 {
@@ -329,15 +330,32 @@ void AWormGameMode::GenerateVoxelBuildings()
         return;
     }
 
+    // Appliquer les paramètres de terrain avant de générer
+    ApplyTerrainSettings();
+
     UE_LOG(LogTemp, Warning, TEXT("Generating %d voxel buildings..."), NumberOfBuildings);
 
     FActorSpawnParameters SpawnParams;
     SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
 
-    // Use fixed values for consistency
+    // Obtenir les paramètres de terrain
+    UVoxelTerrainSettingsManager* Manager = UVoxelTerrainSettingsManager::GetInstance();
+    FVoxelTerrainSettings Settings;
+    
+    if (Manager)
+    {
+        Settings = Manager->GetSettings();
+    }
+    else
+    {
+        // Utiliser les valeurs par défaut si le manager n'est pas disponible
+        Settings = FVoxelTerrainSettings();
+    }
+
+    // Utiliser des valeurs fixes pour la cohérence
     for (int32 i = 0; i < NumberOfBuildings; i++)
     {
-        // Calculate random position in area
+        // Calculer une position aléatoire dans la zone
         float X = FMath::RandRange(-SpawnAreaSize, SpawnAreaSize);
         float Y = FMath::RandRange(-SpawnAreaSize, SpawnAreaSize);
         float Z = 0.0f; // Position buildings at ground level
@@ -357,15 +375,17 @@ void AWormGameMode::GenerateVoxelBuildings()
         {
             UE_LOG(LogTemp, Warning, TEXT("Voxel building %d generated at %s"), i, *Location.ToString());
 
-            // Configure with fixed values
-            Building->GridSizeX = 10;
-            Building->GridSizeY = 10;
-            Building->GridSizeZ = 10;
-            Building->VoxelSize = 100.0f;
-            Building->SmoothingFactor = 0.01f;
-            Building->bUseRandomColors = true;
-            Building->CubeMargin = 0.02f;
-            Building->bUseDoubleSidedGeometry = true;
+            // Appliquer les paramètres de terrain
+            Building->GridSizeX = Settings.GridSizeX;
+            Building->GridSizeY = Settings.GridSizeY;
+            Building->GridSizeZ = Settings.GridSizeZ;
+            Building->VoxelSize = Settings.VoxelSize;
+            Building->SmoothingFactor = Settings.SmoothingFactor;
+            Building->bUseRandomColors = Settings.bUseRandomColors;
+            Building->CubeMargin = Settings.CubeMargin;
+            Building->bSpawnDebrisOnDestruction = Settings.bSpawnDebrisOnDestruction;
+            Building->DebrisAmountMultiplier = Settings.DebrisAmountMultiplier;
+            Building->bSpawnImpactCloud = Settings.bSpawnImpactCloud;
 
             // Generate building
             Building->GenerateBuilding();
@@ -452,3 +472,23 @@ void AWormGameMode::InitializeWeaponsForAllPlayers()
         false
     );
 }
+
+void AWormGameMode::ApplyTerrainSettings()
+{
+    // Obtenir les paramètres actuels
+    UVoxelTerrainSettingsManager* Manager = UVoxelTerrainSettingsManager::GetInstance();
+    if (!Manager)
+    {
+        return;
+    }
+    
+    FVoxelTerrainSettings Settings = Manager->GetSettings();
+    
+    // Mettre à jour les propriétés du GameMode
+    NumberOfBuildings = Settings.NumberOfBuildings;
+    SpawnAreaSize = Settings.SpawnAreaSize;
+    
+    UE_LOG(LogTemp, Warning, TEXT("Applied terrain settings: Buildings=%d, Area=%.1f"), 
+        NumberOfBuildings, SpawnAreaSize);
+}
+

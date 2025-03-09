@@ -20,7 +20,9 @@ public:
     // Override standard GameMode functions
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
-    
+    // Appliquer les paramètres de terrain à tous les bâtiments générés
+    UFUNCTION(BlueprintCallable, Category = "Voxel Building")
+    void ApplyTerrainSettings();
     // Turn management functions
     UFUNCTION(BlueprintCallable, Category = "Turns")
     void StartNextTurn();
