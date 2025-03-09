@@ -33,6 +33,12 @@ void UGameLoadingWidget::NativeConstruct()
         PlayAnimation(LoadingAnimation, 0.0f, 0, EUMGSequencePlayMode::Forward, 1.0f);
     }
     
+    // Play show animation if available
+    if (ShowAnimation)
+    {
+        PlayAnimation(ShowAnimation);
+    }
+    
     // Block input
     if (GetOwningPlayer())
     {
@@ -78,6 +84,24 @@ void UGameLoadingWidget::SetLoadingProgress(float Progress, const FString& NewSt
     }
 }
 
+void UGameLoadingWidget::SetStatusText(const FString& NewStatusText)
+{
+    // Update just the status text
+    if (StatusText && !NewStatusText.IsEmpty())
+    {
+        StatusText->SetText(FText::FromString(NewStatusText));
+    }
+}
+
+void UGameLoadingWidget::SetProgress(float NewProgress)
+{
+    // Update just the progress bar
+    if (LoadingProgressBar)
+    {
+        LoadingProgressBar->SetPercent(FMath::Clamp(NewProgress, 0.0f, 1.0f));
+    }
+}
+
 void UGameLoadingWidget::ShowLoadingScreen(float Duration)
 {
     // Clear any existing dismiss timer
@@ -114,6 +138,12 @@ void UGameLoadingWidget::ShowLoadingScreen(float Duration)
     }
     
     bIsActive = true;
+    
+    // Play show animation if available
+    if (ShowAnimation)
+    {
+        PlayAnimation(ShowAnimation);
+    }
 }
 
 void UGameLoadingWidget::DismissLoadingScreen()
@@ -127,7 +157,37 @@ void UGameLoadingWidget::DismissLoadingScreen()
     // Call the blueprint event
     OnLoadingComplete();
     
-    // Remove from viewport with a slight delay to ensure animations can finish
+    // Play hide animation if available
+    if (HideAnimation)
+    {
+        PlayAnimation(HideAnimation);
+        
+        // Set a timer to remove the widget after the animation completes
+        FTimerHandle RemovalTimerHandle;
+        GetWorld()->GetTimerManager().SetTimer(
+            RemovalTimerHandle,
+            [this]()
+            {
+                // Restore game input mode
+                if (GetOwningPlayer())
+                {
+                    UWidgetBlueprintLibrary::SetInputMode_GameAndUIEx(GetOwningPlayer());
+                    GetOwningPlayer()->SetShowMouseCursor(true);
+                }
+                
+                RemoveFromParent();
+                bIsActive = false;
+                
+                UE_LOG(LogTemp, Warning, TEXT("Loading screen dismissed after animation"));
+            },
+            HideAnimation->GetEndTime(),
+            false
+        );
+        
+        return;
+    }
+    
+    // If no hide animation, remove immediately with a slight delay
     FTimerHandle RemovalTimerHandle;
     GetWorld()->GetTimerManager().SetTimer(
         RemovalTimerHandle,

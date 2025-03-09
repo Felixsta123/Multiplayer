@@ -1,4 +1,3 @@
-// WormGameState.h
 #pragma once
 
 #include "CoreMinimal.h"
@@ -6,7 +5,8 @@
 #include "../AWormCharacter.h"
 #include "TestVisibleTerrain.h"
 #include "ADestructibleTerrain.h"
-#include "Worms_3d/AVoxelBuilding.h"  // Added voxel building include
+#include "Worms_3d/AVoxelBuilding.h"
+#include "../NetworkLoadingManager.h"
 #include "WormGameState.generated.h"
 
 UCLASS()
@@ -17,7 +17,7 @@ class WORMS_3D_API AWormGameState : public AGameState
 public:
     AWormGameState();
     DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCurrentPlayerChanged, int32, NewPlayerIndex);
-    
+   
     // Replicated properties for all clients
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Turns")
     int32 CurrentPlayerIndex;
@@ -37,6 +37,10 @@ public:
 
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Turns")
     FString CurrentPlayerName;   // Name of active player, easier to replicate than an index
+
+    // Network loading manager component for synchronized loading screens
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Loading")
+    UNetworkLoadingManager* LoadingManager;
 
     UFUNCTION(BlueprintCallable, Category = "Game")
     void SetCurrentPlayer(int32 PlayerIndex);
@@ -61,4 +65,14 @@ public:
     // New function to get all voxel buildings
     UFUNCTION(BlueprintCallable, Category = "Voxel Buildings")
     TArray<AImprovedVoxelBuilding*> GetAllVoxelBuildings() const;
+
+    // Loading screen convenience methods (calls through to LoadingManager)
+    UFUNCTION(BlueprintCallable, Category = "Loading")
+    void ShowLoadingScreen(float Duration = 5.0f);
+    
+    UFUNCTION(BlueprintCallable, Category = "Loading")
+    void UpdateLoadingProgress(float Progress, const FString& StatusText);
+    
+    UFUNCTION(BlueprintCallable, Category = "Loading")
+    void DismissLoadingScreen();
 };

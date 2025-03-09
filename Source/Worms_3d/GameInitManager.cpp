@@ -1,10 +1,10 @@
 ﻿#include "GameInitManager.h"
-#include "GameInitManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/PlayerController.h"
 #include "Blueprint/UserWidget.h"
 #include "AVoxelBuilding.h"
 #include "WormGameMode.h"
+#include "WormGameState.h"
 
 AGameInitManager::AGameInitManager()
 {
@@ -22,6 +22,9 @@ AGameInitManager::AGameInitManager()
 void AGameInitManager::BeginPlay()
 {
     Super::BeginPlay();
+    
+    // Initialize the network loading system first
+    InitializeNetworkLoading();
     
     // Only execute on server or standalone
     if (GetLocalRole() == ROLE_Authority)
@@ -42,6 +45,27 @@ void AGameInitManager::BeginPlay()
     }
 }
 
+void AGameInitManager::InitializeNetworkLoading()
+{
+    // Get a reference to the game state
+    WormGameState = Cast<AWormGameState>(UGameplayStatics::GetGameState(this));
+    
+    if (WormGameState && WormGameState->LoadingManager)
+    {
+        UE_LOG(LogTemp, Log, TEXT("GameInitManager: Found WormGameState with NetworkLoadingManager"));
+        
+        // Configure loading widget class if needed
+        if (LoadingWidgetClass)
+        {
+            WormGameState->LoadingManager->LoadingWidgetClass = LoadingWidgetClass;
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("GameInitManager: Failed to find WormGameState with LoadingManager, will use local loading widget"));
+    }
+}
+
 void AGameInitManager::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
@@ -51,31 +75,41 @@ void AGameInitManager::StartInitializationSequence()
 {
     UE_LOG(LogTemp, Warning, TEXT("Starting game initialization sequence"));
     
-    // Create and show loading widget for all local players
-    for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+    // Show loading screen using NetworkLoadingManager if available
+    if (WormGameState && WormGameState->LoadingManager)
     {
-        APlayerController* PC = It->Get();
-        if (PC && PC->IsLocalController())
+        UE_LOG(LogTemp, Warning, TEXT("Using NetworkLoadingManager to show loading screen on all clients"));
+        WormGameState->ShowLoadingScreen(LoadingScreenDuration);
+    }
+    // Fallback to local implementation for the server player
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Falling back to local loading screen (clients won't see it)"));
+        // Create and show loading widget for all local players
+        for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
         {
-            // Create loading widget
-            if (LoadingWidgetClass)
+            APlayerController* PC = It->Get();
+            if (PC && PC->IsLocalController())
             {
-                LoadingWidget = CreateWidget<UGameLoadingWidget>(PC, LoadingWidgetClass);
-                if (LoadingWidget)
+                // Create loading widget
+                if (LoadingWidgetClass)
                 {
-                    LoadingWidget->AddToViewport(9999); // High Z-order to be on top
-                    LoadingWidget->ShowLoadingScreen(LoadingScreenDuration);
-                    
-                    UE_LOG(LogTemp, Warning, TEXT("Loading widget created for player controller"));
+                    LoadingWidget = CreateWidget<UW_GameLoadingScreen>(PC, LoadingWidgetClass);
+                    if (LoadingWidget)
+                    {
+                        LoadingWidget->AddToViewport(9999);
+                        LoadingWidget->ShowLoadingScreen(LoadingScreenDuration);
+                        UE_LOG(LogTemp, Warning, TEXT("Loading widget created for player controller"));
+                    }
+                    else
+                    {
+                        UE_LOG(LogTemp, Error, TEXT("Failed to create loading widget"));
+                    }
                 }
-                else
-                {
-                    UE_LOG(LogTemp, Error, TEXT("Failed to create loading widget"));
-                }
+                
+                // Only handle the first local player controller for now
+                break;
             }
-            
-            // Only handle the first local player controller for now
-            break;
         }
     }
     
@@ -135,8 +169,6 @@ void AGameInitManager::ExecuteInitializationStep()
             if (Buildings.Num() > 0)
             {
                 UE_LOG(LogTemp, Warning, TEXT("Found %d voxel buildings, positioning player starts"), Buildings.Num());
-                
-               
             }
             else
             {
@@ -183,8 +215,6 @@ void AGameInitManager::ExecuteInitializationStep()
             CurrentInitStep++;
             break;
         }
-        
-                
         
         case 3: // Fourth step - position players on voxel buildings
         {
@@ -253,8 +283,13 @@ void AGameInitManager::ExecuteInitializationStep()
 
 void AGameInitManager::UpdateLoadingProgress(float Progress, const FString& StatusText)
 {
-    // Update loading widget if available
-    if (LoadingWidget)
+    // First, try to update using the NetworkLoadingManager
+    if (WormGameState && WormGameState->LoadingManager)
+    {
+        WormGameState->UpdateLoadingProgress(Progress, StatusText);
+    }
+    // Fallback to local loading widget if available
+    else if (LoadingWidget)
     {
         LoadingWidget->SetLoadingProgress(Progress, StatusText);
     }
@@ -266,55 +301,41 @@ void AGameInitManager::CompleteInitialization()
 {
     UE_LOG(LogTemp, Warning, TEXT("Game initialization sequence complete"));
     
-    // Dismiss loading widget after a short delay to ensure last message is seen
-    FTimerHandle DismissTimerHandle;
-    GetWorld()->GetTimerManager().SetTimer(
-        DismissTimerHandle,
-        [this]()
-        {
-            if (LoadingWidget)
+    // First, try to dismiss using the NetworkLoadingManager
+    if (WormGameState && WormGameState->LoadingManager)
+    {
+        // Delay dismissal a bit so players can see the "Ready!" message
+        FTimerHandle DismissTimerHandle;
+        GetWorld()->GetTimerManager().SetTimer(
+            DismissTimerHandle,
+            [this]()
             {
-                LoadingWidget->DismissLoadingScreen();
-                LoadingWidget = nullptr;
-            }
-        },
-        1.0f,
-        false
-    );
-}
-
-AGameInitManager* AWormGameMode::SetupGameInitialization()
-{
-    // Check if we already have a game init manager
-    if (GameInitManager)
-    {
-        return GameInitManager;
+                if (WormGameState)
+                {
+                    WormGameState->DismissLoadingScreen();
+                }
+            },
+            1.0f,
+            false
+        );
     }
-    
-    // Determine which class to use
-    TSubclassOf<AGameInitManager> ClassToUse = GameInitManagerClass;
-    if (!ClassToUse)
+    // Fallback to local loading widget if available
+    else if (LoadingWidget)
     {
-        ClassToUse = AGameInitManager::StaticClass();
+        // Dismiss loading widget after a short delay to ensure last message is seen
+        FTimerHandle DismissTimerHandle;
+        GetWorld()->GetTimerManager().SetTimer(
+            DismissTimerHandle,
+            [this]()
+            {
+                if (LoadingWidget)
+                {
+                    LoadingWidget->DismissLoadingScreen();
+                    LoadingWidget = nullptr;
+                }
+            },
+            1.0f,
+            false
+        );
     }
-    
-    // Create the game init manager
-    FActorSpawnParameters SpawnParams;
-    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-    
-    AGameInitManager* InitManager = GetWorld()->SpawnActor<AGameInitManager>(
-        ClassToUse,
-        FVector::ZeroVector,
-        FRotator::ZeroRotator,
-        SpawnParams
-    );
-    
-    if (InitManager)
-    {
-        UE_LOG(LogTemp, Log, TEXT("Game initialization manager created successfully"));
-        return InitManager;
-    }
-    
-    UE_LOG(LogTemp, Error, TEXT("Failed to create game initialization manager"));
-    return nullptr;
 }

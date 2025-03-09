@@ -7,6 +7,7 @@
 #include "../AWormCharacter.h"
 #include "ADestructibleTerrain.h"
 #include "Worms_3d/AVoxelBuilding.h" // Added VoxelBuilding include
+#include "../W_GameLoadingScreen.h"
 #include "WormGameMode.generated.h"
 
 UCLASS()
@@ -16,7 +17,11 @@ class WORMS_3D_API AWormGameMode : public AGameMode
 
 public:
     AWormGameMode();
+    // Dans la section des includes de WormGameMode.h
 
+    // Dans la section public: de la classe AWormGameMode
+    UPROPERTY(EditDefaultsOnly, Category = "UI")
+    TSubclassOf<UW_GameLoadingScreen> LoadingWidgetClass;
     // Override standard GameMode functions
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;

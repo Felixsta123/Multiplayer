@@ -41,6 +41,14 @@ public:
     UFUNCTION(BlueprintPure, Category = "Loading")
     bool IsActive() const { return bIsActive; }
     
+    // Update just the status text (for more granular updates)
+    UFUNCTION(BlueprintCallable, Category = "Loading")
+    void SetStatusText(const FString& NewStatusText);
+    
+    // Update just the progress bar (for more granular updates)
+    UFUNCTION(BlueprintCallable, Category = "Loading")
+    void SetProgress(float NewProgress);
+    
 protected:
     // Text block for status message
     UPROPERTY(meta = (BindWidget))
@@ -53,6 +61,13 @@ protected:
     // Animation for the loading screen
     UPROPERTY(Transient, meta = (BindWidgetAnim))
     class UWidgetAnimation* LoadingAnimation;
+    
+    // Animation for show/hide
+    UPROPERTY(Transient, meta = (BindWidgetAnim))
+    class UWidgetAnimation* ShowAnimation;
+    
+    UPROPERTY(Transient, meta = (BindWidgetAnim))
+    class UWidgetAnimation* HideAnimation;
     
     // Timer handle for auto-dismiss
     FTimerHandle DismissTimerHandle;

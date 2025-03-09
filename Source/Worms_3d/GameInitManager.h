@@ -4,6 +4,8 @@
 #include "GameFramework/Actor.h"
 #include "GameLoadingWidget.h"
 #include "PlayerSpawnManager.h"
+#include "WormGameState.h"
+#include "W_GameLoadingScreen.h"
 #include "GameInitManager.generated.h"
 
 /**
@@ -27,10 +29,7 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     UPlayerSpawnManager* PlayerSpawnManager;
 
-    // Widget class for the loading screen
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI")
-    TSubclassOf<UGameLoadingWidget> LoadingWidgetClass;
-    
+
     // Duration to show the loading screen
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI")
     float LoadingScreenDuration = 5.0f;
@@ -52,7 +51,11 @@ public:
     void CompleteInitialization();
     
 protected:
-    // Current instance of the loading widget
+    // Reference to the game state for network synchronized loading
+    UPROPERTY()
+    AWormGameState* WormGameState;
+    
+    // Current instance of the loading widget (used as fallback if NetworkLoadingManager fails)
     UPROPERTY()
     UGameLoadingWidget* LoadingWidget;
     
@@ -64,4 +67,7 @@ protected:
     
     // Execute the current initialization step
     void ExecuteInitializationStep();
+    
+    // Initialize the network loading system
+    void InitializeNetworkLoading();
 };

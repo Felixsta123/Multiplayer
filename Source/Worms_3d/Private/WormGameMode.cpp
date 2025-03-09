@@ -6,6 +6,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "WormGameState.h"
 #include "Worms_3d/AVoxelBuilding.h"
+#include "Worms_3d/GameInitFactorySubsystem.h"
 #include "Worms_3d/VoxelTerrainSettings.h"
 
 AWormGameMode::AWormGameMode()
@@ -505,3 +506,50 @@ void AWormGameMode::ApplyTerrainSettings()
         NumberOfBuildings, SpawnAreaSize);
 }
 
+AGameInitManager* AWormGameMode::SetupGameInitialization()
+{
+    if (GameInitManager)
+    {
+        return GameInitManager;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Setting up game initialization manager..."));
+
+    UGameInitFactorySubsystem* InitFactory = GetWorld()->GetGameInstance()->GetSubsystem<UGameInitFactorySubsystem>();
+    if (InitFactory)
+    {
+        GameInitManager = InitFactory->GetOrCreateGameInitManager(this);
+        if (GameInitManager)
+        {
+            return GameInitManager;
+        }
+    }
+
+    FActorSpawnParameters SpawnParams;
+    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+    UClass* ClassToUse = GameInitManagerClass ? 
+        GameInitManagerClass.Get() : AGameInitManager::StaticClass();
+
+    GameInitManager = GetWorld()->SpawnActor<AGameInitManager>(
+        ClassToUse,
+        FVector::ZeroVector,
+        FRotator::ZeroRotator,
+        SpawnParams
+    );
+
+    if (GameInitManager)
+    {
+        AWormGameState* WormGS = GetGameState<AWormGameState>();
+        if (WormGS && WormGS->LoadingManager)
+        {
+            if (LoadingWidgetClass)
+            {
+                WormGS->LoadingManager->LoadingWidgetClass = LoadingWidgetClass;
+            }
+            UE_LOG(LogTemp, Log, TEXT("NetworkLoadingManager configured in GameState"));
+        }
+    }
+
+    return GameInitManager;
+}

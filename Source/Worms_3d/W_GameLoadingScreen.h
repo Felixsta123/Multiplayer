@@ -28,9 +28,6 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Loading")
     void UpdateStatusMessage(const FText& NewStatus);
     
-    // Dismiss the loading screen
-    void DismissLoadingScreen();
-    
     // Event fired when loading screen is dismissed
     UPROPERTY(BlueprintAssignable, Category = "Loading")
     FOnLoadingScreenDismissed OnLoadingScreenDismissed;
@@ -46,6 +43,9 @@ public:
     // Title text to display
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Loading")
     FText TitleText;
+    // Whether this loading screen is network synchronized
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Loading")
+    bool bIsNetworkSynchronized = true;
     
 protected:
     // UI Elements (bind these in the UMG designer)
@@ -53,21 +53,11 @@ protected:
     class UTextBlock* LoadingTitle;
     
     UPROPERTY(meta = (BindWidget))
-    class UProgressBar* LoadingProgress;
-    
-    UPROPERTY(meta = (BindWidget))
     class UImage* BackgroundImage;
     
     UPROPERTY(meta = (BindWidget))
     class UThrobber* LoadingThrobber;
-    
-    // Animations
-    UPROPERTY(Transient, meta = (BindWidgetAnim))
-    class UWidgetAnimation* ShowAnimation;
-    
-    UPROPERTY(Transient, meta = (BindWidgetAnim))
-    class UWidgetAnimation* HideAnimation;
-    
+
     // Timer for auto-dismiss
     FTimerHandle DismissTimerHandle;
     

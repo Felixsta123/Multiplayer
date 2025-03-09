@@ -1,4 +1,3 @@
-// WormGameState.cpp
 #include "WormGameState.h"
 #include "Net/UnrealNetwork.h"
 #include "Net/Core/PushModel/PushModel.h"
@@ -11,6 +10,9 @@ AWormGameState::AWormGameState()
     CurrentPlayerIndex = 0;
     RemainingTurnTime = 0.0f;
     TurnDuration = 30.0f;
+    
+    // Create NetworkLoadingManager component
+    LoadingManager = CreateDefaultSubobject<UNetworkLoadingManager>(TEXT("LoadingManager"));
 }
 
 // Add this function in GetLifetimeReplicatedProps
@@ -138,4 +140,44 @@ TArray<AImprovedVoxelBuilding*> AWormGameState::GetAllVoxelBuildings() const
 {
     // Use the utility function directly from AImprovedVoxelBuilding
     return AImprovedVoxelBuilding::FindAllVoxelBuildings(this);
+}
+
+// Loading screen convenience methods
+
+void AWormGameState::ShowLoadingScreen(float Duration)
+{
+    if (LoadingManager)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("GameState: Showing loading screen to all clients with duration %.1f"), Duration);
+        LoadingManager->ShowLoadingScreen(Duration);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("LoadingManager not found in GameState!"));
+    }
+}
+
+void AWormGameState::UpdateLoadingProgress(float Progress, const FString& StatusText)
+{
+    if (LoadingManager)
+    {
+        LoadingManager->UpdateLoadingProgress(Progress, StatusText);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("LoadingManager not found in GameState!"));
+    }
+}
+
+void AWormGameState::DismissLoadingScreen()
+{
+    if (LoadingManager)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("GameState: Dismissing loading screen on all clients"));
+        LoadingManager->DismissLoadingScreen();
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("LoadingManager not found in GameState!"));
+    }
 }
