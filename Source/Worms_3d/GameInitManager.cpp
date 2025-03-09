@@ -207,15 +207,15 @@ void AGameInitManager::ExecuteInitializationStep()
             {
                 // Set a static guard flag to prevent multiple calls
                 static bool bAlreadyTeleportedPlayers = false;
-    
+
                 if (!bAlreadyTeleportedPlayers)
                 {
                     // Set flag first to prevent recursive calls
                     bAlreadyTeleportedPlayers = true;
-        
+    
                     // Start the positioning process - Use the teleport function
                     PlayerSpawnManager->TeleportPlayersToBuildings();
-        
+    
                     UE_LOG(LogTemp, Warning, TEXT("Called TeleportPlayersToBuildings once"));
                 }
                 else
