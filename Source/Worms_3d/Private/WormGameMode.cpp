@@ -33,20 +33,33 @@ void AWormGameMode::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Collect all controllers
-    GatherAllPlayerControllers();
-    
-    // Collect spawn points
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), SpawnPoints);
-    
-    // Initialize voxel buildings first (changed order to prioritize voxel buildings)
-    GetWorldTimerManager().SetTimer(VoxelBuildingsSpawnTimerHandle, this, &AWormGameMode::GenerateVoxelBuildings, 1.0f, false);
+    // If using game init manager, set it up first and let it handle initialization
+    if (bUseGameInitManager)
+    {
+        // Setup the game initialization manager
+        GameInitManager = SetupGameInitialization();
+        
+        // Let the game init manager handle the initialization sequence
+        // (it will call our functions in the proper order)
+    }
+    else
+    {
+        // Use original initialization logic
+        // Collect all controllers
+        GatherAllPlayerControllers();
+        
+        // Collect spawn points
+        UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), SpawnPoints);
+        
+        // Initialize voxel buildings first (changed order to prioritize voxel buildings)
+        GetWorldTimerManager().SetTimer(VoxelBuildingsSpawnTimerHandle, this, &AWormGameMode::GenerateVoxelBuildings, 1.0f, false);
 
-    // Initialize weapons for all players
-    GetWorldTimerManager().SetTimer(WeaponSpawnTimerHandle, this, &AWormGameMode::InitializeWeaponsForAllPlayers, 1.5f, false);
- 
-    // Start first turn after a delay
-    GetWorldTimerManager().SetTimer(TurnTimerHandle, this, &AWormGameMode::StartNextTurn, 2.5f, false);
+        // Initialize weapons for all players
+        GetWorldTimerManager().SetTimer(WeaponSpawnTimerHandle, this, &AWormGameMode::InitializeWeaponsForAllPlayers, 1.5f, false);
+     
+        // Start first turn after a delay
+        GetWorldTimerManager().SetTimer(TurnTimerHandle, this, &AWormGameMode::StartNextTurn, 2.5f, false);
+    }
 }
 
 void AWormGameMode::Tick(float DeltaTime)

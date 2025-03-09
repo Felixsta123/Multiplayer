@@ -86,7 +86,20 @@ public:
     // Function to find all voxel buildings in the level
     UFUNCTION(BlueprintCallable, Category = "Voxel Building")
     TArray<AImprovedVoxelBuilding*> GetAllVoxelBuildings();
+    UPROPERTY(BlueprintReadOnly, Category = "Game Initialization")
+    class AGameInitManager* GameInitManager;
     
+    // Class to use for the game init manager (optional, will use default if not set)
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Game Initialization")
+    TSubclassOf<AGameInitManager> GameInitManagerClass;
+    
+    // Create and configure the game initialization manager
+    UFUNCTION(BlueprintCallable, Category = "Game Initialization")
+    AGameInitManager* SetupGameInitialization();
+    
+    // Whether to use loading screen and sequenced initialization
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Game Initialization")
+    bool bUseGameInitManager = true;
 protected:
     // Miscellaneous variables 
     UPROPERTY(BlueprintReadWrite, Category = "Game")
