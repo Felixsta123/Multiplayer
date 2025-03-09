@@ -4,6 +4,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
 #include "Blueprint/UserWidget.h"
+#include "../PlayerDataStruct.h"
 #include "WormPlayerController.generated.h"
 
 UCLASS()
@@ -16,7 +17,9 @@ public:
 
     virtual void Tick(float DeltaTime) override;
     virtual void BeginPlay() override;
-
+    // Player settings variable
+    UPROPERTY(Replicated, EditAnywhere, BlueprintReadWrite, Category = "Player Settings")
+    FPlayerData PlayerSettings;
 protected:
     // La classe du widget UI à créer
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "UI")

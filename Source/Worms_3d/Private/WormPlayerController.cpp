@@ -32,6 +32,14 @@ void AWormPlayerController::BeginPlay()
 }
 
 
+void AWormPlayerController::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+    // Add PlayerSettings to the list of replicated properties
+    DOREPLIFETIME(AWormPlayerController, PlayerSettings);
+}
+
 void AWormPlayerController::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
