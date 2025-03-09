@@ -49,21 +49,6 @@ void AGameInitManager::InitializeNetworkLoading()
 {
     // Get a reference to the game state
     WormGameState = Cast<AWormGameState>(UGameplayStatics::GetGameState(this));
-    
-    if (WormGameState && WormGameState->LoadingManager)
-    {
-        UE_LOG(LogTemp, Log, TEXT("GameInitManager: Found WormGameState with NetworkLoadingManager"));
-        
-        // Configure loading widget class if needed
-        if (LoadingWidgetClass)
-        {
-            WormGameState->LoadingManager->LoadingWidgetClass = LoadingWidgetClass;
-        }
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("GameInitManager: Failed to find WormGameState with LoadingManager, will use local loading widget"));
-    }
 }
 
 void AGameInitManager::Tick(float DeltaTime)
@@ -75,17 +60,18 @@ void AGameInitManager::StartInitializationSequence()
 {
     UE_LOG(LogTemp, Warning, TEXT("Starting game initialization sequence"));
     
-    // Show loading screen using NetworkLoadingManager if available
+    // ALWAYS use NetworkLoadingManager if available
     if (WormGameState && WormGameState->LoadingManager)
     {
         UE_LOG(LogTemp, Warning, TEXT("Using NetworkLoadingManager to show loading screen on all clients"));
         WormGameState->ShowLoadingScreen(LoadingScreenDuration);
     }
-    // Fallback to local implementation for the server player
     else
     {
-        UE_LOG(LogTemp, Warning, TEXT("Falling back to local loading screen (clients won't see it)"));
-        // Create and show loading widget for all local players
+        // Only as a fallback - log warning that network loading won't work
+        UE_LOG(LogTemp, Warning, TEXT("WARNING: No NetworkLoadingManager available - only local loading screen will show"));
+        
+        // Create and show loading widget for local player only
         for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
         {
             APlayerController* PC = It->Get();
@@ -99,15 +85,9 @@ void AGameInitManager::StartInitializationSequence()
                     {
                         LoadingWidget->AddToViewport(9999);
                         LoadingWidget->ShowLoadingScreen(LoadingScreenDuration);
-                        UE_LOG(LogTemp, Warning, TEXT("Loading widget created for player controller"));
-                    }
-                    else
-                    {
-                        UE_LOG(LogTemp, Error, TEXT("Failed to create loading widget"));
+                        UE_LOG(LogTemp, Warning, TEXT("Loading widget created for local player controller only"));
                     }
                 }
-                
-                // Only handle the first local player controller for now
                 break;
             }
         }
@@ -216,30 +196,46 @@ void AGameInitManager::ExecuteInitializationStep()
             break;
         }
         
+        // This is just the case for step 3 in the ExecuteInitializationStep function
         case 3: // Fourth step - position players on voxel buildings
         {
             // Update loading progress
             UpdateLoadingProgress(0.8f, TEXT("Positioning players..."));
 
-            // Position players on top of buildings
+            // Position players on top of buildings only if we have a PlayerSpawnManager
             if (PlayerSpawnManager)
             {
-                // Start the positioning process - Use the new direct teleport function
-                PlayerSpawnManager->TeleportPlayersToBuildings();
+                // Set a static guard flag to prevent multiple calls
+                static bool bAlreadyTeleportedPlayers = false;
     
+                if (!bAlreadyTeleportedPlayers)
+                {
+                    // Set flag first to prevent recursive calls
+                    bAlreadyTeleportedPlayers = true;
+        
+                    // Start the positioning process - Use the teleport function
+                    PlayerSpawnManager->TeleportPlayersToBuildings();
+        
+                    UE_LOG(LogTemp, Warning, TEXT("Called TeleportPlayersToBuildings once"));
+                }
+                else
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("Skipped duplicate call to TeleportPlayersToBuildings"));
+                }
+
                 // Schedule the next step with a delay to allow teleportation to complete
                 GetWorld()->GetTimerManager().SetTimer(
                     InitStepTimerHandle,
                     this,
                     &AGameInitManager::ExecuteInitializationStep,
-                    1.0f,
+                    2.0f,  // Increased from 1.0f to give more time for teleportation
                     false
                 );
             }
             else
             {
                 UE_LOG(LogTemp, Error, TEXT("No PlayerSpawnManager available"));
-    
+
                 // Skip to next step
                 GetWorld()->GetTimerManager().SetTimer(
                     InitStepTimerHandle,
@@ -296,12 +292,11 @@ void AGameInitManager::UpdateLoadingProgress(float Progress, const FString& Stat
     
     UE_LOG(LogTemp, Warning, TEXT("Loading progress: %.0f%% - %s"), Progress * 100.0f, *StatusText);
 }
-
 void AGameInitManager::CompleteInitialization()
 {
     UE_LOG(LogTemp, Warning, TEXT("Game initialization sequence complete"));
     
-    // First, try to dismiss using the NetworkLoadingManager
+    // ALWAYS dismiss through NetworkLoadingManager if available
     if (WormGameState && WormGameState->LoadingManager)
     {
         // Delay dismissal a bit so players can see the "Ready!" message
@@ -319,10 +314,9 @@ void AGameInitManager::CompleteInitialization()
             false
         );
     }
-    // Fallback to local loading widget if available
     else if (LoadingWidget)
     {
-        // Dismiss loading widget after a short delay to ensure last message is seen
+        // Only as fallback for local player
         FTimerHandle DismissTimerHandle;
         GetWorld()->GetTimerManager().SetTimer(
             DismissTimerHandle,

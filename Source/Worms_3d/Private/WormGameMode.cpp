@@ -543,11 +543,18 @@ AGameInitManager* AWormGameMode::SetupGameInitialization()
         AWormGameState* WormGS = GetGameState<AWormGameState>();
         if (WormGS && WormGS->LoadingManager)
         {
+            // Make sure GameInitManager and LoadingManager use the same widget class
             if (LoadingWidgetClass)
             {
                 WormGS->LoadingManager->LoadingWidgetClass = LoadingWidgetClass;
+                // Also set in GameInitManager for consistency
+                GameInitManager->LoadingWidgetClass = LoadingWidgetClass;
             }
-            UE_LOG(LogTemp, Log, TEXT("NetworkLoadingManager configured in GameState"));
+            UE_LOG(LogTemp, Log, TEXT("NetworkLoadingManager in GameState configured with correct widget class"));
+        }
+        else
+        {
+            UE_LOG(LogTemp, Error, TEXT("WARNING: No NetworkLoadingManager found in GameState - loading screens won't be networked!"));
         }
     }
 

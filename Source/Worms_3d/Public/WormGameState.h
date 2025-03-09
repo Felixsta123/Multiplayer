@@ -17,7 +17,8 @@ class WORMS_3D_API AWormGameState : public AGameState
 public:
     AWormGameState();
     DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCurrentPlayerChanged, int32, NewPlayerIndex);
-   
+    UPROPERTY(EditDefaultsOnly, Category = "UI")
+    TSubclassOf<UGameLoadingWidget> LoadingWidgetClass;
     // Replicated properties for all clients
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Turns")
     int32 CurrentPlayerIndex;

@@ -18,7 +18,13 @@ class WORMS_3D_API AGameInitManager : public AActor
     
 public:    
     AGameInitManager();
+    UPROPERTY(EditDefaultsOnly, Category = "UI")
+    TSubclassOf<UW_GameLoadingScreen> LoadingWidgetClass;
 
+    //LoadingWidget
+    UPROPERTY()
+    UW_GameLoadingScreen* LoadingWidget;
+    
     // Called when the game starts or when spawned
     virtual void BeginPlay() override;
     
@@ -54,11 +60,6 @@ protected:
     // Reference to the game state for network synchronized loading
     UPROPERTY()
     AWormGameState* WormGameState;
-    
-    // Current instance of the loading widget (used as fallback if NetworkLoadingManager fails)
-    UPROPERTY()
-    UGameLoadingWidget* LoadingWidget;
-    
     // Timer handle for initialization steps
     FTimerHandle InitStepTimerHandle;
     
