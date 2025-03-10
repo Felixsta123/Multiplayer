@@ -138,7 +138,12 @@ public:
     // RPC multicast pour synchroniser la destruction sur tous les clients
     UFUNCTION(NetMulticast, Reliable)
     void Multicast_DestroyVoxelsAt(FVector Location, FVector ImpactNormal, float Radius);
-
+    UPROPERTY(BlueprintReadOnly, Category = "Building")
+    FVector TopSpawnPoint;
+    
+    // Fonction pour obtenir le point de spawn
+    UFUNCTION(BlueprintCallable, Category = "Building")
+    FVector GetTopSpawnPoint() const { return TopSpawnPoint; }
 protected:
     virtual void BeginPlay() override;
     

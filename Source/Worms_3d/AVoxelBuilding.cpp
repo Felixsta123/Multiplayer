@@ -243,6 +243,18 @@ void AImprovedVoxelBuilding::CreateMesh()
         // Force collision data update
         BuildingMesh->ContainsPhysicsTriMeshData(true);
     }
+
+    FVector LocalTopCenter = FVector(
+    GridSizeX * VoxelSize * 0.5f,
+    GridSizeY * VoxelSize * 0.5f,
+    GridSizeZ * VoxelSize + 100.0f  // 100 unités au-dessus
+    );
+    
+    // Transformer en coordonnées monde (prend en compte rotation/scale/position)
+    TopSpawnPoint = GetActorTransform().TransformPosition(LocalTopCenter);
+    
+    UE_LOG(LogTemp, Log, TEXT("Building %s: Top spawn point calculated at %s"), 
+        *GetName(), *TopSpawnPoint.ToString());
 }
 
 // Modified function signature to accept face visibility flags
