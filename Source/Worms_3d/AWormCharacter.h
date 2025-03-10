@@ -67,7 +67,16 @@ public:
 
     UPROPERTY(BlueprintReadOnly, Category = "UI")
     UUserWidget* AimingWidget;
+    // Animation parameter
+    UPROPERTY(BlueprintReadOnly, Category = "Animation")
+    float AnimationSpeed;
 
+    UPROPERTY(BlueprintReadWrite, Category = "Animation")
+    bool bIsHit;
+
+    // Fonction pour déclencher l'animation de dégâts
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void PlayHitReaction();
     // === FONCTIONS DE JEU PRINCIPALES ===
     
     // Armes

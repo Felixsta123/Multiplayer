@@ -32,7 +32,8 @@ AWormCharacter::AWormCharacter()
     WeaponSocketName = "WeaponSocket";
     bAutoEndTurnTimerActive = false;
     HeadSocketName = "head";
-    
+    AnimationSpeed = 0.0f;
+
     // Valeurs de mouvement et combat
     MaxMovementPoints = 100.0f;
     MovementPoints = MaxMovementPoints;
@@ -386,6 +387,8 @@ void AWormCharacter::Tick(float DeltaTime)
     {
         UpdateMovementPoints();
     }
+    FVector Velocity = GetVelocity();
+    AnimationSpeed = FVector2D(Velocity.X, Velocity.Y).Size();
     
     // Interface utilisateur de visée
     if (AimingWidget && CurrentWeapon)
@@ -705,10 +708,7 @@ void AWormCharacter::ApplyDamageToWorm(float DamageAmount, FVector ImpactDirecti
     else
     {
         // Jouer l'animation de réaction aux dégâts si pas mort
-        if (HitReactMontage)
-        {
-            PlayAnimMontage(HitReactMontage);
-        }
+        PlayHitReaction();
     }
 }
 void AWormCharacter::ApplyMovementImpulse(FVector Direction, float Strength)
@@ -1299,4 +1299,25 @@ void AWormCharacter::OnRep_CurrentWeaponIndex()
         AttachWeaponToSocket(CurrentWeapon);
         CurrentWeapon->EnsureWeaponVisibility();
     }
+}
+
+void AWormCharacter::PlayHitReaction()
+{
+    // Déclencher l'animation de dégâts
+    bIsHit = true;
+    
+    // Créer un timer pour réinitialiser l'état après un délai
+    FTimerHandle HitResetTimerHandle;
+    GetWorldTimerManager().SetTimer(
+        HitResetTimerHandle,
+        [this]()
+        {
+            bIsHit = false;
+        },
+        0.5f, // Durée pendant laquelle bIsHit reste true (ajustez selon la durée de votre animation)
+        false
+    );
+    
+    // Log pour déboguer
+    UE_LOG(LogTemp, Warning, TEXT("%s: Animation de dégâts déclenchée"), *GetName());
 }
