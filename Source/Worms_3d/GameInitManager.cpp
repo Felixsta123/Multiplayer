@@ -16,7 +16,7 @@ AGameInitManager::AGameInitManager()
     PlayerSpawnManager = CreateDefaultSubobject<UPlayerSpawnManager>(TEXT("PlayerSpawnManager"));
     
     // Default values
-    LoadingScreenDuration = 5.0f;
+    LoadingScreenDuration = 50.0f;
     bAutoHandleInitialization = true;
     CurrentInitStep = 0;
 }
@@ -108,6 +108,8 @@ void AGameInitManager::ExecuteInitializationStep()
     {
         case 0: // Génération du terrain
         {
+                UE_LOG(LogTemp, Warning, TEXT("Starting initialization step %d"), CurrentInitStep);
+
             UpdateLoadingProgress(0.2f, TEXT("Génération du terrain..."));
             
             AWormGameMode* GameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(this));
@@ -123,6 +125,8 @@ void AGameInitManager::ExecuteInitializationStep()
                 3.0f, // Increased from 2.0f
                 false
             );
+                UE_LOG(LogTemp, Warning, TEXT("Completed initialization step %d, next step in %.1f seconds"), 
+                CurrentInitStep-1, 3.0f);
             
             CurrentInitStep++;
             break;
@@ -130,6 +134,8 @@ void AGameInitManager::ExecuteInitializationStep()
         
         case 1: // Préparation des joueurs - First gather controllers
         {
+                UE_LOG(LogTemp, Warning, TEXT("Starting initialization step %d"), CurrentInitStep);
+              
             UpdateLoadingProgress(0.4f, TEXT("Préparation des joueurs..."));
             
             // Make sure all controllers are ready and their settings have been replicated
@@ -158,13 +164,16 @@ void AGameInitManager::ExecuteInitializationStep()
                 2.0f, // Increased from 1.0f
                 false
             );
-            
+                UE_LOG(LogTemp, Warning, TEXT("Completed initialization step %d, next step in %.1f seconds"), 
+                                CurrentInitStep-1, 2.0f);
             CurrentInitStep++;
             break;
         }
         
         case 2: // Spawn and position players first
         {
+                UE_LOG(LogTemp, Warning, TEXT("Starting initialization step %d"), CurrentInitStep);
+
             UpdateLoadingProgress(0.5f, TEXT("Placement des joueurs..."));
 
             if (PlayerSpawnManager) {
@@ -193,11 +202,15 @@ void AGameInitManager::ExecuteInitializationStep()
             }
 
             CurrentInitStep++;
+                UE_LOG(LogTemp, Warning, TEXT("Completed initialization step %d, next step in %.1f seconds"), 
+                CurrentInitStep-1, 5.0f);
             break;
         }
          
         case 3: // Initialisation des armes
         {
+                UE_LOG(LogTemp, Warning, TEXT("Starting initialization step %d"), CurrentInitStep);
+
             UpdateLoadingProgress(0.6f, TEXT("Chargement des armes..."));
         
             AWormGameMode* GameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(this));
@@ -216,11 +229,15 @@ void AGameInitManager::ExecuteInitializationStep()
             );
         
             CurrentInitStep++;
+                UE_LOG(LogTemp, Warning, TEXT("Completed initialization step %d, next step in %.1f seconds"), 
+                CurrentInitStep-1, 2.0f);
             break;
         }
     
         case 4: // Now initialize weapons AFTER players are positioned
         {
+                UE_LOG(LogTemp, Warning, TEXT("Starting initialization step %d"), CurrentInitStep);
+
             UpdateLoadingProgress(0.9f, TEXT("Chargement des armes..."));
             
             AWormGameMode* GameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(this));
@@ -241,7 +258,8 @@ void AGameInitManager::ExecuteInitializationStep()
                 3.0f,
                 false
             );
-            
+                UE_LOG(LogTemp, Warning, TEXT("Completed initialization step %d, next step in %.1f seconds"), 
+                    CurrentInitStep-1, 3.0f);
             CurrentInitStep++;
             break;
         }
@@ -308,7 +326,16 @@ void AGameInitManager::UpdateLoadingProgress(float Progress, const FString& Stat
 }
 void AGameInitManager::CompleteInitialization()
 {
+    // Add this check to ensure we've completed all steps
+    if (CurrentInitStep < 5) {
+        UE_LOG(LogTemp, Error, TEXT("Attempting to complete initialization at step %d before all steps finished!"), CurrentInitStep);
+        return; // Don't complete if we haven't finished all steps
+    }
+    
     UE_LOG(LogTemp, Warning, TEXT("Game initialization sequence complete"));
+    
+    // Increase the delay before dismissal
+    float DismissDelay = 3.0f; // Increase from 1.0f to 3.0f
     
     // ALWAYS dismiss through NetworkLoadingManager if available
     if (WormGameState && WormGameState->LoadingManager)
@@ -324,7 +351,7 @@ void AGameInitManager::CompleteInitialization()
                     WormGameState->DismissLoadingScreen();
                 }
             },
-            1.0f,
+            DismissDelay,
             false
         );
     }

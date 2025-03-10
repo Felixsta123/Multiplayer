@@ -77,6 +77,7 @@ void UW_GameLoadingScreen::UpdateStatusMessage(const FText& NewStatus)
 void UW_GameLoadingScreen::HandleDismissed()
 {
     // Call the blueprint event
+    UE_LOG(LogTemp, Log, TEXT("Loading screen auto-dismissed after %.1f seconds"), LoadingScreenDuration);
     OnLoadingScreenDismissed.Broadcast();
     
     // Remove from parent
