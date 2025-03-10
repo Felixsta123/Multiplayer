@@ -6,6 +6,7 @@
 #include "Components/CapsuleComponent.h"
 #include "EngineUtils.h"
 #include "WormPlayerController.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PawnMovementComponent.h"
 
 UPlayerSpawnManager::UPlayerSpawnManager()
@@ -106,8 +107,6 @@ void UPlayerSpawnManager::TeleportPlayersToPositions(const TArray<FVector>& Spaw
 }
 void UPlayerSpawnManager::TeleportPlayersToBuildings()
 {
- 
-    
     UE_LOG(LogTemp, Warning, TEXT("Téléportation des joueurs sur les bâtiments..."));
     
     // Récupération des bâtiments
@@ -118,20 +117,48 @@ void UPlayerSpawnManager::TeleportPlayersToBuildings()
         return;
     }
     
-    // Calcul des positions de spawn sur les bâtiments
-    TArray<FVector> SpawnLocations;
-    
-    // Pour chaque bâtiment, trouver des points de spawn
-    for (AImprovedVoxelBuilding* Building : VoxelBuildings) {
-        FVector SpawnLocation = FindSpawnLocationOnBuilding(Building, SpawnLocations);
-        
-        // Vérifier si la position est valide
-        if (!SpawnLocation.IsZero()) {
-            SpawnLocations.Add(SpawnLocation);
+    // Ensure buildings are at sufficient distance from each other
+    for (int i = 0; i < VoxelBuildings.Num(); i++) {
+        for (int j = i+1; j < VoxelBuildings.Num(); j++) {
+            float Distance = FVector::Dist(VoxelBuildings[i]->GetActorLocation(), VoxelBuildings[j]->GetActorLocation());
+            if (Distance < 500.0f) {
+                UE_LOG(LogTemp, Warning, TEXT("Buildings too close, adjusting position"));
+                // Move second building away
+                FVector Direction = (VoxelBuildings[j]->GetActorLocation() - VoxelBuildings[i]->GetActorLocation()).GetSafeNormal();
+                VoxelBuildings[j]->SetActorLocation(VoxelBuildings[i]->GetActorLocation() + Direction * 1000.0f);
+            }
         }
+    }
+    
+    // Calculate maximum Z height in level for absolute safety
+    float MaxZInLevel = 0.0f;
+    for (AImprovedVoxelBuilding* Building : VoxelBuildings) {
+        float BuildingMaxZ = Building->GetActorLocation().Z + (Building->GridSizeZ * Building->VoxelSize);
+        MaxZInLevel = FMath::Max(MaxZInLevel, BuildingMaxZ);
+    }
+    
+    // Extra safety height above maximum Z level
+    float ExtraSafetyHeight = 500.0f;
+    
+    // Calculate highest possible spawn points
+    TArray<FVector> SpawnLocations;
+    int32 BuildingsNeeded = FMath::Min(4, VoxelBuildings.Num());
+    
+    // For each building, calculate a very high spawn point
+    for (int32 i = 0; i < BuildingsNeeded; i++) {
+        AImprovedVoxelBuilding* Building = VoxelBuildings[i];
         
-        // Si on a assez de positions, on arrête
-        if (SpawnLocations.Num() >= 4) break; // Limite arbitraire de 4 joueurs
+        // Calculate building center
+        FVector BuildingOrigin = Building->GetActorLocation();
+        float BuildingWidth = Building->GridSizeX * Building->VoxelSize;
+        float BuildingDepth = Building->GridSizeY * Building->VoxelSize;
+        
+        // Calculate EXACT center of building's top surface
+        FVector TopCenter = BuildingOrigin + FVector(BuildingWidth * 0.5f, BuildingDepth * 0.5f, MaxZInLevel + ExtraSafetyHeight);
+        
+        SpawnLocations.Add(TopCenter);
+        UE_LOG(LogTemp, Warning, TEXT("Added spawn location %d: %s (ABSOLUTE HEIGHT SAFETY)"), 
+            SpawnLocations.Num(), *TopCenter.ToString());
     }
     
     if (SpawnLocations.Num() == 0) {
@@ -139,13 +166,16 @@ void UPlayerSpawnManager::TeleportPlayersToBuildings()
         return;
     }
     
-    // Maintenant, spawn ou téléporte les joueurs
+    // Get all controllers with long staggered delays
     TArray<APlayerController*> PlayerControllers;
     for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It) {
         PlayerControllers.Add(It->Get());
     }
     
-    // Spawn et téléporte les joueurs
+    UE_LOG(LogTemp, Warning, TEXT("Spawning %d players onto %d spawn locations with EXTREME HEIGHT SAFETY"), 
+        PlayerControllers.Num(), SpawnLocations.Num());
+    
+    // Spawn each player with a LONG delay between each
     for (int32 i = 0; i < PlayerControllers.Num(); i++) {
         APlayerController* PC = PlayerControllers[i];
         if (!PC) continue;
@@ -153,89 +183,147 @@ void UPlayerSpawnManager::TeleportPlayersToBuildings()
         AWormPlayerController* WPC = Cast<AWormPlayerController>(PC);
         if (!WPC) continue;
         
-        // Calcul de la position de spawn
+        // Calculate spawn position - extra vertical space between players
         int32 LocationIndex = i % SpawnLocations.Num();
         FVector SpawnLocation = SpawnLocations[LocationIndex];
+        
+        // Add extra height per player to avoid collisions
+        SpawnLocation.Z += (i * 50.0f);
+        
         FRotator SpawnRotation = FRotator::ZeroRotator;
         
-        // Si le controller n'a pas de pawn ou a un pawn incorrect
-        bool bNeedsNewPawn = !PC->GetPawn();
+        // Need new pawn?
+        bool bNeedsNewPawn = !PC->GetPawn() || 
+            (PC->GetPawn() && WPC->PlayerSettings.MyPlayerCharacter && 
+             !PC->GetPawn()->IsA(WPC->PlayerSettings.MyPlayerCharacter));
         
-        // Vérifier si le pawn existant est de la bonne classe
-        if (PC->GetPawn() && WPC->PlayerSettings.MyPlayerCharacter) {
-            if (!PC->GetPawn()->IsA(WPC->PlayerSettings.MyPlayerCharacter)) {
-                bNeedsNewPawn = true;
-                
-                // Détruire le pawn existant s'il est de la mauvaise classe
-                PC->GetPawn()->Destroy();
-            }
+        // Destroy existing pawn if needed
+        if (PC->GetPawn() && bNeedsNewPawn) {
+            PC->GetPawn()->Destroy();
         }
         
-        // Créer un nouveau pawn si nécessaire
-        if (bNeedsNewPawn && WPC->PlayerSettings.MyPlayerCharacter) {
-            FActorSpawnParameters SpawnParams;
-            SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+        // VERY long delay for each player (1 second+ between each)
+        float DelayAmount = 1.0f + (i * 1.5f);
+        
+        // Set up spawn delegate
+        FTimerHandle SpawnTimerHandle;
+        FTimerDelegate SpawnDelegate;
+        
+        SpawnDelegate.BindLambda([this, PC, WPC, SpawnLocation, SpawnRotation, bNeedsNewPawn, i]() {
+            // Check for valid character class
+            UClass* CharacterClass = WPC->PlayerSettings.MyPlayerCharacter;
+            if (!CharacterClass && bNeedsNewPawn) {
+                UE_LOG(LogTemp, Error, TEXT("No valid character class for player %d"), i);
+                return;
+            }
             
-            UE_LOG(LogTemp, Warning, TEXT("Spawn d'un nouveau personnage [%s] pour %s à %s"), 
-                *WPC->PlayerSettings.MyPlayerCharacter->GetName(), 
-                *PC->GetName(), 
-                *SpawnLocation.ToString());
-            
-            APawn* NewPawn = GetWorld()->SpawnActor<APawn>(
-                WPC->PlayerSettings.MyPlayerCharacter,
-                SpawnLocation,
-                SpawnRotation,
-                SpawnParams
-            );
-            
-            if (NewPawn) {
-                PC->Possess(NewPawn);
+            if (bNeedsNewPawn && CharacterClass) {
+                // Spawn new character with collision handling set to always spawn
+                FActorSpawnParameters SpawnParams;
+                SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
                 
-                // Léger délai pour s'assurer que le pawn est correctement initialisé
-                FTimerHandle PossessTimerHandle;
-                GetWorld()->GetTimerManager().SetTimer(
-                    PossessTimerHandle,
-                    [PC, NewPawn]() {
-                        if (PC && NewPawn && IsValid(NewPawn)) {
-                            UE_LOG(LogTemp, Warning, TEXT("Réinitialisé la vélocité pour %s"), *NewPawn->GetName());
-                            if (NewPawn->GetMovementComponent()) {
-                                NewPawn->GetMovementComponent()->Velocity = FVector::ZeroVector;
-                            }
-                        }
-                    },
-                    0.2f,
-                    false
+                UE_LOG(LogTemp, Warning, TEXT("Spawn d'un nouveau personnage [%s] pour %s à %s (SAFETY HEIGHT)"), 
+                    *CharacterClass->GetName(), 
+                    *PC->GetName(), 
+                    *SpawnLocation.ToString());
+                
+                APawn* NewPawn = GetWorld()->SpawnActor<APawn>(
+                    CharacterClass,
+                    SpawnLocation,
+                    SpawnRotation,
+                    SpawnParams
                 );
-            }
-        }
-        // Si le pawn existe déjà et est correct, on le téléporte
-        else if (PC->GetPawn()) {
-            APawn* Pawn = PC->GetPawn();
-            
-            // Téléportation avec décalage temporel entre chaque joueur
-            FTimerHandle TeleportTimerHandle;
-            GetWorld()->GetTimerManager().SetTimer(
-                TeleportTimerHandle,
-                [Pawn, SpawnLocation, SpawnRotation, i]() {
-                    if (Pawn && IsValid(Pawn)) {
-                        bool bSuccess = Pawn->TeleportTo(SpawnLocation, SpawnRotation);
+                
+                if (NewPawn) {
+                    // Possess new pawn
+                    PC->Possess(NewPawn);
+                    
+                    // Schedule multiple velocity resets with increasing delay
+                    for (int resetAttempt = 0; resetAttempt < 5; resetAttempt++) {
+                        // Create multiple timers to reset velocity
+                        float ResetDelay = 0.2f + (resetAttempt * 0.3f);
                         
-                        // Réinitialiser la vélocité
-                        if (bSuccess && Pawn->GetMovementComponent()) {
-                            Pawn->GetMovementComponent()->Velocity = FVector::ZeroVector;
-                        }
-                        
-                        UE_LOG(LogTemp, Warning, TEXT("%s téléporté avec %s"), 
-                            *Pawn->GetName(), bSuccess ? TEXT("succès") : TEXT("échec"));
+                        FTimerHandle VelocityResetTimerHandle;
+                        GetWorld()->GetTimerManager().SetTimer(
+                            VelocityResetTimerHandle,
+                            [PC, NewPawn, resetAttempt]() {
+                                if (PC && NewPawn && IsValid(NewPawn)) {
+                                    UE_LOG(LogTemp, Warning, TEXT("Reset attempt %d: Réinitialisé la vélocité pour %s"), 
+                                        resetAttempt, *NewPawn->GetName());
+                                    
+                                    if (NewPawn->GetMovementComponent()) {
+                                        NewPawn->GetMovementComponent()->Velocity = FVector::ZeroVector;
+                                        
+                                        UCharacterMovementComponent* CharMoveComp = Cast<UCharacterMovementComponent>(NewPawn->GetMovementComponent());
+                                        if (CharMoveComp) {
+                                            // Force walking mode and higher gravity
+                                            CharMoveComp->SetMovementMode(MOVE_Walking);
+                                            CharMoveComp->GravityScale = 2.0f;
+                                            CharMoveComp->AirControl = 1.0f;
+                                            CharMoveComp->GroundFriction = 8.0f;
+                                            CharMoveComp->AddForce(FVector(0, 0, -2000.0f));
+                                        }
+                                    }
+                                }
+                            },
+                            ResetDelay,
+                            false
+                        );
                     }
-                },
-                0.2f * i, // Décalage progressif
-                false
-            );
-        }
+                }
+            }
+            // If pawn exists, teleport it with similar safety measures
+            else if (PC->GetPawn()) {
+                APawn* Pawn = PC->GetPawn();
+                UE_LOG(LogTemp, Warning, TEXT("Teleporting existing pawn %s to %s (SAFETY HEIGHT)"), 
+                    *Pawn->GetName(), *SpawnLocation.ToString());
+                
+                bool bSuccess = Pawn->TeleportTo(SpawnLocation, SpawnRotation);
+                
+                // Multiple velocity reset attempts
+                for (int resetAttempt = 0; resetAttempt < 5; resetAttempt++) {
+                    float ResetDelay = 0.2f + (resetAttempt * 0.3f);
+                    
+                    FTimerHandle VelocityResetTimerHandle;
+                    GetWorld()->GetTimerManager().SetTimer(
+                        VelocityResetTimerHandle,
+                        [Pawn, resetAttempt]() {
+                            if (Pawn && IsValid(Pawn)) {
+                                if (Pawn->GetMovementComponent()) {
+                                    UE_LOG(LogTemp, Warning, TEXT("Reset attempt %d: Zero velocity for %s"), 
+                                        resetAttempt, *Pawn->GetName());
+                                        
+                                    Pawn->GetMovementComponent()->Velocity = FVector::ZeroVector;
+                                    
+                                    UCharacterMovementComponent* CharMoveComp = Cast<UCharacterMovementComponent>(Pawn->GetMovementComponent());
+                                    if (CharMoveComp) {
+                                        CharMoveComp->SetMovementMode(MOVE_Walking);
+                                        CharMoveComp->GravityScale = 2.0f; 
+                                        CharMoveComp->AirControl = 1.0f;
+                                        CharMoveComp->GroundFriction = 8.0f;
+                                        CharMoveComp->AddForce(FVector(0, 0, -2000.0f));
+                                    }
+                                }
+                            }
+                        },
+                        ResetDelay,
+                        false
+                    );
+                }
+            }
+        });
+        
+        GetWorld()->GetTimerManager().SetTimer(
+            SpawnTimerHandle,
+            SpawnDelegate,
+            DelayAmount,
+            false
+        );
+        
+        UE_LOG(LogTemp, Warning, TEXT("Scheduled player %d teleport/spawn with %.1f second delay (EXTENDED)"), i, DelayAmount);
     }
-    
 }
+
 FVector UPlayerSpawnManager::FindSpawnLocationOnBuilding(AImprovedVoxelBuilding* Building, TArray<FVector>& ExistingLocations)
 {
     if (!Building)
@@ -253,31 +341,63 @@ FVector UPlayerSpawnManager::FindSpawnLocationOnBuilding(AImprovedVoxelBuilding*
     // Building origin is usually at the corner, so add half width and depth to center
     FVector TopCenter = BuildingOrigin + FVector(BuildingWidth * 0.5f, BuildingDepth * 0.5f, BuildingHeight);
     
-    // Add height offset for the spawn point - INCREASED SIGNIFICANTLY for safety
-    FVector SpawnLocation = TopCenter + FVector(0, 0, HeightOffset + 100.0f);
+    // Use MUCH larger height offset for safety - this is critical
+    float SafetyHeightBuffer = 400.0f; // Significantly increased from 250
+    FVector SpawnLocation = TopCenter + FVector(0, 0, HeightOffset + SafetyHeightBuffer);
     
+    // Log the building dimensions and calculated spawn point for debugging
+    UE_LOG(LogTemp, Warning, TEXT("Building at %s: Width=%.1f, Depth=%.1f, Height=%.1f"),
+        *BuildingOrigin.ToString(), BuildingWidth, BuildingDepth, BuildingHeight);
+    UE_LOG(LogTemp, Warning, TEXT("Calculated spawn location: %s (HeightOffset=%.1f, SafetyBuffer=%.1f)"),
+        *SpawnLocation.ToString(), HeightOffset, SafetyHeightBuffer);
+        
     // Try to find a valid position (not too close to existing spawns)
     if (!IsPositionValid(SpawnLocation, ExistingLocations))
     {
         // Try a few more positions if initial position isn't valid
+        bool foundValid = false;
         for (int32 Attempts = 0; Attempts < 15; Attempts++)
         {
-            // Narrow the range to stay more centered on the building (40-60% range)
-            float RandomX = FMath::RandRange(0.4f, 0.6f) * BuildingWidth;
-            float RandomY = FMath::RandRange(0.4f, 0.6f) * BuildingDepth;
+            // More conservative range to stay closer to building center (45-55% range)
+            // This prevents spawning too close to edges where falling is more likely
+            float RandomX = FMath::RandRange(0.45f, 0.55f) * BuildingWidth;
+            float RandomY = FMath::RandRange(0.45f, 0.55f) * BuildingDepth;
             
-            FVector RandomPos = BuildingOrigin + FVector(RandomX, RandomY, BuildingHeight + HeightOffset + 100.0f);
+            FVector RandomPos = BuildingOrigin + FVector(RandomX, RandomY, BuildingHeight + HeightOffset + SafetyHeightBuffer);
             
             // Check if we're far enough from existing spawn points
             if (IsPositionValid(RandomPos, ExistingLocations))
             {
                 UE_LOG(LogTemp, Warning, TEXT("Found valid spawn position after %d attempts: %s"), 
                     Attempts, *RandomPos.ToString());
+                foundValid = true;
                 return RandomPos;
             }
         }
+        
+        if (!foundValid) {
+            // If no valid position found, log warning but use center with extra height
+            UE_LOG(LogTemp, Warning, TEXT("No valid spawn position found after multiple attempts, using building center with extra height"));
+        }
     }
     
-    // If no perfect position is found after attempts, just use the original top center with extra height
-    return TopCenter + FVector(0, 0, HeightOffset + 150.0f);
+    // If no valid position found, log warning but use center with extra height
+    return TopCenter + FVector(0, 0, HeightOffset + SafetyHeightBuffer + 100.0f);
+}
+
+float UPlayerSpawnManager::FindMaximumZValueInLevel()
+{
+    float MaxZ = 0.0f;
+    
+    // Iterate through all buildings to find highest point
+    TArray<AImprovedVoxelBuilding*> Buildings = AImprovedVoxelBuilding::FindAllVoxelBuildings(GetWorld());
+    for (AImprovedVoxelBuilding* Building : Buildings) {
+        if (Building) {
+            float BuildingHeight = Building->GetActorLocation().Z + (Building->GridSizeZ * Building->VoxelSize);
+            MaxZ = FMath::Max(MaxZ, BuildingHeight);
+        }
+    }
+    
+    // Add safety margin
+    return MaxZ + 500.0f;
 }

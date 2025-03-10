@@ -90,10 +90,13 @@ void UNetworkLoadingManager::DismissLoadingScreen()
     // Set loading state to inactive
     bIsLoadingActive = false;
     
-    // Broadcast to all clients
-    Multicast_DismissLoadingScreen();
+    // Broadcast to all clients with a slight delay to ensure all processing is complete
+    FTimerHandle DelayTimer;
+    GetWorld()->GetTimerManager().SetTimer(DelayTimer, [this]() {
+        Multicast_DismissLoadingScreen();
+    }, 1.0f, false);
     
-    UE_LOG(LogTemp, Log, TEXT("Server: Dismissing loading screen"));
+    UE_LOG(LogTemp, Log, TEXT("Server: Dismissing loading screen (with 1s delay)"));
 }
 
 void UNetworkLoadingManager::Multicast_ShowLoadingScreen_Implementation(float Duration)
@@ -156,6 +159,7 @@ void UNetworkLoadingManager::Multicast_DismissLoadingScreen_Implementation()
         if (LoadingWidget)
         {
             LoadingWidget->DismissLoadingScreen();
+            UE_LOG(LogTemp, Log, TEXT("Server: Dismissing loading widget"));
         }
         return;
     }
@@ -166,7 +170,12 @@ void UNetworkLoadingManager::Multicast_DismissLoadingScreen_Implementation()
         LoadingWidget->DismissLoadingScreen();
         UE_LOG(LogTemp, Log, TEXT("Client: Dismissing loading screen"));
     }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Client: No loading widget to dismiss!"));
+    }
 }
+
 
 void UNetworkLoadingManager::EnsureLoadingWidgetExists()
 {

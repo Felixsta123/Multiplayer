@@ -5,6 +5,8 @@
 #include "AVoxelBuilding.h"
 #include "WormGameMode.h"
 #include "WormGameState.h"
+#include "WormPlayerController.h"
+#include "GameFramework/CharacterMovementComponent.h"
 
 AGameInitManager::AGameInitManager()
 {
@@ -97,6 +99,7 @@ void AGameInitManager::StartInitializationSequence()
     CurrentInitStep = 0;
     ExecuteInitializationStep();
 }
+
 void AGameInitManager::ExecuteInitializationStep()
 {
     if (GetLocalRole() != ROLE_Authority) return;
@@ -112,11 +115,12 @@ void AGameInitManager::ExecuteInitializationStep()
                 GameMode->GenerateVoxelBuildings();
             }
             
+            // Increased delay to ensure terrain is fully generated
             GetWorld()->GetTimerManager().SetTimer(
                 InitStepTimerHandle,
                 this,
                 &AGameInitManager::ExecuteInitializationStep,
-                2.0f,
+                3.0f, // Increased from 2.0f
                 false
             );
             
@@ -124,21 +128,34 @@ void AGameInitManager::ExecuteInitializationStep()
             break;
         }
         
-        case 1: // Préparation des joueurs
+        case 1: // Préparation des joueurs - First gather controllers
         {
             UpdateLoadingProgress(0.4f, TEXT("Préparation des joueurs..."));
             
-            // S'assurer que tous les controllers sont prêts
+            // Make sure all controllers are ready and their settings have been replicated
             AWormGameMode* GameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(this));
             if (GameMode) {
                 GameMode->GatherAllPlayerControllers();
+                
+                // Log all found controllers and their settings
+                UE_LOG(LogTemp, Warning, TEXT("Found %d player controllers"), GameMode->AllPlayerControllers.Num());
+                for (int32 i = 0; i < GameMode->AllPlayerControllers.Num(); i++) {
+                    AController* PC = GameMode->AllPlayerControllers[i];
+                    AWormPlayerController* WPC = Cast<AWormPlayerController>(PC);
+                    if (WPC) {
+                        UE_LOG(LogTemp, Warning, TEXT("Controller %d: %s, Has character class: %s"), 
+                            i, *PC->GetName(), 
+                            WPC->PlayerSettings.MyPlayerCharacter ? TEXT("Yes") : TEXT("No"));
+                    }
+                }
             }
             
+            // Increased delay to allow settings to replicate
             GetWorld()->GetTimerManager().SetTimer(
                 InitStepTimerHandle,
                 this,
                 &AGameInitManager::ExecuteInitializationStep,
-                1.0f,
+                2.0f, // Increased from 1.0f
                 false
             );
             
@@ -146,48 +163,26 @@ void AGameInitManager::ExecuteInitializationStep()
             break;
         }
         
-        case 2: // Initialisation des armes
+        case 2: // Spawn and position players first
         {
-            UpdateLoadingProgress(0.6f, TEXT("Chargement des armes..."));
-            
-            AWormGameMode* GameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(this));
-            if (GameMode) {
-                GameMode->InitializeWeaponsForAllPlayers();
-            }
-            
-            GetWorld()->GetTimerManager().SetTimer(
-                InitStepTimerHandle,
-                this,
-                &AGameInitManager::ExecuteInitializationStep,
-                1.0f,
-                false
-            );
-            
-            CurrentInitStep++;
-            break;
-        }
-        
-        case 3: // Spawn and position players
-        {
-            UpdateLoadingProgress(0.8f, TEXT("Placing players..."));
+            UpdateLoadingProgress(0.7f, TEXT("Placement des joueurs..."));
 
             if (PlayerSpawnManager) {
-                // REMOVE static flag - it causes issues with multiple game instances
-                //static bool bAlreadyTeleportedPlayers = false;
-                //if (!bAlreadyTeleportedPlayers) {
-                //    bAlreadyTeleportedPlayers = true;
+                UE_LOG(LogTemp, Warning, TEXT("Teleporting players to buildings..."));
+                
+                // Teleport players to buildings with improved positioning
                 PlayerSpawnManager->TeleportPlayersToBuildings();
-                //}
 
-                // INCREASE this delay to give more time for network replication
+                // Delay to allow players to be properly positioned
                 GetWorld()->GetTimerManager().SetTimer(
                     InitStepTimerHandle,
                     this,
                     &AGameInitManager::ExecuteInitializationStep,
-                    4.0f,  // Increased from 2.5f to ensure proper replication
+                    5.0f,
                     false
                 );
             } else {
+                UE_LOG(LogTemp, Error, TEXT("PlayerSpawnManager is NULL!"));
                 GetWorld()->GetTimerManager().SetTimer(
                     InitStepTimerHandle,
                     this,
@@ -201,25 +196,100 @@ void AGameInitManager::ExecuteInitializationStep()
             break;
         }
          
-        
-        case 4: // Finalisation
+        case 3: // Initialisation des armes
         {
-            UpdateLoadingProgress(1.0f, TEXT("Prêt !"));
+            UpdateLoadingProgress(0.6f, TEXT("Chargement des armes..."));
+        
+            AWormGameMode* GameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(this));
+            if (GameMode) {
+                UE_LOG(LogTemp, Warning, TEXT("✅ Initializing weapons for all players"));
+                GameMode->InitializeWeaponsForAllPlayers();
+            }
+        
+            // Increased delay to ensure weapons are properly initialized
+            GetWorld()->GetTimerManager().SetTimer(
+                InitStepTimerHandle,
+                this,
+                &AGameInitManager::ExecuteInitializationStep,
+                2.0f, // Increased from 1.0f
+                false
+            );
+        
+            CurrentInitStep++;
+            break;
+        }
+    
+        case 4: // Now initialize weapons AFTER players are positioned
+        {
+            UpdateLoadingProgress(0.9f, TEXT("Chargement des armes..."));
             
             AWormGameMode* GameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(this));
             if (GameMode) {
-                GameMode->StartNextTurn();
+                UE_LOG(LogTemp, Warning, TEXT("✅ Initializing weapons for all players after positioning"));
+                
+                // First gather fresh controller list
+                GameMode->GatherAllPlayerControllers();
+                
+                // Now initialize weapons
+                GameMode->InitializeWeaponsForAllPlayers();
             }
             
-            CompleteInitialization();
+            GetWorld()->GetTimerManager().SetTimer(
+                InitStepTimerHandle,
+                this,
+                &AGameInitManager::ExecuteInitializationStep,
+                3.0f,
+                false
+            );
+            
+            CurrentInitStep++;
             break;
         }
         
-        default:
+        case 5: // Finalisation
+        {
+            UpdateLoadingProgress(1.0f, TEXT("Prêt !"));
+
+            AWormGameMode* GameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(this));
+            if (GameMode) {
+                // Final check to ensure all characters are stable
+                GameMode->GatherAllPlayerControllers();
+    
+                // For each character, ensure movement properties are set correctly
+                for (AController* Controller : GameMode->AllPlayerControllers) {
+                    AWormCharacter* Character = GameMode->GetWormCharacterFromController(Controller);
+                    if (Character && Character->GetCharacterMovement()) {
+                        // Reset velocity
+                        Character->GetCharacterMovement()->Velocity = FVector::ZeroVector;
+            
+                        // Force walking mode
+                        Character->GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+            
+                        // Apply slight downward force
+                        Character->GetCharacterMovement()->AddForce(FVector(0, 0, -980.0f));
+            
+                        // Increase air control for stability
+                        Character->GetCharacterMovement()->AirControl = 1.0f;
+            
+                        // Force update of physics state
+                        Character->GetCharacterMovement()->UpdateComponentVelocity();
+            
+                        UE_LOG(LogTemp, Warning, TEXT("Final stability check for %s complete"), *Character->GetName());
+                    }
+                }
+    
+                // Start the first turn
+                GameMode->StartNextTurn();
+            }
+
+            // Only complete initialization AFTER all steps are done
+            UE_LOG(LogTemp, Warning, TEXT("Game initialization sequence complete"));
             CompleteInitialization();
             break;
+        }
     }
 }
+
 
 void AGameInitManager::UpdateLoadingProgress(float Progress, const FString& StatusText)
 {

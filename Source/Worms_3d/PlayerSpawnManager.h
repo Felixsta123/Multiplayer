@@ -53,6 +53,7 @@ private:
 
     // Find suitable spawn location on a building
     FVector FindSpawnLocationOnBuilding(AImprovedVoxelBuilding* Building, TArray<FVector>& ExistingLocations);
+    float FindMaximumZValueInLevel();
 
     // Helper function to check if a position is far enough from existing positions
     bool IsPositionValid(const FVector& Position, const TArray<FVector>& ExistingLocations);

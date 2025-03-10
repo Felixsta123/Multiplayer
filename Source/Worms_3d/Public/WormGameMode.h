@@ -71,7 +71,8 @@ public:
     // Function to distribute weapons to characters
     UFUNCTION(BlueprintCallable, Category = "Game")
     void InitializeWeaponsForAllPlayers();
-    
+    void VerifyWeaponsForAllPlayers();
+
     // Voxel building properties
     UPROPERTY(EditDefaultsOnly, Category = "Voxel Building")
     TSubclassOf<AImprovedVoxelBuilding> VoxelBuildingClass;

@@ -17,6 +17,7 @@ public:
 
     virtual void Tick(float DeltaTime) override;
     virtual void BeginPlay() override;
+    void LoadPlayerSettings();
     // Player settings variable
     UPROPERTY(Replicated, EditAnywhere, BlueprintReadWrite, Category = "Player Settings")
     FPlayerData PlayerSettings;
@@ -43,6 +44,8 @@ public:
     // Fonction pour créer l'UI du joueur
     UFUNCTION(BlueprintCallable, Category = "UI")
     void CreatePlayerUI();
+    bool ServerSetPlayerSettings_Validate(const FPlayerData& NewSettings);
+
 private:
     FTimerHandle UICheckTimerHandle;
     FTimerHandle PlayerUITimerHandle;

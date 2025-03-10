@@ -10,9 +10,10 @@ UW_GameLoadingScreen::UW_GameLoadingScreen(const FObjectInitializer& ObjectIniti
     : Super(ObjectInitializer)
 {
     // Default values
-    LoadingScreenDuration = 5.0f;
+    LoadingScreenDuration = 10.0f;
     TitleText = FText::FromString(TEXT("LOADING GAME"));
     bIsNetworkSynchronized = true;
+    bAutoDismiss = false; // Changed to false - we will rely on network coordination
 }
 
 void UW_GameLoadingScreen::NativeConstruct()
@@ -44,7 +45,7 @@ void UW_GameLoadingScreen::NativeConstruct()
     // Start with the default status message
     UpdateStatusMessage(FText::FromString(TEXT("Initializing game...")));
     
-    // Start auto-dismiss timer if duration is set
+    // Start auto-dismiss timer if duration is set AND NOT network synchronized
     if (LoadingScreenDuration > 0.0f && bAutoDismiss && !bIsNetworkSynchronized)
     {
         GetWorld()->GetTimerManager().SetTimer(
@@ -71,7 +72,6 @@ void UW_GameLoadingScreen::UpdateStatusMessage(const FText& NewStatus)
 {
     // Update status text if it exists
     SetStatusText(NewStatus.ToString());
-
 }
 
 void UW_GameLoadingScreen::HandleDismissed()

@@ -2,9 +2,11 @@
 #include "WormGameMode.h"
 
 #include "AIController.h"
+#include "EngineUtils.h"
 #include "Blueprint/UserWidget.h"
 #include "Kismet/GameplayStatics.h"
 #include "WormGameState.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Worms_3d/AVoxelBuilding.h"
 #include "Worms_3d/GameInitFactorySubsystem.h"
 #include "Worms_3d/VoxelTerrainSettings.h"
@@ -430,66 +432,137 @@ void AWormGameMode::InitializeWeaponsForAllPlayers()
 
     // Recollect controllers for safety
     GatherAllPlayerControllers();
+    
+    // Log the controller list to verify
+    UE_LOG(LogTemp, Warning, TEXT("Found %d controllers to assign weapons to:"), AllPlayerControllers.Num());
+    for (int32 i = 0; i < AllPlayerControllers.Num(); i++)
+    {
+        AController* Controller = AllPlayerControllers[i];
+        APawn* ControlledPawn = Controller ? Controller->GetPawn() : nullptr;
+        
+        UE_LOG(LogTemp, Warning, TEXT("  Controller %d: %s, Has Pawn: %s"), 
+            i, 
+            Controller ? *Controller->GetName() : TEXT("NULL"),
+            ControlledPawn ? *ControlledPawn->GetName() : TEXT("NO PAWN"));
+    }
 
-    // FIX: Create unique timer handles for each player
+    // Process each controller with individual timers to ensure clean processing
     for (int32 i = 0; i < AllPlayerControllers.Num(); i++)
     {
         AController* Controller = AllPlayerControllers[i];
         int32 PlayerIndex = i;
         
-        // Create a dynamic timer name for each player
         FTimerHandle* PlayerWeaponTimer = new FTimerHandle();
         
         GetWorld()->GetTimerManager().SetTimer(
             *PlayerWeaponTimer,
             [this, Controller, PlayerIndex, PlayerWeaponTimer]() {
+                // Get the character for this controller, trying harder if needed
                 AWormCharacter* Character = GetWormCharacterFromController(Controller);
+                if (!Character && Controller)
+                {
+                    // Try to find the character even if not properly possessed yet
+                    for (TActorIterator<AWormCharacter> It(GetWorld()); It; ++It)
+                    {
+                        AWormCharacter* FoundChar = *It;
+                        // Check if this character belongs to the controller
+                        if (FoundChar && FoundChar->GetController() == Controller)
+                        {
+                            Character = FoundChar;
+                            break;
+                        }
+                    }
+                }
+                
                 if (Character)
                 {
                     UE_LOG(LogTemp, Warning, TEXT("Assigning weapons to %s (Player %d)"), 
                         *Character->GetName(), PlayerIndex);
+                    
+                    // Assign weapons and ensure visibility
                     Character->SetAvailableWeapons(AvailableWeaponTypes);
+                    
+                    // Additional safety timer to ensure weapon is visible after assignment
+                    FTimerHandle WeaponVisibilityTimer;
+                    GetWorld()->GetTimerManager().SetTimer(
+                        WeaponVisibilityTimer,
+                        [Character]() {
+                            if (Character && Character->CurrentWeapon)
+                            {
+                                Character->CurrentWeapon->EnsureWeaponVisibility();
+                                UE_LOG(LogTemp, Warning, TEXT("Ensured weapon visibility for %s"), *Character->GetName());
+                            }
+                        },
+                        0.5f,
+                        false
+                    );
                 }
                 else
                 {
                     UE_LOG(LogTemp, Error, TEXT("Could not get character for controller %s"), 
                         Controller ? *Controller->GetName() : TEXT("NULL"));
                 }
+                
                 // Clean up the timer handle
                 delete PlayerWeaponTimer;
             },
-            0.5f + (0.2f * i),
+            0.5f + (0.2f * i),  // Staggered timers for safety
             false
         );
     }
 
-
-    // Schedule delayed check to ensure all characters have their weapons
-    FTimerHandle WeaponCheckTimer;
+    // Schedule a delayed comprehensive check to ensure all characters have their weapons
+    FTimerHandle WeaponVerificationTimer;
     GetWorld()->GetTimerManager().SetTimer(
-        WeaponCheckTimer,
+        WeaponVerificationTimer,
         [this]() {
-            UE_LOG(LogTemp, Warning, TEXT("Verifying weapons for all players..."));
-            for (AController* Controller : AllPlayerControllers)
-            {
-                AWormCharacter* Character = GetWormCharacterFromController(Controller);
-                if (Character && Character->CurrentWeapon == nullptr)
-                {
-                    UE_LOG(LogTemp, Warning, TEXT("Reassigning weapons to %s"), *Character->GetName());
-                    Character->SetAvailableWeapons(AvailableWeaponTypes);
-                }
-                else if (Character && Character->CurrentWeapon)
-                {
-                    UE_LOG(LogTemp, Warning, TEXT("Verification: %s already has weapon %s"), 
-                        *Character->GetName(), *Character->CurrentWeapon->GetName());
-                }
-            }
+            VerifyWeaponsForAllPlayers();
         },
-        3.0f,  // Check after 3 seconds
+        3.0f,  // Check after all individual timers should have completed
         false
     );
 }
-
+void AWormGameMode::VerifyWeaponsForAllPlayers()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Verifying weapons for all players..."));
+    
+    // First, gather a fresh list of controllers and characters
+    GatherAllPlayerControllers();
+    
+    // Check each character
+    for (AController* Controller : AllPlayerControllers)
+    {
+        AWormCharacter* Character = GetWormCharacterFromController(Controller);
+        if (Character)
+        {
+            // Check if character has a weapon
+            if (!Character->CurrentWeapon)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("Character %s has no weapon - reassigning"), *Character->GetName());
+                Character->SetAvailableWeapons(AvailableWeaponTypes);
+            }
+            else
+            {
+                // Ensure weapon visibility
+                Character->CurrentWeapon->EnsureWeaponVisibility();
+                UE_LOG(LogTemp, Warning, TEXT("Character %s already has weapon %s"), 
+                    *Character->GetName(), *Character->CurrentWeapon->GetName());
+            }
+            
+            // Ensure all movement modes are correct
+            if (Character->GetCharacterMovement())
+            {
+                // Reset velocity and set to walking
+                Character->GetCharacterMovement()->Velocity = FVector::ZeroVector;
+                Character->GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+            }
+        }
+        else if (Controller)
+        {
+            UE_LOG(LogTemp, Error, TEXT("Controller %s has no character!"), *Controller->GetName());
+        }
+    }
+}
 void AWormGameMode::ApplyTerrainSettings()
 {
     // Obtenir les paramètres actuels
