@@ -105,6 +105,10 @@ public:
     // Whether to use loading screen and sequenced initialization
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Game Initialization")
     bool bUseGameInitManager = true;
+    // Function to collect all controllers
+    UFUNCTION(BlueprintCallable, Category = "Game")
+    void GatherAllPlayerControllers();
+    
 protected:
     // Miscellaneous variables 
     UPROPERTY(BlueprintReadWrite, Category = "Game")
@@ -122,10 +126,7 @@ protected:
     FTimerHandle VoxelBuildingsSpawnTimerHandle;
     FTimerHandle WeaponSpawnTimerHandle;
 
-    // Function to collect all controllers
-    UFUNCTION(BlueprintCallable, Category = "Game")
-    void GatherAllPlayerControllers();
-    
+
     // Function called when time expires
     UFUNCTION()
     void OnTurnTimeExpired();

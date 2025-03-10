@@ -97,92 +97,43 @@ void AGameInitManager::StartInitializationSequence()
     CurrentInitStep = 0;
     ExecuteInitializationStep();
 }
-
 void AGameInitManager::ExecuteInitializationStep()
 {
-    // Only execute on server or standalone
-    if (GetLocalRole() != ROLE_Authority)
-    {
-        return;
-    }
+    if (GetLocalRole() != ROLE_Authority) return;
     
-    // Execute steps based on current step index
     switch (CurrentInitStep)
     {
-        case 0: // Initial step - wait for game mode to generate voxel buildings
+        case 0: // Génération du terrain
         {
-            // Update loading progress
-            UpdateLoadingProgress(0.2f, TEXT("Generating terrain..."));
+            UpdateLoadingProgress(0.2f, TEXT("Génération du terrain..."));
             
-            // Check if the game mode is ready and has generated buildings
             AWormGameMode* GameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(this));
-            if (GameMode)
-            {
-                // Make sure voxel buildings get generated
+            if (GameMode) {
                 GameMode->GenerateVoxelBuildings();
-                
-                UE_LOG(LogTemp, Warning, TEXT("Requested voxel building generation from game mode"));
             }
             
-            // Schedule next step
             GetWorld()->GetTimerManager().SetTimer(
                 InitStepTimerHandle,
                 this,
                 &AGameInitManager::ExecuteInitializationStep,
-                2.0f, // Wait for voxel buildings to be generated
+                2.0f,
                 false
             );
             
-            // Move to next step
             CurrentInitStep++;
             break;
         }
         
-        case 1: // Second step - position player starts
+        case 1: // Préparation des joueurs
         {
-            // Update loading progress
-            UpdateLoadingProgress(0.4f, TEXT("Positioning player spawns..."));
+            UpdateLoadingProgress(0.4f, TEXT("Préparation des joueurs..."));
             
-            // Check if we have buildings before positioning player starts
-            TArray<AImprovedVoxelBuilding*> Buildings = AImprovedVoxelBuilding::FindAllVoxelBuildings(this);
-            
-            if (Buildings.Num() > 0)
-            {
-                UE_LOG(LogTemp, Warning, TEXT("Found %d voxel buildings, positioning player starts"), Buildings.Num());
-            }
-            else
-            {
-                UE_LOG(LogTemp, Warning, TEXT("No voxel buildings found, will try to position spawns anyway"));
-            }
-            
-            // Schedule next step
-            GetWorld()->GetTimerManager().SetTimer(
-                InitStepTimerHandle,
-                this,
-                &AGameInitManager::ExecuteInitializationStep,
-                1.0f,
-                false
-            );
-            
-            // Move to next step
-            CurrentInitStep++;
-            break;
-        }
-        
-        case 2: // Third step - initialize weapons
-        {
-            // Update loading progress
-            UpdateLoadingProgress(0.6f, TEXT("Loading weapons..."));
-            
-            // Get the game mode and initialize weapons
+            // S'assurer que tous les controllers sont prêts
             AWormGameMode* GameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(this));
-            if (GameMode)
-            {
-                GameMode->InitializeWeaponsForAllPlayers();
-                UE_LOG(LogTemp, Warning, TEXT("Requested weapon initialization from game mode"));
+            if (GameMode) {
+                GameMode->GatherAllPlayerControllers();
             }
             
-            // Schedule next step
             GetWorld()->GetTimerManager().SetTimer(
                 InitStepTimerHandle,
                 this,
@@ -191,52 +142,50 @@ void AGameInitManager::ExecuteInitializationStep()
                 false
             );
             
-            // Move to next step
             CurrentInitStep++;
             break;
         }
         
-        // This is just the case for step 3 in the ExecuteInitializationStep function
-        case 3: // Fourth step - position players on voxel buildings
+        case 2: // Initialisation des armes
         {
-            // Update loading progress
-            UpdateLoadingProgress(0.8f, TEXT("Positioning players..."));
+            UpdateLoadingProgress(0.6f, TEXT("Chargement des armes..."));
+            
+            AWormGameMode* GameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(this));
+            if (GameMode) {
+                GameMode->InitializeWeaponsForAllPlayers();
+            }
+            
+            GetWorld()->GetTimerManager().SetTimer(
+                InitStepTimerHandle,
+                this,
+                &AGameInitManager::ExecuteInitializationStep,
+                1.0f,
+                false
+            );
+            
+            CurrentInitStep++;
+            break;
+        }
+        
+        case 3: // Spawn et positionnement des joueurs
+        {
+            UpdateLoadingProgress(0.8f, TEXT("Placement des joueurs..."));
 
-            // Position players on top of buildings only if we have a PlayerSpawnManager
-            if (PlayerSpawnManager)
-            {
-                // Set a static guard flag to prevent multiple calls
+            if (PlayerSpawnManager) {
                 static bool bAlreadyTeleportedPlayers = false;
-
-                if (!bAlreadyTeleportedPlayers)
-                {
-                    // Set flag first to prevent recursive calls
+                if (!bAlreadyTeleportedPlayers) {
                     bAlreadyTeleportedPlayers = true;
-    
-                    // Start the positioning process - Use the teleport function
                     PlayerSpawnManager->TeleportPlayersToBuildings();
-    
-                    UE_LOG(LogTemp, Warning, TEXT("Called TeleportPlayersToBuildings once"));
-                }
-                else
-                {
-                    UE_LOG(LogTemp, Warning, TEXT("Skipped duplicate call to TeleportPlayersToBuildings"));
                 }
 
-                // Schedule the next step with a delay to allow teleportation to complete
                 GetWorld()->GetTimerManager().SetTimer(
                     InitStepTimerHandle,
                     this,
                     &AGameInitManager::ExecuteInitializationStep,
-                    2.0f,  // Increased from 1.0f to give more time for teleportation
+                    2.5f,  // Délai augmenté pour le spawn et la téléportation
                     false
                 );
-            }
-            else
-            {
-                UE_LOG(LogTemp, Error, TEXT("No PlayerSpawnManager available"));
-
-                // Skip to next step
+            } else {
                 GetWorld()->GetTimerManager().SetTimer(
                     InitStepTimerHandle,
                     this,
@@ -246,32 +195,24 @@ void AGameInitManager::ExecuteInitializationStep()
                 );
             }
 
-            // Move to next step
             CurrentInitStep++;
             break;
         }
         
-        case 4: // Final step - complete initialization
+        case 4: // Finalisation
         {
-            // Update loading progress to 100%
-            UpdateLoadingProgress(1.0f, TEXT("Ready!"));
+            UpdateLoadingProgress(1.0f, TEXT("Prêt !"));
             
-            // Start the first turn in the game mode
             AWormGameMode* GameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(this));
-            if (GameMode)
-            {
+            if (GameMode) {
                 GameMode->StartNextTurn();
-                UE_LOG(LogTemp, Warning, TEXT("Started first game turn"));
             }
             
-            // Complete initialization (will dismiss loading screen after a short delay)
             CompleteInitialization();
             break;
         }
         
         default:
-            // Should not get here
-            UE_LOG(LogTemp, Error, TEXT("Invalid initialization step: %d"), CurrentInitStep);
             CompleteInitialization();
             break;
     }

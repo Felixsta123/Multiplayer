@@ -4,24 +4,37 @@
 #include "Kismet/GameplayStatics.h"
 #include "UWormGameUI.h"
 #include "WormGameState.h"
+#include "Worms_3d/PlayerSaveGame.h"
 
 AWormPlayerController::AWormPlayerController()
 {
     // Constructeur vide
 }
-
 void AWormPlayerController::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Démarrer un timer qui va vérifier périodiquement si l'UI peut être créée
+    // Charger les paramètres du joueur depuis le slot de sauvegarde
+    if (UGameplayStatics::DoesSaveGameExist("PlayerSettingsSave", 0))
+    {
+        UPlayerSaveGame* LoadedGame = Cast<UPlayerSaveGame>(UGameplayStatics::LoadGameFromSlot("PlayerSettingsSave", 0));
+        if (LoadedGame)
+        {
+            // Charger les données dans PlayerSettings
+            PlayerSettings = LoadedGame->SavedPlayerInfo;
+            UE_LOG(LogTemp, Log, TEXT("Paramètres joueur chargés pour %s"), *GetName());
+        }
+    }
+    
+    // Démarrer les timers d'UI
     GetWorldTimerManager().SetTimer(
         UICheckTimerHandle,
         this,
         &AWormPlayerController::CheckAndCreateUI,
         0.5f,
-        true // Répéter jusqu'à ce que l'UI soit créée
+        true
     );
+    
     GetWorldTimerManager().SetTimer(
         PlayerUITimerHandle, 
         this, 
@@ -30,6 +43,7 @@ void AWormPlayerController::BeginPlay()
         false
     );
 }
+
 
 
 void AWormPlayerController::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
