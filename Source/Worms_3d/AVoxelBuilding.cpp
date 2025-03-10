@@ -51,7 +51,15 @@ void AImprovedVoxelBuilding::BeginPlay()
 void AImprovedVoxelBuilding::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+    // Add to GetLifetimeReplicatedProps in AVoxelBuilding.cpp
+    DOREPLIFETIME(AImprovedVoxelBuilding, GridSizeX);
+    DOREPLIFETIME(AImprovedVoxelBuilding, GridSizeY);
+    DOREPLIFETIME(AImprovedVoxelBuilding, GridSizeZ);
+    DOREPLIFETIME(AImprovedVoxelBuilding, VoxelSize);
+    DOREPLIFETIME(AImprovedVoxelBuilding, SmoothingFactor);
+    DOREPLIFETIME(AImprovedVoxelBuilding, bUseRandomColors);
     
+    // Add all other visual properties that need to be replicated
     // Replicate the destruction history
     DOREPLIFETIME(AImprovedVoxelBuilding, DestructionHistory);
 }

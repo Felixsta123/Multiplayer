@@ -66,22 +66,22 @@ public:
     virtual void OnConstruction(const FTransform& Transform) override;
     
     // Properties to configure the building
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", Replicated)
     int32 GridSizeX;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", Replicated)
     int32 GridSizeY;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", Replicated)
     int32 GridSizeZ;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", Replicated)
     float VoxelSize;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", Replicated)
     float SmoothingFactor;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", Replicated)
     bool bUseRandomColors;
     
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", meta = (EditCondition = "!bUseRandomColors"))

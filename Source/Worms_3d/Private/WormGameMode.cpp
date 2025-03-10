@@ -402,6 +402,7 @@ void AWormGameMode::GenerateVoxelBuildings()
             Building->bSpawnDebrisOnDestruction = Settings.bSpawnDebrisOnDestruction;
             Building->DebrisAmountMultiplier = Settings.DebrisAmountMultiplier;
             Building->bSpawnImpactCloud = Settings.bSpawnImpactCloud;
+            Building->ForceNetUpdate();
 
             // Generate building
             Building->GenerateBuilding();
