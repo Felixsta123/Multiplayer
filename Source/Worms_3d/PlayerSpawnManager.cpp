@@ -162,7 +162,7 @@ void UPlayerSpawnManager::TeleportPlayersToBuildings()
         }
         
         // Délai progressif entre chaque spawn
-        float Delay = 1.0f + (i * 1.5f);
+        float Delay = 1.0f + (i * 0.5f);
         
         FTimerHandle SpawnTimer;
         FTimerDelegate SpawnDelegate;

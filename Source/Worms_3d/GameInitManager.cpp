@@ -165,7 +165,7 @@ void AGameInitManager::ExecuteInitializationStep()
         
         case 2: // Spawn and position players first
         {
-            UpdateLoadingProgress(0.7f, TEXT("Placement des joueurs..."));
+            UpdateLoadingProgress(0.5f, TEXT("Placement des joueurs..."));
 
             if (PlayerSpawnManager) {
                 UE_LOG(LogTemp, Warning, TEXT("Teleporting players to buildings..."));
