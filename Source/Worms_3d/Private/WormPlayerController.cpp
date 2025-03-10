@@ -20,14 +20,23 @@ void AWormPlayerController::BeginPlay()
         UPlayerSaveGame* LoadedGame = Cast<UPlayerSaveGame>(UGameplayStatics::LoadGameFromSlot("PlayerSettingsSave", 0));
         if (LoadedGame)
         {
-            // Charger les données dans PlayerSettings
+            // Load data into PlayerSettings
             PlayerSettings = LoadedGame->SavedPlayerInfo;
-            UE_LOG(LogTemp, Log, TEXT("Paramètres joueur chargés pour %s"), *GetName());
+            UE_LOG(LogTemp, Log, TEXT("Player settings loaded for %s"), *GetName());
+            
+            // ADD THIS: Force immediate replication to server
+            if (GetLocalRole() < ROLE_Authority)
+            {
+                ServerSetPlayerSettings(PlayerSettings);
+            }
         } else {
-            UE_LOG(LogTemp, Error, TEXT("Impossible de charger les paramètres du joueur pour %s"), *GetName());
+            UE_LOG(LogTemp, Error, TEXT("Could not load player settings for %s"), *GetName());
         }
     }
-    
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("No player settings save found for %s"), *GetName());
+    }
     // Démarrer les timers d'UI
     GetWorldTimerManager().SetTimer(
         UICheckTimerHandle,
@@ -133,4 +142,10 @@ void AWormPlayerController::CreatePlayerUI()
             UE_LOG(LogTemp, Log, TEXT("Interface utilisateur du joueur créée avec succès"));
         }
     }
+}
+
+void AWormPlayerController::ServerSetPlayerSettings_Implementation(const FPlayerData& NewSettings)
+{
+    PlayerSettings = NewSettings;
+    UE_LOG(LogTemp, Warning, TEXT("Server received player settings for %s"), *GetName());
 }

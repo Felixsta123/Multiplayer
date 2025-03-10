@@ -20,7 +20,7 @@ public:
     // Player settings variable
     UPROPERTY(Replicated, EditAnywhere, BlueprintReadWrite, Category = "Player Settings")
     FPlayerData PlayerSettings;
-protected:
+    protected:
     // La classe du widget UI à créer
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "UI")
     TSubclassOf<UUserWidget> GameUIClass;
@@ -36,6 +36,9 @@ protected:
     // L'instance du widget UI du joueur
     UPROPERTY(BlueprintReadOnly, Category = "UI")
     class UUserWidget* PlayerUIWidget;
+    // ADD THIS to the public or protected section
+    UFUNCTION(Server, Reliable)
+    void ServerSetPlayerSettings(const FPlayerData& NewSettings);
 
     // Fonction pour créer l'UI du joueur
     UFUNCTION(BlueprintCallable, Category = "UI")

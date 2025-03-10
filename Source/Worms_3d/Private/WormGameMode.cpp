@@ -431,18 +431,18 @@ void AWormGameMode::InitializeWeaponsForAllPlayers()
     // Recollect controllers for safety
     GatherAllPlayerControllers();
 
-    // Distribute weapons to all characters one by one with slight delay
+    // FIX: Create unique timer handles for each player
     for (int32 i = 0; i < AllPlayerControllers.Num(); i++)
     {
         AController* Controller = AllPlayerControllers[i];
-        
-        // Create local capture of variables for lambda
         int32 PlayerIndex = i;
         
-        // Add slight delay for each player to avoid conflicts
+        // Create a dynamic timer name for each player
+        FTimerHandle* PlayerWeaponTimer = new FTimerHandle();
+        
         GetWorld()->GetTimerManager().SetTimer(
-            WeaponSpawnTimerHandle,
-            [this, Controller, PlayerIndex]() {
+            *PlayerWeaponTimer,
+            [this, Controller, PlayerIndex, PlayerWeaponTimer]() {
                 AWormCharacter* Character = GetWormCharacterFromController(Controller);
                 if (Character)
                 {
@@ -455,11 +455,14 @@ void AWormGameMode::InitializeWeaponsForAllPlayers()
                     UE_LOG(LogTemp, Error, TEXT("Could not get character for controller %s"), 
                         Controller ? *Controller->GetName() : TEXT("NULL"));
                 }
+                // Clean up the timer handle
+                delete PlayerWeaponTimer;
             },
-            0.5f + (0.2f * i),  // Progressive delay for each player
+            0.5f + (0.2f * i),
             false
         );
     }
+
 
     // Schedule delayed check to ensure all characters have their weapons
     FTimerHandle WeaponCheckTimer;

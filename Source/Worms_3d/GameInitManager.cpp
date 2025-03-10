@@ -167,22 +167,24 @@ void AGameInitManager::ExecuteInitializationStep()
             break;
         }
         
-        case 3: // Spawn et positionnement des joueurs
+        case 3: // Spawn and position players
         {
-            UpdateLoadingProgress(0.8f, TEXT("Placement des joueurs..."));
+            UpdateLoadingProgress(0.8f, TEXT("Placing players..."));
 
             if (PlayerSpawnManager) {
-                static bool bAlreadyTeleportedPlayers = false;
-                if (!bAlreadyTeleportedPlayers) {
-                    bAlreadyTeleportedPlayers = true;
-                    PlayerSpawnManager->TeleportPlayersToBuildings();
-                }
+                // REMOVE static flag - it causes issues with multiple game instances
+                //static bool bAlreadyTeleportedPlayers = false;
+                //if (!bAlreadyTeleportedPlayers) {
+                //    bAlreadyTeleportedPlayers = true;
+                PlayerSpawnManager->TeleportPlayersToBuildings();
+                //}
 
+                // INCREASE this delay to give more time for network replication
                 GetWorld()->GetTimerManager().SetTimer(
                     InitStepTimerHandle,
                     this,
                     &AGameInitManager::ExecuteInitializationStep,
-                    2.5f,  // Délai augmenté pour le spawn et la téléportation
+                    4.0f,  // Increased from 2.5f to ensure proper replication
                     false
                 );
             } else {
@@ -198,6 +200,7 @@ void AGameInitManager::ExecuteInitializationStep()
             CurrentInitStep++;
             break;
         }
+         
         
         case 4: // Finalisation
         {

@@ -106,9 +106,7 @@ void UPlayerSpawnManager::TeleportPlayersToPositions(const TArray<FVector>& Spaw
 }
 void UPlayerSpawnManager::TeleportPlayersToBuildings()
 {
-    static bool bTeleportInProgress = false;
-    if (bTeleportInProgress) return;
-    bTeleportInProgress = true;
+ 
     
     UE_LOG(LogTemp, Warning, TEXT("Téléportation des joueurs sur les bâtiments..."));
     
@@ -117,7 +115,6 @@ void UPlayerSpawnManager::TeleportPlayersToBuildings()
     
     if (VoxelBuildings.Num() == 0) {
         UE_LOG(LogTemp, Error, TEXT("Aucun bâtiment voxel trouvé pour téléporter les joueurs"));
-        bTeleportInProgress = false;
         return;
     }
     
@@ -139,7 +136,6 @@ void UPlayerSpawnManager::TeleportPlayersToBuildings()
     
     if (SpawnLocations.Num() == 0) {
         UE_LOG(LogTemp, Error, TEXT("Impossible de trouver des positions valides sur les bâtiments"));
-        bTeleportInProgress = false;
         return;
     }
     
@@ -239,14 +235,6 @@ void UPlayerSpawnManager::TeleportPlayersToBuildings()
         }
     }
     
-    // Réinitialisation du flag après un délai suffisant
-    FTimerHandle ResetFlagTimerHandle;
-    GetWorld()->GetTimerManager().SetTimer(
-        ResetFlagTimerHandle,
-        []() { bTeleportInProgress = false; },
-        PlayerControllers.Num() * 0.2f + 0.5f,
-        false
-    );
 }
 FVector UPlayerSpawnManager::FindSpawnLocationOnBuilding(AImprovedVoxelBuilding* Building, TArray<FVector>& ExistingLocations)
 {
