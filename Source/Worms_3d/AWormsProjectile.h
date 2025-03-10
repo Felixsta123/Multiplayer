@@ -2,7 +2,6 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "public/ADestructibleTerrain.h"
 #include "Field/FieldSystemComponent.h"
 #include "Field/FieldSystemActor.h"
 #include "Chaos/ChaosSolverActor.h"

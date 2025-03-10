@@ -3,9 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameMode.h"
-#include "TestVisibleTerrain.h"
 #include "../AWormCharacter.h"
-#include "ADestructibleTerrain.h"
 #include "Worms_3d/AVoxelBuilding.h" // Added VoxelBuilding include
 #include "../W_GameLoadingScreen.h"
 #include "WormGameMode.generated.h"

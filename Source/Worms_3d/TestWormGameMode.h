@@ -2,7 +2,6 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameMode.h"
-#include "ADestructibleTerrain.h"
 #include "WormWeapon.h"
 #include "AVoxelBuilding.h"
 #include "TestWormGameMode.generated.h"
@@ -32,14 +31,7 @@ public:
     // Fonction pour générer les bâtiments voxel
     UFUNCTION(BlueprintCallable, Category = "Voxel Building")
     void GenerateVoxelBuildings();
-    // Terrain destructible
-    UPROPERTY(BlueprintReadOnly, Category = "Terrain")
-    ADestructibleTerrain* DestructibleTerrain;
 
-    // Créer le terrain destructible
-    UFUNCTION(BlueprintCallable, Category = "Terrain")
-    void SpawnDestructibleTerrain();
-    
     // Réinitialise le tour (pour le mode solo)
     UFUNCTION(BlueprintCallable, Category = "Game")
     void ResetTurn();

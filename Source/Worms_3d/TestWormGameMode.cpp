@@ -100,40 +100,6 @@ void ATestWormGameMode::GenerateVoxelBuildings()
     }
 }
 
-void ATestWormGameMode::SpawnDestructibleTerrain()
-{
-    // Vérifier s'il existe déjà un terrain
-    if (DestructibleTerrain)
-    {
-        DestructibleTerrain->Destroy();
-        DestructibleTerrain = nullptr;
-    }
-    
-    // Paramètres de spawn
-    FVector Location = FVector(-1000.0f, -100.0f, -2250.0f);
-    FRotator Rotation = FRotator::ZeroRotator;
-    
-    FActorSpawnParameters SpawnParams;
-    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-
-    // Spawner le terrain destructible
-    DestructibleTerrain = GetWorld()->SpawnActor<ADestructibleTerrain>(
-        ADestructibleTerrain::StaticClass(), 
-        Location, 
-        Rotation, 
-        SpawnParams
-    );
-    
-    if (DestructibleTerrain)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Terrain destructible généré avec succès"));
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("Échec de la génération du terrain destructible"));
-    }
-}
-
 void ATestWormGameMode::ResetTurn()
 {
     // Réinitialiser le temps du tour

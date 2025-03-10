@@ -3,8 +3,6 @@
 #include "CoreMinimal.h"
 #include "GameFramework/GameState.h"
 #include "../AWormCharacter.h"
-#include "TestVisibleTerrain.h"
-#include "ADestructibleTerrain.h"
 #include "Worms_3d/AVoxelBuilding.h"
 #include "../NetworkLoadingManager.h"
 #include "WormGameState.generated.h"
