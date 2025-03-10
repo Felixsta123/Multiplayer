@@ -148,7 +148,8 @@ protected:
     
     // Voxel data
     TArray<TArray<TArray<FVoxelData>>> VoxelGrid;
-    
+    UPROPERTY()
+    int32 LastProcessedDestructionCount;
     // Initialize voxel grid
     void InitializeVoxelGrid();
     

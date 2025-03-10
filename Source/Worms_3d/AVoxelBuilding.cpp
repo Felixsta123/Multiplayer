@@ -31,7 +31,8 @@ AImprovedVoxelBuilding::AImprovedVoxelBuilding()
     bUseDoubleSidedGeometry = false; // Changed to false for better rendering
     bEnableCollision = true;
     CubeMargin = 0.01f; // Reduced margin for tighter fitting
-    
+    LastProcessedDestructionCount = 0;
+
     // Make actor replicable
     bReplicates = true;
     BuildingMesh->SetIsReplicated(true);
@@ -895,21 +896,17 @@ void AImprovedVoxelBuilding::OnRep_DestructionHistory()
 {
     if (!HasAuthority())
     {
-        // Dans OnRep_DestructionHistory, ajoutez :
-        UE_LOG(LogTemp, Warning, TEXT("OnRep_DestructionHistory: Client a reçu %d opérations de destruction"), 
-            DestructionHistory.Num());
-        // When running on clients, apply any new destruction operations
-        // Get the count of operations we've already processed
-        static int32 LastProcessedCount = 0;
-        
+        UE_LOG(LogTemp, Warning, TEXT("OnRep_DestructionHistory: Client received %d operations (previously processed %d)"), 
+            DestructionHistory.Num(), LastProcessedDestructionCount);
+            
         // Process only new operations
-        for (int32 i = LastProcessedCount; i < DestructionHistory.Num(); i++)
+        for (int32 i = LastProcessedDestructionCount; i < DestructionHistory.Num(); i++)
         {
             ApplyDeterministicDestruction(DestructionHistory[i]);
         }
         
         // Update our processed count
-        LastProcessedCount = DestructionHistory.Num();
+        LastProcessedDestructionCount = DestructionHistory.Num();
     }
 }
 

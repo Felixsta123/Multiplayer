@@ -23,6 +23,8 @@ void AWormPlayerController::BeginPlay()
             // Charger les données dans PlayerSettings
             PlayerSettings = LoadedGame->SavedPlayerInfo;
             UE_LOG(LogTemp, Log, TEXT("Paramètres joueur chargés pour %s"), *GetName());
+        } else {
+            UE_LOG(LogTemp, Error, TEXT("Impossible de charger les paramètres du joueur pour %s"), *GetName());
         }
     }
     
