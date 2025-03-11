@@ -48,7 +48,9 @@ AWormCharacter::AWormCharacter()
     GetCharacterMovement()->AirControl = 0.8f;
     GetCharacterMovement()->JumpZVelocity = 600.0f;
     GetCharacterMovement()->BrakingDecelerationWalking = 2000.0f;
-    
+    // Dans le constructeur du personnage qui ne s'oriente pas correctement
+    GetCharacterMovement()->bOrientRotationToMovement = true; // Activer cette propriété
+    GetCharacterMovement()->RotationRate = FRotator(0.0f, 540.0f, 0.0f); // Vitesse de rotation
     // Configuration du système de caméra
     InitializeCameraSystem();
 }
