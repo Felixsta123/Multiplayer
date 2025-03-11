@@ -6,6 +6,7 @@
 #include "Blueprint/UserWidget.h"
 #include "Kismet/GameplayStatics.h"
 #include "WormGameState.h"
+#include "Blueprint/WidgetBlueprintLibrary.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Worms_3d/AVoxelBuilding.h"
 #include "Worms_3d/GameInitFactorySubsystem.h"
@@ -714,7 +715,24 @@ void AWormGameMode::StartRestartSequence()
         // Force replication
         WormGS->ForceNetUpdate();
     }
-
+    // Clear any existing game over widget from all screens
+    for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+    {
+        APlayerController* PC = It->Get();
+        if (PC)
+        {
+            // Check if our results widget is showing and remove it
+            TArray<UUserWidget*> AllWidgets;
+            UWidgetBlueprintLibrary::GetAllWidgetsOfClass(GetWorld(), AllWidgets, UW_GameResultsScreen::StaticClass(), false);
+            for (UUserWidget* Widget : AllWidgets)
+            {
+                if (Widget && Widget->IsInViewport())
+                {
+                    Widget->RemoveFromParent();
+                }
+            }
+        }
+    }
     // Reset all characters
     for (FConstControllerIterator It = GetWorld()->GetControllerIterator(); It; ++It)
     {
@@ -741,7 +759,17 @@ void AWormGameMode::StartRestartSequence()
             Building->Destroy();
         }
     }
-    
+    // Clean up any leftover weapons
+    TArray<AActor*> LeftoverWeapons;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormWeapon::StaticClass(), LeftoverWeapons);
+    for (AActor* Weapon : LeftoverWeapons)
+    {
+        if (Weapon)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Cleaning up leftover weapon: %s"), *Weapon->GetName());
+            Weapon->Destroy();
+        }
+    }
     // Use GameInitManager to handle the restart
     if (GameInitManager)
     {
