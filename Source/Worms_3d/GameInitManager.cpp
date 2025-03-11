@@ -106,9 +106,9 @@ void AGameInitManager::ExecuteInitializationStep()
     
     switch (CurrentInitStep)
     {
-        case 0: // Génération du terrain
+        case 0: // Terrain generation
         {
-                UE_LOG(LogTemp, Warning, TEXT("Starting initialization step %d"), CurrentInitStep);
+            UE_LOG(LogTemp, Warning, TEXT("Starting initialization step %d: Terrain Generation"), CurrentInitStep);
 
             UpdateLoadingProgress(0.2f, TEXT("Génération du terrain..."));
             
@@ -125,16 +125,14 @@ void AGameInitManager::ExecuteInitializationStep()
                 3.0f, // Increased from 2.0f
                 false
             );
-                UE_LOG(LogTemp, Warning, TEXT("Completed initialization step %d, next step in %.1f seconds"), 
-                CurrentInitStep-1, 3.0f);
             
             CurrentInitStep++;
             break;
         }
         
-        case 1: // Préparation des joueurs - First gather controllers
+        case 1: // Player controller gathering
         {
-                UE_LOG(LogTemp, Warning, TEXT("Starting initialization step %d"), CurrentInitStep);
+            UE_LOG(LogTemp, Warning, TEXT("Starting initialization step %d: Controller Gathering"), CurrentInitStep);
               
             UpdateLoadingProgress(0.4f, TEXT("Préparation des joueurs..."));
             
@@ -164,15 +162,14 @@ void AGameInitManager::ExecuteInitializationStep()
                 2.0f, // Increased from 1.0f
                 false
             );
-                UE_LOG(LogTemp, Warning, TEXT("Completed initialization step %d, next step in %.1f seconds"), 
-                                CurrentInitStep-1, 2.0f);
+            
             CurrentInitStep++;
             break;
         }
         
-        case 2: // Spawn and position players first
+        case 2: // Spawn and position players
         {
-                UE_LOG(LogTemp, Warning, TEXT("Starting initialization step %d"), CurrentInitStep);
+            UE_LOG(LogTemp, Warning, TEXT("Starting initialization step %d: Player Spawning"), CurrentInitStep);
 
             UpdateLoadingProgress(0.5f, TEXT("Placement des joueurs..."));
 
@@ -182,12 +179,13 @@ void AGameInitManager::ExecuteInitializationStep()
                 // Teleport players to buildings with improved positioning
                 PlayerSpawnManager->TeleportPlayersToBuildings();
 
-                // Delay to allow players to be properly positioned
+                // IMPORTANT: Increased delay to 7.0 seconds to ensure all characters are fully spawned and stable
+                // before proceeding to weapon initialization
                 GetWorld()->GetTimerManager().SetTimer(
                     InitStepTimerHandle,
                     this,
                     &AGameInitManager::ExecuteInitializationStep,
-                    5.0f,
+                    7.0f, // Increased from 5.0f
                     false
                 );
             } else {
@@ -202,53 +200,77 @@ void AGameInitManager::ExecuteInitializationStep()
             }
 
             CurrentInitStep++;
-                UE_LOG(LogTemp, Warning, TEXT("Completed initialization step %d, next step in %.1f seconds"), 
-                CurrentInitStep-1, 5.0f);
             break;
         }
          
-        case 3: // Initialisation des armes
+        case 3: // Initial weapon preparation (with safety)
         {
-                UE_LOG(LogTemp, Warning, TEXT("Starting initialization step %d"), CurrentInitStep);
+            UE_LOG(LogTemp, Warning, TEXT("Starting initialization step %d: Initial Weapon Setup"), CurrentInitStep);
 
-            UpdateLoadingProgress(0.6f, TEXT("Chargement des armes..."));
+            UpdateLoadingProgress(0.7f, TEXT("Préparation des armes..."));
         
             AWormGameMode* GameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(this));
             if (GameMode) {
-                UE_LOG(LogTemp, Warning, TEXT("✅ Initializing weapons for all players"));
-                GameMode->InitializeWeaponsForAllPlayers();
+                UE_LOG(LogTemp, Warning, TEXT("✅ First-phase weapon initialization"));
+                
+                // First gather controllers again to ensure the list is current
+                GameMode->GatherAllPlayerControllers();
+                
+                // Pre-check all characters to verify they are ready
+                bool allPlayersReady = true;
+                for (AController* Controller : GameMode->AllPlayerControllers) {
+                    AWormCharacter* Character = GameMode->GetWormCharacterFromController(Controller);
+                    if (!Character || !IsValid(Character)) {
+                        allPlayersReady = false;
+                        UE_LOG(LogTemp, Warning, TEXT("Not all characters are ready yet; will retry"));
+                        break;
+                    }
+                }
+                
+                if (allPlayersReady) {
+                    // Initialize weapons for all players
+                    GameMode->InitializeWeaponsForAllPlayers();
+                } else {
+                    // Not all players are ready, delay and retry the same step
+                    GetWorld()->GetTimerManager().SetTimer(
+                        InitStepTimerHandle,
+                        this,
+                        &AGameInitManager::ExecuteInitializationStep,
+                        2.0f,
+                        false
+                    );
+                    return; // Don't increment the step counter
+                }
             }
         
-            // Increased delay to ensure weapons are properly initialized
+            // Proceed to next step after a delay
             GetWorld()->GetTimerManager().SetTimer(
                 InitStepTimerHandle,
                 this,
                 &AGameInitManager::ExecuteInitializationStep,
-                2.0f, // Increased from 1.0f
+                3.0f, // Increased from 2.0f
                 false
             );
         
             CurrentInitStep++;
-                UE_LOG(LogTemp, Warning, TEXT("Completed initialization step %d, next step in %.1f seconds"), 
-                CurrentInitStep-1, 2.0f);
             break;
         }
     
-        case 4: // Now initialize weapons AFTER players are positioned
+        case 4: // Final weapon verification
         {
-                UE_LOG(LogTemp, Warning, TEXT("Starting initialization step %d"), CurrentInitStep);
+            UE_LOG(LogTemp, Warning, TEXT("Starting initialization step %d: Final Weapon Verification"), CurrentInitStep);
 
-            UpdateLoadingProgress(0.9f, TEXT("Chargement des armes..."));
+            UpdateLoadingProgress(0.9f, TEXT("Vérification des armes..."));
             
             AWormGameMode* GameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(this));
             if (GameMode) {
-                UE_LOG(LogTemp, Warning, TEXT("✅ Initializing weapons for all players after positioning"));
+                UE_LOG(LogTemp, Warning, TEXT("✅ Final weapon verification phase"));
                 
-                // First gather fresh controller list
+                // Gather fresh controller list
                 GameMode->GatherAllPlayerControllers();
                 
-                // Now initialize weapons
-                GameMode->InitializeWeaponsForAllPlayers();
+                // Verify all weapons
+                GameMode->VerifyWeaponsForAllPlayers();
             }
             
             GetWorld()->GetTimerManager().SetTimer(
@@ -258,13 +280,12 @@ void AGameInitManager::ExecuteInitializationStep()
                 3.0f,
                 false
             );
-                UE_LOG(LogTemp, Warning, TEXT("Completed initialization step %d, next step in %.1f seconds"), 
-                    CurrentInitStep-1, 3.0f);
+            
             CurrentInitStep++;
             break;
         }
         
-        case 5: // Finalisation
+        case 5: // Final stabilization and game start
         {
             UpdateLoadingProgress(1.0f, TEXT("Prêt !"));
 
@@ -292,6 +313,12 @@ void AGameInitManager::ExecuteInitializationStep()
                         // Force update of physics state
                         Character->GetCharacterMovement()->UpdateComponentVelocity();
             
+                        // Final weapon visibility check
+                        if (Character->CurrentWeapon) {
+                            Character->CurrentWeapon->EnsureWeaponVisibility();
+                            Character->AttachWeaponToSocket(Character->CurrentWeapon);
+                        }
+            
                         UE_LOG(LogTemp, Warning, TEXT("Final stability check for %s complete"), *Character->GetName());
                     }
                 }
@@ -300,7 +327,7 @@ void AGameInitManager::ExecuteInitializationStep()
                 GameMode->StartNextTurn();
             }
 
-            // Only complete initialization AFTER all steps are done
+            // Complete initialization AFTER all steps are done
             UE_LOG(LogTemp, Warning, TEXT("Game initialization sequence complete"));
             CompleteInitialization();
             break;

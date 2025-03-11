@@ -159,7 +159,9 @@ public:
     UPROPERTY(EditDefaultsOnly, Category = "Worm")
     float MaxMovementPoints;
 
-
+    // Count of diagnostic attempts for this instance
+    UPROPERTY()
+    int32 DiagnosticCount;  
 protected:
     // === ÉTAT DU PERSONNAGE ===
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Worm")

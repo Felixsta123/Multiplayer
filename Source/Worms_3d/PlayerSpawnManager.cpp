@@ -109,7 +109,7 @@ void UPlayerSpawnManager::TeleportPlayersToBuildings()
 {
     UE_LOG(LogTemp, Warning, TEXT("Téléportation des joueurs sur les bâtiments..."));
     
-    // 1. Récupérer les bâtiments
+    // 1. Get the buildings
     TArray<AImprovedVoxelBuilding*> VoxelBuildings = AImprovedVoxelBuilding::FindAllVoxelBuildings(this);
     
     if (VoxelBuildings.Num() == 0) {
@@ -117,24 +117,24 @@ void UPlayerSpawnManager::TeleportPlayersToBuildings()
         return;
     }
     
-    // 2. Récupérer directement les points de spawn depuis les bâtiments
+    // 2. Get spawn points directly from buildings
     TArray<FVector> SpawnLocations;
     
     for (int32 i = 0; i < VoxelBuildings.Num(); i++) {
         AImprovedVoxelBuilding* Building = VoxelBuildings[i];
         if (!Building) continue;
         
-        // Utiliser le point de spawn pré-calculé
-        FVector SpawnPoint = Building->GetTopSpawnPoint();
+        // Use pre-calculated spawn point with extra height for safety
+        FVector SpawnPoint = Building->GetTopSpawnPoint() + FVector(0, 0, 200.0f);
         SpawnLocations.Add(SpawnPoint);
         
         UE_LOG(LogTemp, Warning, TEXT("Point de spawn %d: %s"), i, *SpawnPoint.ToString());
         
-        // Visualisation du point de spawn
+        // Visualize spawn point
         DrawDebugSphere(GetWorld(), SpawnPoint, 25.0f, 8, FColor::Yellow, false, 10.0f);
     }
     
-    // 3. Récupérer les controllers
+    // 3. Get controllers
     TArray<APlayerController*> PlayerControllers;
     for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It) {
         APlayerController* PC = It->Get();
@@ -143,7 +143,7 @@ void UPlayerSpawnManager::TeleportPlayersToBuildings()
         }
     }
     
-    // 4. Spawner les joueurs avec un délai entre chaque
+    // 4. Spawn players with delay between each
     for (int32 i = 0; i < PlayerControllers.Num(); i++) {
         APlayerController* PC = PlayerControllers[i];
         if (!PC) continue;
@@ -151,63 +151,82 @@ void UPlayerSpawnManager::TeleportPlayersToBuildings()
         AWormPlayerController* WPC = Cast<AWormPlayerController>(PC);
         if (!WPC) continue;
         
-        // Choisir une position (en cycle si plus de joueurs que de positions)
+        // Choose a position (cycling if more players than positions)
         int32 PosIndex = i % SpawnLocations.Num();
         FVector SpawnPos = SpawnLocations[PosIndex];
         
-        // On détruit l'ancien pawn pour éviter les conflits
+        // Destroy old pawn to avoid conflicts
         if (PC->GetPawn()) {
             PC->GetPawn()->Destroy();
             PC->UnPossess();
         }
         
-        // Délai progressif entre chaque spawn
-        float Delay = 1.0f + (i * 0.5f);
+        // Progressive delay between each spawn - increased delays for network safety
+        float Delay = 1.5f + (i * 0.8f);
         
         FTimerHandle SpawnTimer;
         FTimerDelegate SpawnDelegate;
         
-        SpawnDelegate.BindLambda([this, PC, WPC, SpawnPos, i]() {
-            // Vérifier la classe de personnage
-            UClass* CharClass = WPC->PlayerSettings.MyPlayerCharacter;
+        // Use weak pointers for safety
+        TWeakObjectPtr<APlayerController> WeakPC(PC);
+        TWeakObjectPtr<AWormPlayerController> WeakWPC(WPC);
+        
+        SpawnDelegate.BindLambda([this, WeakPC, WeakWPC, SpawnPos, i]() {
+            // Safety check
+            if (!WeakPC.IsValid() || !WeakWPC.IsValid()) {
+                UE_LOG(LogTemp, Error, TEXT("Invalid controller in spawn delegate"));
+                return;
+            }
+            
+            // Check character class
+            UClass* CharClass = WeakWPC->PlayerSettings.MyPlayerCharacter;
             if (!CharClass) {
                 UE_LOG(LogTemp, Error, TEXT("Pas de classe de personnage pour le joueur %d"), i);
                 return;
             }
             
-            // Spawner le personnage
+            // Spawn character with non-colliding approach
             FActorSpawnParameters SpawnParams;
             SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
             
             UE_LOG(LogTemp, Warning, TEXT("Spawn du personnage [%s] pour %s à %s"), 
-                *CharClass->GetName(), *PC->GetName(), *SpawnPos.ToString());
+                *CharClass->GetName(), *WeakPC->GetName(), *SpawnPos.ToString());
             
             APawn* NewPawn = GetWorld()->SpawnActor<APawn>(CharClass, SpawnPos, FRotator::ZeroRotator, SpawnParams);
             
             if (NewPawn) {
-                // Posseder le nouveau pawn
-                PC->Possess(NewPawn);
+                // Possess the new pawn
+                WeakPC->Possess(NewPawn);
                 
-                // Stabiliser le personnage
+                // Stabilize the character with delayed movement enabling
                 UCharacterMovementComponent* MovementComp = 
                     Cast<UCharacterMovementComponent>(NewPawn->GetMovementComponent());
                 
                 if (MovementComp) {
-                    // Désactiver temporairement le mouvement
+                    // Disable movement temporarily and reset velocity
                     MovementComp->StopMovementImmediately();
+                    MovementComp->Velocity = FVector::ZeroVector;
                     MovementComp->DisableMovement();
                     
-                    // Réactiver après un court délai
-                    FTimerHandle EnableMovementTimer;
-                    GetWorld()->GetTimerManager().SetTimer(
-                        EnableMovementTimer, 
-                        [MovementComp]() {
-                            MovementComp->SetMovementMode(MOVE_Walking);
-                        }, 
-                        0.5f, 
-                        false
-                    );
+                    // Schedule multiple movement re-enabling attempts
+                    for (float EnableDelay : {0.5f, 1.0f, 2.0f}) {
+                        FTimerHandle EnableMovementTimer;
+                        TWeakObjectPtr<UCharacterMovementComponent> WeakMovement(MovementComp);
+                        
+                        GetWorld()->GetTimerManager().SetTimer(
+                            EnableMovementTimer, 
+                            [WeakMovement]() {
+                                if (WeakMovement.IsValid()) {
+                                    WeakMovement->SetMovementMode(MOVE_Walking);
+                                }
+                            }, 
+                            EnableDelay, 
+                            false
+                        );
+                    }
                 }
+            } else {
+                UE_LOG(LogTemp, Error, TEXT("Failed to spawn character for player %d"), i);
             }
         });
         

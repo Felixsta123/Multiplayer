@@ -145,25 +145,36 @@ void AWormWeapon::BeginPlay()
 }
 void AWormWeapon::EnsureWeaponVisibility()
 {
-    // S'assurer que l'acteur lui-même est visible
+    // Make sure actor is visible
     SetActorHiddenInGame(false);
     
-    // S'assurer que le mesh est visible
     if (WeaponMesh)
     {
+        // Force maximum visibility settings
         WeaponMesh->SetVisibility(true);
         WeaponMesh->SetHiddenInGame(false);
-        WeaponMesh->MarkRenderStateDirty();
-        // Forcer une mise à jour des composants au cas où
+        WeaponMesh->SetCastShadow(true);
         WeaponMesh->MarkRenderStateDirty();
         
-        // Log pour déboguer
-        UE_LOG(LogTemp, Warning, TEXT("EnsureWeaponVisibility: Arme %s rendue visible (Owner: %s)"), 
+        // Apply any materials that might be missing
+        if (WeaponMesh->GetNumMaterials() > 0)
+        {
+            for (int32 i = 0; i < WeaponMesh->GetNumMaterials(); i++)
+            {
+                UMaterialInterface* Mat = WeaponMesh->GetMaterial(i);
+                if (Mat)
+                {
+                    WeaponMesh->SetMaterial(i, Mat);
+                }
+            }
+        }
+        
+        UE_LOG(LogTemp, Warning, TEXT("EnsureWeaponVisibility: Weapon %s forced visible (Owner: %s)"), 
             *GetName(), GetOwner() ? *GetOwner()->GetName() : TEXT("None"));
     }
     else
     {
-        UE_LOG(LogTemp, Error, TEXT("EnsureWeaponVisibility: WeaponMesh est NULL pour l'arme %s!"), *GetName());
+        UE_LOG(LogTemp, Error, TEXT("EnsureWeaponVisibility: WeaponMesh is NULL for weapon %s!"), *GetName());
     }
 }
 

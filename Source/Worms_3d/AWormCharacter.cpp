@@ -145,34 +145,41 @@ void AWormCharacter::BeginPlay()
 
 void AWormCharacter::SetupWeaponDiagnostic()
 {
-    // Ne configurer que pour les clients et limiter à 3 tentatives maximum
+    // Only setup for clients and limit to 3 attempts max per instance
     if (!HasAuthority() && IsLocallyControlled())
     {
         UE_LOG(LogTemp, Warning, TEXT("[CLIENT] Configuration du diagnostic d'arme pour %s"), *GetName());
         
-        static int32 DiagnosticCount = 0;
-        FTimerHandle DiagnosticTimerHandle;
+        // Make this instance-specific rather than static
+        DiagnosticCount = 0;
+        TWeakObjectPtr<AWormCharacter> WeakThis(this);
         
+        FTimerHandle DiagnosticTimerHandle;
         GetWorld()->GetTimerManager().SetTimer(
             DiagnosticTimerHandle,
-            [this]() {
-                if (DiagnosticCount < 3) // Limiter à 3 diagnostics
-                {
-                    DiagnoseWeapons();
-                    DiagnosticCount++;
+            [WeakThis]() {
+                // Safety check to ensure character still exists
+                if (!WeakThis.IsValid())
+                    return;
                     
-                    // Force la création d'arme uniquement après la 2ème tentative et seulement si nécessaire
-                    if (DiagnosticCount >= 2 && !CurrentWeapon && AvailableWeapons.Num() > 0)
+                if (WeakThis->DiagnosticCount < 3) // Limit to 3 diagnostics
+                {
+                    WeakThis->DiagnoseWeapons();
+                    WeakThis->DiagnosticCount++;
+                    
+                    // Force weapon creation only after the 2nd attempt and only if necessary
+                    if (WeakThis->DiagnosticCount >= 2 && !WeakThis->CurrentWeapon && WeakThis->AvailableWeapons.Num() > 0)
                     {
-                        OnRep_CurrentWeaponIndex();
+                        WeakThis->OnRep_CurrentWeaponIndex();
                     }
                 }
             },
-            2.0f,  // Premier diagnostic après 2 secondes
-            false   // Ne pas répéter
+            2.0f,  // First diagnostic after 2 seconds
+            false   // Don't repeat
         );
     }
 }
+
 void AWormCharacter::PossessedBy(AController* NewController)
 {
     Super::PossessedBy(NewController);
@@ -1129,23 +1136,32 @@ void AWormCharacter::Multicast_UpdateWeaponRotation_Implementation(FRotator NewR
 
 void AWormCharacter::AttachWeaponToSocket(AWormWeapon* Weapon)
 {
-    if (!Weapon || !GetMesh())
+    if (!Weapon || !IsValid(Weapon) || !GetMesh() || !IsValid(GetMesh()))
     {
+        UE_LOG(LogTemp, Error, TEXT("AttachWeaponToSocket: Invalid weapon or mesh"));
         return;
     }
 
-    // Détacher d'abord
+    // Detach first
     Weapon->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
     
-    // Réattacher avec des règles strictes
+    // Check socket exists
+    if (!GetMesh()->DoesSocketExist(WeaponSocketName)) {
+        UE_LOG(LogTemp, Error, TEXT("Socket '%s' does not exist on character mesh"), *WeaponSocketName.ToString());
+        return;
+    }
+    
+    // Reattach with strict rules
     Weapon->AttachToComponent(GetMesh(),
         FAttachmentTransformRules::SnapToTargetIncludingScale,
         WeaponSocketName);
         
-    // S'assurer que l'arme est visible
+    // Ensure weapon is visible
     Weapon->EnsureWeaponVisibility();
+    
+    UE_LOG(LogTemp, Log, TEXT("Weapon %s attached to socket %s"), 
+        *Weapon->GetName(), *WeaponSocketName.ToString());
 }
-
 
 
 void AWormCharacter::ToggleCameraMode(bool bUseFPSCamera)
@@ -1250,56 +1266,113 @@ void AWormCharacter::OnRep_Health()
         PlayAnimMontage(DeathMontage);
     }
 }
-
 void AWormCharacter::OnRep_CurrentWeaponIndex()
 {
-    // Ne rien faire sur le serveur
+    // Don't do anything on the server
     if (HasAuthority())
     {
         return;
     }
 
-    // Vérification index valide
+    // Valid index check
     if (!AvailableWeapons.IsValidIndex(CurrentWeaponIndex))
     {
+        UE_LOG(LogTemp, Warning, TEXT("Invalid weapon index: %d (AvailableWeapons: %d)"), 
+               CurrentWeaponIndex, AvailableWeapons.Num());
         return;
     }
 
-    // Vérifier si on a déjà la bonne arme
+    // Check if we already have the right weapon
     if (CurrentWeapon && CurrentWeapon->IsA(AvailableWeapons[CurrentWeaponIndex]))
     {
+        UE_LOG(LogTemp, Log, TEXT("Already have correct weapon type: %s"), *CurrentWeapon->GetName());
+        // Just re-attach to ensure proper socket placement
         AttachWeaponToSocket(CurrentWeapon);
         return;
     }
 
-    // Destruction propre de l'arme existante
+    // Cleaner weapon destruction with added safety
     if (CurrentWeapon)
     {
         AWormWeapon* WeaponToDestroy = CurrentWeapon;
-        CurrentWeapon = nullptr;
+        CurrentWeapon = nullptr; // Clear reference first
+        
+        // Detach before destruction
         WeaponToDestroy->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
-        WeaponToDestroy->Destroy();
+        
+        // Destroy with delay to avoid race conditions
+        FTimerHandle DestroyTimer;
+        TWeakObjectPtr<AWormWeapon> WeakWeapon(WeaponToDestroy);
+        GetWorld()->GetTimerManager().SetTimer(
+            DestroyTimer,
+            [WeakWeapon]() {
+                if (WeakWeapon.IsValid()) {
+                    WeakWeapon->Destroy();
+                }
+            },
+            0.1f,
+            false
+        );
     }
 
-    // Création de la nouvelle arme avec la transformation du socket
+    // More safety checks before weapon creation
+    if (!IsValid(this) || !GetWorld() || !GetMesh()) {
+        UE_LOG(LogTemp, Error, TEXT("Cannot create weapon - invalid character state"));
+        return;
+    }
+
+    // Get the socket transform for spawning
     FTransform SpawnTransform = GetMesh()->GetSocketTransform(WeaponSocketName);
     
     FActorSpawnParameters SpawnParams;
     SpawnParams.Owner = this;
     SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
+    // Get the weapon class with safety check
+    TSubclassOf<AWormWeapon> WeaponClass = AvailableWeapons[CurrentWeaponIndex];
+    if (!WeaponClass) {
+        UE_LOG(LogTemp, Error, TEXT("NULL weapon class at index %d"), CurrentWeaponIndex);
+        return;
+    }
+
+    // Create the new weapon
     CurrentWeapon = GetWorld()->SpawnActor<AWormWeapon>(
-        AvailableWeapons[CurrentWeaponIndex],
+        WeaponClass,
         SpawnTransform,
         SpawnParams
     );
 
     if (CurrentWeapon)
     {
+        UE_LOG(LogTemp, Log, TEXT("Successfully created weapon: %s"), *CurrentWeapon->GetName());
+        
+        // Attach with improved rules and multiple safety attempts
         AttachWeaponToSocket(CurrentWeapon);
-        CurrentWeapon->EnsureWeaponVisibility();
+        
+        // Schedule multiple visibility checks to ensure weapon remains visible
+        for (float Delay : {0.2f, 0.5f, 1.0f, 2.0f}) {
+            FTimerHandle VisibilityTimer;
+            TWeakObjectPtr<AWormCharacter> WeakThis(this);
+            TWeakObjectPtr<AWormWeapon> WeakWeapon(CurrentWeapon);
+            
+            GetWorld()->GetTimerManager().SetTimer(
+                VisibilityTimer,
+                [WeakThis, WeakWeapon]() {
+                    if (WeakThis.IsValid() && WeakWeapon.IsValid()) {
+                        WeakWeapon->EnsureWeaponVisibility();
+                    }
+                },
+                Delay,
+                false
+            );
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("Failed to create weapon of class %s"), *WeaponClass->GetName());
     }
 }
+
 
 void AWormCharacter::PlayHitReaction()
 {
