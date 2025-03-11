@@ -10,6 +10,8 @@
 #include "Worms_3d/AVoxelBuilding.h"
 #include "Worms_3d/GameInitFactorySubsystem.h"
 #include "Worms_3d/VoxelTerrainSettings.h"
+#include "Worms_3d/WormGameInstance.h"
+#include "Worms_3d/W_GameResultsScreen.h"
 
 AWormGameMode::AWormGameMode()
 {
@@ -636,4 +638,57 @@ AGameInitManager* AWormGameMode::SetupGameInitialization()
     }
 
     return GameInitManager;
+}
+
+void AWormGameMode::ShowGameOverWidget()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Showing game over widget"));
+    
+    // Get Game State for results data
+    AWormGameState* WormGS = GetGameState<AWormGameState>();
+    if (!WormGS)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Cannot show game over widget: GameState not valid"));
+        return;
+    }
+
+    if (!GameOverWidgetClass)
+    {
+        UE_LOG(LogTemp, Error, TEXT("GameOverWidgetClass not set in GameMode!"));
+        return;
+    }
+    
+    // Get local player controller
+    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+    if (!PC)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Cannot show game over widget: PlayerController not found"));
+        return;
+    }
+    
+    // Create the widget
+    UUserWidget* GameOverWidget = CreateWidget<UUserWidget>(PC, GameOverWidgetClass);
+    if (!GameOverWidget)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Failed to create GameOverWidget"));
+        return;
+    }
+    
+    // Try to cast to your specific widget class to set up data
+    UW_GameResultsScreen* ResultsWidget = Cast<UW_GameResultsScreen>(GameOverWidget);
+    if (ResultsWidget)
+    {
+        // Pass game results to the widget
+        ResultsWidget->DisplayResults(WormGS->WinnerName, WormGS->PlayerDamageDealt);
+    }
+    
+    // Show the widget
+    GameOverWidget->AddToViewport(1000); // High Z-order to be on top
+    
+    // Set input mode to UI
+    PC->SetInputMode(FInputModeUIOnly());
+    PC->bShowMouseCursor = true;
+    
+    // Freeze the game (optional)
+    UGameplayStatics::SetGamePaused(GetWorld(), true);
 }

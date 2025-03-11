@@ -14,6 +14,7 @@
 //include for   AWormCharacter.cpp(1045): [C2039] 'IsNormalized': is not a member of 'UE::Math::TRotator<double>'
 #include "Math/UnrealMathUtility.h"
 // Ajouter les includes manquants pour les collisions Cannot resolve symbol 'SetCollisionEnabled'
+#include "WormGameState.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
 
@@ -706,13 +707,35 @@ void AWormCharacter::ApplyDamageToWorm(float DamageAmount, FVector ImpactDirecti
     // L'impulsion est déjà incluse dans ImpactDirection, ne pas multiplier à nouveau
     // Juste normaliser pour être sûr
     ApplyMovementImpulse(ImpactDirection.GetSafeNormal(), ImpactDirection.Size());
-        
+    AActor* DamageInstigator = GetInstigator();
+    if (DamageInstigator)
+    {
+        // Get the game state to record damage
+        AWormGameState* GameState = Cast<AWormGameState>(UGameplayStatics::GetGameState(this));
+        if (GameState)
+        {
+            FString InstigatorName = DamageInstigator->GetName();
+            GameState->AddDamageDealt(InstigatorName, DamageAmount);
+        }
+    }
     // Vérifier si le personnage est mort
     if (Health <= 0)
     {
-        // Désactiver les collisions et le mouvement seulement si mort
-        GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-        GetCharacterMovement()->DisableMovement();
+        // Update player alive status in game state
+        AWormGameState* GameState = Cast<AWormGameState>(UGameplayStatics::GetGameState(this));
+        if (GameState)
+        {
+            // Find this character's name in the player names array
+            FString MyName = GetName();
+            int32 MyIndex = GameState->PlayerNames.Find(MyName);
+            if (MyIndex != INDEX_NONE)
+            {
+                GameState->PlayerIsAlive[MyIndex] = false;
+            
+                // Check if game is over
+                GameState->CheckGameOverCondition();
+            }
+        }
     }
     else
     {

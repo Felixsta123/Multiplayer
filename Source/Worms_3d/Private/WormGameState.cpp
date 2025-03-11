@@ -27,6 +27,9 @@ void AWormGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
     DOREPLIFETIME(AWormGameState, PlayerNames);
     DOREPLIFETIME(AWormGameState, PlayerIsAlive);
     DOREPLIFETIME(AWormGameState, CurrentPlayerName);
+    DOREPLIFETIME(AWormGameState, bGameOver);
+    DOREPLIFETIME(AWormGameState, WinnerName);
+    DOREPLIFETIME(AWormGameState, PlayerDamageDealt);
 }
 
 void AWormGameState::UpdatePlayerList(const TArray<AController*>& Controllers)
@@ -180,4 +183,141 @@ void AWormGameState::DismissLoadingScreen()
     {
         UE_LOG(LogTemp, Error, TEXT("LoadingManager not found in GameState!"));
     }
+}
+
+
+void AWormGameState::AddDamageDealt(const FString& PlayerName, float Damage)
+{
+    if (HasAuthority())
+    {
+        // Find existing entry for this player
+        bool bFoundPlayer = false;
+        for (int32 i = 0; i < PlayerDamageDealt.Num(); i++)
+        {
+            if (PlayerDamageDealt[i].PlayerName == PlayerName)
+            {
+                PlayerDamageDealt[i].DamageValue += Damage;
+                bFoundPlayer = true;
+                UE_LOG(LogTemp, Log, TEXT("Player %s has dealt %.1f total damage"), 
+                    *PlayerName, PlayerDamageDealt[i].DamageValue);
+                break;
+            }
+        }
+        
+        // If player not found, add new entry
+        if (!bFoundPlayer)
+        {
+            PlayerDamageDealt.Add(FPlayerDamageInfo(PlayerName, Damage));
+            UE_LOG(LogTemp, Log, TEXT("Player %s has dealt %.1f damage (first record)"), *PlayerName, Damage);
+        }
+        
+        // Force replication
+        MARK_PROPERTY_DIRTY_FROM_NAME(AWormGameState, PlayerDamageDealt, this);
+    }
+}
+
+void AWormGameState::CheckGameOverCondition()
+{
+    if (HasAuthority() && !bGameOver)
+    {
+        // Count alive players
+        int32 AliveCount = 0;
+        FString LastAlivePlayerName = TEXT("");
+        
+        for (int32 i = 0; i < PlayerNames.Num(); i++)
+        {
+            if (PlayerIsAlive.IsValidIndex(i) && PlayerIsAlive[i])
+            {
+                AliveCount++;
+                LastAlivePlayerName = PlayerNames[i];
+            }
+        }
+        
+        // Game over when only one player remains
+        if (AliveCount <= 1 && !LastAlivePlayerName.IsEmpty())
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Game over! Winner: %s"), *LastAlivePlayerName);
+            TriggerGameOver(LastAlivePlayerName);
+        }
+    }
+}
+
+void AWormGameState::TriggerGameOver(const FString& Winner)
+{
+    if (HasAuthority() && !bGameOver)
+    {
+        bGameOver = true;
+        WinnerName = Winner;
+        
+        // Force replication
+        MARK_PROPERTY_DIRTY_FROM_NAME(AWormGameState, bGameOver, this);
+        MARK_PROPERTY_DIRTY_FROM_NAME(AWormGameState, WinnerName, this);
+        
+        // Broadcast event to all clients
+        OnGameOver.Broadcast(Winner);
+        
+        UE_LOG(LogTemp, Warning, TEXT("Game over triggered! Winner: %s"), *Winner);
+        
+        // Show results widget after a short delay
+        FTimerHandle ShowWidgetTimerHandle;
+        GetWorld()->GetTimerManager().SetTimer(
+            ShowWidgetTimerHandle,
+            this,
+            &AWormGameState::ShowGameOverWidget,
+            2.0f, // 2 second delay before showing widget
+            false
+        );
+    }
+}
+
+void AWormGameState::ShowGameOverWidget()
+{
+    // Use RPC to show the widget on all clients
+    Multicast_ShowGameOverWidget();
+}
+
+void AWormGameState::Multicast_ShowGameOverWidget_Implementation()
+{
+    // Find the Game Mode
+    AWormGameMode* GameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(this));
+    if (GameMode)
+    {
+        GameMode->ShowGameOverWidget();
+    }
+    
+    // Also show it on listen server or in standalone
+    if (GetWorld()->GetNetMode() == NM_ListenServer || GetWorld()->GetNetMode() == NM_Standalone)
+    {
+        // Get the local player controller
+        APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+        if (PC)
+        {
+            // Try to show the widget directly on this machine
+            AWormGameMode* LocalGameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(GetWorld()));
+            if (LocalGameMode)
+            {
+                LocalGameMode->ShowGameOverWidget();
+            }
+        }
+    }
+}
+TArray<FString> AWormGameState::GetPlayersRankedByDamage() const
+{
+    TArray<FString> RankedPlayers;
+    
+    // Create a copy we can sort
+    TArray<FPlayerDamageInfo> SortedDamageStats = PlayerDamageDealt;
+    
+    // Sort by damage (descending)
+    SortedDamageStats.Sort([](const FPlayerDamageInfo& A, const FPlayerDamageInfo& B) {
+        return A.DamageValue > B.DamageValue;
+    });
+    
+    // Extract names in order
+    for (const auto& DamageInfo : SortedDamageStats)
+    {
+        RankedPlayers.Add(DamageInfo.PlayerName);
+    }
+    
+    return RankedPlayers;
 }

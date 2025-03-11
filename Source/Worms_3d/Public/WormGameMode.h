@@ -107,7 +107,11 @@ public:
     // Function to collect all controllers
     UFUNCTION(BlueprintCallable, Category = "Game")
     void GatherAllPlayerControllers();
-    
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI")
+    TSubclassOf<UUserWidget> GameOverWidgetClass;
+
+    UFUNCTION(BlueprintCallable, Category = "Game")
+    void ShowGameOverWidget();
 protected:
     // Miscellaneous variables 
     UPROPERTY(BlueprintReadWrite, Category = "Game")
