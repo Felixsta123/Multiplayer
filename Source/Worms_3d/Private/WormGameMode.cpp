@@ -678,7 +678,7 @@ void AWormGameMode::ShowGameOverWidget()
     UW_GameResultsScreen* ResultsWidget = Cast<UW_GameResultsScreen>(GameOverWidget);
     if (ResultsWidget)
     {
-        // Pass game results to the widget
+        // Pass game results directly from GameState to the widget
         ResultsWidget->DisplayResults(WormGS->WinnerName, WormGS->PlayerDamageDealt);
     }
     
@@ -689,6 +689,84 @@ void AWormGameMode::ShowGameOverWidget()
     PC->SetInputMode(FInputModeUIOnly());
     PC->bShowMouseCursor = true;
     
-    // Freeze the game (optional)
+    // Freeze the game
     UGameplayStatics::SetGamePaused(GetWorld(), true);
+}
+
+
+void AWormGameMode::StartRestartSequence()
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("Starting game restart sequence"));
+    
+    // Reset game state
+    AWormGameState* WormGS = GetGameState<AWormGameState>();
+    if (WormGS)
+    {
+        WormGS->bGameOver = false;
+        WormGS->WinnerName = TEXT("");
+        WormGS->PlayerDamageDealt.Empty();
+        
+        // Force replication
+        WormGS->ForceNetUpdate();
+    }
+
+    // Reset all characters
+    for (FConstControllerIterator It = GetWorld()->GetControllerIterator(); It; ++It)
+    {
+        AController* Controller = It->Get();
+        if (Controller)
+        {
+            // Respawn controlled characters
+            if (Controller->GetPawn())
+            {
+                Controller->GetPawn()->Destroy();
+            }
+            
+            // Force possession of a new character when restart completes
+            // This will be handled by GameInitManager for player positioning
+        }
+    }
+    
+    // Destroy existing voxel buildings
+    TArray<AImprovedVoxelBuilding*> ExistingBuildings = AImprovedVoxelBuilding::FindAllVoxelBuildings(this);
+    for (AImprovedVoxelBuilding* Building : ExistingBuildings)
+    {
+        if (Building)
+        {
+            Building->Destroy();
+        }
+    }
+    
+    // Use GameInitManager to handle the restart
+    if (GameInitManager)
+    {
+        // Show loading screen first
+        if (WormGS && WormGS->LoadingManager)
+        {
+            WormGS->ShowLoadingScreen(10.0f);
+        }
+
+        // Start initialization sequence after a short delay
+        FTimerHandle RestartTimerHandle;
+        GetWorld()->GetTimerManager().SetTimer(
+            RestartTimerHandle,
+            [this]() {
+                if (GameInitManager)
+                {
+                    GameInitManager->StartInitializationSequence();
+                }
+            },
+            1.0f, // Small delay to ensure everything is ready
+            false
+        );
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("Cannot restart: GameInitManager is null"));
+    }
 }

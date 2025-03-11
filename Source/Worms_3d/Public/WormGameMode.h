@@ -112,6 +112,8 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "Game")
     void ShowGameOverWidget();
+    void StartRestartSequence();
+
 protected:
     // Miscellaneous variables 
     UPROPERTY(BlueprintReadWrite, Category = "Game")

@@ -1,6 +1,6 @@
-﻿// W_GameResultsScreen.cpp
-#include "W_GameResultsScreen.h"
+﻿#include "W_GameResultsScreen.h"
 
+#include "WormGameMode.h"
 #include "WormGameState.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
@@ -14,73 +14,105 @@ void UW_GameResultsScreen::NativeConstruct()
     // Bind button events
     if (RestartButton)
     {
-        RestartButton->OnClicked.AddDynamic(this, &UW_GameResultsScreen::RestartGame);
+        RestartButton->OnClicked.AddDynamic(this, &UW_GameResultsScreen::OnRestartClicked);
     }
     
     if (MainMenuButton)
     {
-        MainMenuButton->OnClicked.AddDynamic(this, &UW_GameResultsScreen::ReturnToMainMenu);
+        MainMenuButton->OnClicked.AddDynamic(this, &UW_GameResultsScreen::OnReturnToMenuClicked);
     }
-    
-    // Get game results from the World
-    // This will depend on how you pass data between levels
-    // You could use GameInstance or temporary UObject to store results
 }
 
-void UW_GameResultsScreen::DisplayResults(const FString& WinnerName, const TArray<FPlayerDamageInfo>& DamageStats)
+void UW_GameResultsScreen::DisplayResults(const FString& Winner, const TArray<FPlayerDamageInfo>& DamageStats)
 {
-    // Display winner
+    // Store the results locally for use in the widget
+    WinnerName = Winner;
+    PlayerDamageDealt = DamageStats;
+    
+    // Update the winner text
     if (WinnerText)
     {
         WinnerText->SetText(FText::FromString(FString::Printf(TEXT("Winner: %s"), *WinnerName)));
     }
     
-    // Display damage stats
-    if (DamageStatsContainer && DamageStatEntryClass)
+    // Clear any existing damage entries
+    if (DamageContainer)
     {
-        // Clear previous entries
-        DamageStatsContainer->ClearChildren();
+        DamageContainer->ClearChildren();
         
-        // Sort players by damage
-        TArray<FPlayerDamageInfo> SortedStats = DamageStats;
+        // Sort damage stats by value (highest first)
+        TArray<FPlayerDamageInfo> SortedStats = PlayerDamageDealt;
         SortedStats.Sort([](const FPlayerDamageInfo& A, const FPlayerDamageInfo& B) {
             return A.DamageValue > B.DamageValue;
         });
         
-        // Create entries for each player
-        for (const auto& Stat : SortedStats)
+        // Create simple text entries for each player's damage
+        for (const FPlayerDamageInfo& DamageInfo : SortedStats)
         {
-            UUserWidget* Entry = CreateWidget<UUserWidget>(this, DamageStatEntryClass);
-            if (Entry)
+            UTextBlock* DamageText = NewObject<UTextBlock>(this);
+            if (DamageText)
             {
-                // Set damage stat data - this assumes your entry widget has these properties
-                UTextBlock* NameText = Cast<UTextBlock>(Entry->GetWidgetFromName(TEXT("PlayerNameText")));
-                UTextBlock* DamageText = Cast<UTextBlock>(Entry->GetWidgetFromName(TEXT("DamageText")));
-                
-                if (NameText)
-                {
-                    NameText->SetText(FText::FromString(Stat.PlayerName));
-                }
-                
-                if (DamageText)
-                {
-                    DamageText->SetText(FText::FromString(FString::Printf(TEXT("%.0f"), Stat.DamageValue)));
-                }
-                
-                DamageStatsContainer->AddChild(Entry);
+                FString DamageString = FString::Printf(TEXT("%s - %.1f damage"), 
+                    *DamageInfo.PlayerName, DamageInfo.DamageValue);
+                DamageText->SetText(FText::FromString(DamageString));
+                DamageContainer->AddChild(DamageText);
             }
         }
     }
+    
+    // Play show animation if available
+    if (ShowAnimation)
+    {
+        PlayAnimation(ShowAnimation);
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("Game results displayed: Winner=%s, Damage Stats=%d entries"), 
+        *WinnerName, PlayerDamageDealt.Num());
 }
 
+// Legacy method - keeping for compatibility
 void UW_GameResultsScreen::RestartGame()
 {
-    // Restart the game
-    UGameplayStatics::OpenLevel(GetWorld(), FName(*UGameplayStatics::GetCurrentLevelName(GetWorld())));
+    OnRestartClicked();
 }
 
+// Legacy method - keeping for compatibility
 void UW_GameResultsScreen::ReturnToMainMenu()
 {
-    // Return to main menu
-    UGameplayStatics::OpenLevel(GetWorld(), FName(TEXT("MainMenu")));
+    OnReturnToMenuClicked();
+}
+
+void UW_GameResultsScreen::OnRestartClicked()
+{
+    // Get game mode to handle restart
+    AWormGameMode* GameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(GetWorld()));
+    
+    if (GameMode && GameMode->GameInitManager)
+    {
+        // First remove this widget
+        RemoveFromParent();
+        
+        // Unpause the game
+        UGameplayStatics::SetGamePaused(GetWorld(), false);
+        
+        // Reset game and start initialization sequence
+        GameMode->StartRestartSequence();
+    }
+}
+
+void UW_GameResultsScreen::OnReturnToMenuClicked()
+{
+    // Get player controller
+    APlayerController* PC = GetOwningPlayer();
+    if (PC)
+    {
+        // First remove this widget
+        RemoveFromParent();
+        
+        // Unpause the game
+        UGameplayStatics::SetGamePaused(GetWorld(), false);
+        
+        // Return to main menu
+        UGameplayStatics::OpenLevel(GetWorld(), FName("MainMenuMap"));
+    }
 }

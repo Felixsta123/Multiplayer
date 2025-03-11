@@ -2,7 +2,6 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstance.h"
-#include "WormGameState.h" // Include for FPlayerDamageInfo
 #include "WormGameInstance.generated.h"
 
 UCLASS()
@@ -12,21 +11,10 @@ class WORMS_3D_API UWormGameInstance : public UGameInstance
     
 public:
 	UWormGameInstance();
-    
-	// Game state data that needs to persist across level transitions
-	UPROPERTY(BlueprintReadWrite, Category = "Game")
-	FString WinnerName;
-    
-	UPROPERTY(BlueprintReadWrite, Category = "Game")
-	TArray<FString> PlayerNames;
-    
-	UPROPERTY(BlueprintReadWrite, Category = "Game")
-	TArray<FPlayerDamageInfo> PlayerDamageDealt;
-    
-	// Functions to pass data between levels
-	UFUNCTION(BlueprintCallable, Category = "Game")
-	void StoreGameResults(const FString& Winner, const TArray<FString>& Players, const TArray<FPlayerDamageInfo>& DamageStats);
-    
-	UFUNCTION(BlueprintCallable, Category = "Game")
-	void ClearGameResults();
+	
+	// We're removing all game results functionality from GameInstance
+	// to keep it within the GameState/GameMode
+
+	// Add any other game-instance level functionality here that doesn't
+	// relate to the game-over system
 };

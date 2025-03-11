@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "WormGameState.h"
 #include "W_GameResultsScreen.generated.h"
 
 UCLASS()
@@ -13,12 +14,21 @@ public:
 	virtual void NativeConstruct() override;
     
 	UFUNCTION(BlueprintCallable, Category = "Results")
-	void DisplayResults(const FString& WinnerName, const TArray<FPlayerDamageInfo>& DamageStats);
+	void DisplayResults(const FString& Winner, const TArray<FPlayerDamageInfo>& DamageStats);
+    
+	// Legacy methods - converted to new OnRestart/OnReturnToMenu
 	UFUNCTION(BlueprintCallable, Category = "Results")
 	void RestartGame();
     
 	UFUNCTION(BlueprintCallable, Category = "Results")
 	void ReturnToMainMenu();
+    
+	// New button handlers for in-place restart
+	UFUNCTION(BlueprintCallable, Category = "Results")
+	void OnRestartClicked();
+    
+	UFUNCTION(BlueprintCallable, Category = "Results")
+	void OnReturnToMenuClicked();
     
 protected:
 	// UI bindings - bind these in your BP widget 
@@ -26,7 +36,7 @@ protected:
 	class UTextBlock* WinnerText;
     
 	UPROPERTY(meta = (BindWidget))
-	class UVerticalBox* DamageStatsContainer;
+	class UVerticalBox* DamageContainer;
     
 	UPROPERTY(meta = (BindWidget))
 	class UButton* RestartButton;
@@ -34,7 +44,14 @@ protected:
 	UPROPERTY(meta = (BindWidget))
 	class UButton* MainMenuButton;
     
-	// Reference to the damage stat entry widget class
-	UPROPERTY(EditDefaultsOnly, Category = "UI")
-	TSubclassOf<class UUserWidget> DamageStatEntryClass;
+	// Animation played when showing results
+	UPROPERTY(Transient, meta = (BindWidgetAnim))
+	class UWidgetAnimation* ShowAnimation;
+    
+	// Store the game results locally
+	UPROPERTY()
+	FString WinnerName;
+    
+	UPROPERTY()
+	TArray<FPlayerDamageInfo> PlayerDamageDealt;
 };
