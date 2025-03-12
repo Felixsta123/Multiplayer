@@ -7,12 +7,30 @@
 #include "Engine/PostProcessVolume.h"
 #include "WaterSystem.generated.h"
 
+
+UINTERFACE(MinimalAPI)
+class UWaterSystemInterface : public UInterface
+{
+	GENERATED_BODY()
+};
+
+class WORMS_3D_API IWaterSystemInterface
+{
+	GENERATED_BODY()
+
+public:
+	// Method to notify the water system about turn end
+	UFUNCTION(BlueprintNativeEvent, Category = "Water System")
+	void NotifyTurnEnded();
+};
+
+
 /**
  * Système de gestion de l'eau montante/descendante
  * Permet de créer une marée qui monte progressivement et tue les joueurs qui la touchent
  */
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class WORMS_3D_API UWaterSystem : public UActorComponent
+UCLASS()
+class WORMS_3D_API UWaterSystem : public UActorComponent, public IWaterSystemInterface
 {
 	GENERATED_BODY()
 
@@ -21,7 +39,17 @@ public:
 
 	virtual void BeginPlay() override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-    
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Water System")
+	void NotifyTurnEnded();
+	virtual void NotifyTurnEnded_Implementation() override;
+	void AddPersistentWaterEffects();
+	void SpawnRandomRipple();
+	UFUNCTION(NetMulticast, Reliable)
+	void Multicast_UpdateWaterVisuals(float NewWaterLevel);
+
+
+	FTimerHandle RippleTimerHandle;
+
     // Accesseurs
     UFUNCTION(BlueprintCallable, Category = "Water")
     float GetCurrentWaterLevel() const { return CurrentWaterLevel; }
@@ -59,6 +87,8 @@ public:
     void OnWaterOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, 
                          UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, 
                          bool bFromSweep, const FHitResult& SweepResult);
+
+	void KillCharacterInWater(AActor* Character);
 
 public:
     // Paramètres d'apparence de l'eau
@@ -144,7 +174,6 @@ protected:
     void SpawnWaterSplashEffect(const FVector& Location);
     void CheckForDangerousWaterLevel();
     void HandleCycleUpdate(float DeltaTime);
-    void KillCharacterInWater(AActor* Character);
     
     // Récupérer tous les acteurs actuellement dans l'eau
     TArray<AActor*> GetActorsInWater() const;

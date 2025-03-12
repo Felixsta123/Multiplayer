@@ -2,6 +2,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "AWormCharacter.h"
 #include "AVoxelBuilding.h"
+#include "EngineUtils.h"
 #include "WormGameMode.h"
 #include "WormGameState.h"
 #include "Engine/World.h"
@@ -12,50 +13,51 @@ AEnvironmentalEventsManager::AEnvironmentalEventsManager()
 {
     PrimaryActorTick.bCanEverTick = true;
     
-    // Création du composant WaterSystem
+    // Create the WaterSystem component
     WaterSystem = CreateDefaultSubobject<UWaterSystem>(TEXT("WaterSystem"));
     RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
     
-    // Initialisation des variables pour l'eau
+    // Initialize variables for water
     bIsWaterRisingActive = false;
     TimeUntilNextWaterEvent = InitialWaterDelay;
     TurnCounter = 0;
-    TurnsUntilNextWaterRise = 1; // Par défaut, l'eau monte à chaque tour
+    TurnsUntilNextWaterRise = 1; // By default, water rises each turn
     
-    // S'assurer que l'acteur sera répliqué sur le réseau
+    // Make sure the actor replicates
     bReplicates = true;
     WaterSystem->SetIsReplicated(true);
     
-    // Initialisation des autres systèmes d'événements
+    // Initialize other event systems
     bIsEarthquakeActive = false;
     TimeUntilNextEarthquake = InitialEarthquakeDelay;
     CurrentEarthquakeIntensity = 0.0f;
     CurrentEarthquakeLocation = FVector::ZeroVector;
     
-    // Probabilités par défaut des événements
-    WaterEventProbability = 100.0f; // 100% de chance au début
-    EarthquakeEventProbability = 0.0f; // Désactivé par défaut
+    // Default event probabilities
+    WaterEventProbability = 100.0f; // 100% chance at start
+    EarthquakeEventProbability = 0.0f; // Disabled by default
     
-    // Types d'événements activés par défaut
-    ActiveEventTypes = EEventType::Water; // Seule l'eau est active par défaut
+    // Default enabled event types
+    ActiveEventTypes = EEventType::Water; // Only water active by default
     
-    // Initialisation du système de tours
+    // Initialize turn system
     TurnsUntilNextEvent = 1;
 }
+
 
 void AEnvironmentalEventsManager::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Initialiser les systèmes environnementaux
-    if (HasAuthority()) // Seulement sur le serveur
+    // Initialize the water system first
+    if (HasAuthority()) // Only on server
     {
         InitializeWaterLevel();
         
-        // Démarrer les événements si activés
+        // Start events if enabled
         if (EnumHasAnyFlags(ActiveEventTypes, EEventType::Water) && bEnableWaterEvents)
         {
-            // Démarrer après un délai initial
+            // Start after initial delay
             GetWorldTimerManager().SetTimer(
                 WaterEventTimerHandle,
                 this,
@@ -64,10 +66,10 @@ void AEnvironmentalEventsManager::BeginPlay()
                 false
             );
             
-            UE_LOG(LogTemp, Log, TEXT("L'eau commencera à monter dans %.1f secondes"), InitialWaterDelay);
+            UE_LOG(LogTemp, Log, TEXT("Water will begin rising in %.1f seconds"), InitialWaterDelay);
         }
         
-        // Initialiser les tremblements de terre (désactivés par défaut)
+        // Initialize earthquakes (disabled by default)
         if (EnumHasAnyFlags(ActiveEventTypes, EEventType::Earthquake) && bEnableEarthquakes)
         {
             GetWorldTimerManager().SetTimer(
@@ -78,13 +80,13 @@ void AEnvironmentalEventsManager::BeginPlay()
                 false
             );
             
-            UE_LOG(LogTemp, Log, TEXT("Les tremblements de terre sont initialisés"));
+            UE_LOG(LogTemp, Log, TEXT("Earthquakes are initialized"));
         }
         
-        // Créer l'indicateur d'événements dans l'UI
+        // Create event indicator in UI
         CreateEnvironmentalEventIndicators();
         
-        // Configurer le prochain événement aléatoire
+        // Configure next random event
         ChooseNextEvent();
     }
 }
@@ -152,7 +154,14 @@ void AEnvironmentalEventsManager::GetLifetimeReplicatedProps(TArray<FLifetimePro
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     
-    // Ajouter ici les propriétés à répliquer si nécessaire
+    
+    // Add water system properties to replicate
+    DOREPLIFETIME(AEnvironmentalEventsManager, bIsWaterRisingActive);
+    DOREPLIFETIME(AEnvironmentalEventsManager, TimeUntilNextWaterEvent);
+    DOREPLIFETIME(AEnvironmentalEventsManager, bIsEarthquakeActive);
+    DOREPLIFETIME(AEnvironmentalEventsManager, CurrentEarthquakeIntensity);
+    DOREPLIFETIME(AEnvironmentalEventsManager, CurrentEarthquakeLocation);
+    DOREPLIFETIME(AEnvironmentalEventsManager, ActiveEventTypes);
 }
 
 // ===== FONCTIONS DE GESTION DES ÉVÉNEMENTS =====
@@ -226,7 +235,6 @@ void AEnvironmentalEventsManager::SetActiveEventTypes(EEventType NewActiveTypes)
 }
 
 // ===== FONCTIONS DE L'EAU =====
-
 void AEnvironmentalEventsManager::StartWaterRising()
 {
     if (!WaterSystem || !EnumHasAnyFlags(ActiveEventTypes, EEventType::Water) || !bEnableWaterEvents)
@@ -238,16 +246,16 @@ void AEnvironmentalEventsManager::StartWaterRising()
     
     if (bRiseAfterEachTurn)
     {
-        UE_LOG(LogTemp, Log, TEXT("L'eau va monter à chaque tour"));
+        UE_LOG(LogTemp, Log, TEXT("Water will rise after each turn"));
     }
     else
     {
-        // Configurer le timer pour les montées périodiques
+        // Set up timer for periodic rising
         TimeUntilNextWaterEvent = WaterRiseInterval;
-        UE_LOG(LogTemp, Log, TEXT("L'eau va monter toutes les %.1f secondes"), WaterRiseInterval);
+        UE_LOG(LogTemp, Log, TEXT("Water will rise every %.1f seconds"), WaterRiseInterval);
     }
     
-    // Notification Bluepint
+    // Blueprint notification
     OnWaterStartsRising();
 }
 
@@ -265,29 +273,31 @@ void AEnvironmentalEventsManager::RaiseWater(float Amount)
         return;
     }
     
-    // Si aucun montant spécifié, utiliser le montant par tour
+    // If no amount specified, use the amount per turn
     if (Amount <= 0.0f)
     {
         Amount = WaterRisePerTurn;
     }
     
-    // Faire monter l'eau
+    // Make the water rise (not lower)
     WaterSystem->RaiseWaterLevel(Amount);
     
-    // Créer un événement pour la notification
+    // Create an event for notification
     FEnvironmentalEventData EventData;
     EventData.EventType = EEventType::Water;
-    EventData.Intensity = Amount / WaterRisePerTurn; // Normaliser l'intensité
+    EventData.Intensity = Amount / WaterRisePerTurn; // Normalize intensity
     EventData.Location = GetActorLocation();
-    EventData.Description = FString::Printf(TEXT("L'eau descend de %.1f unités"), Amount);
-    EventData.Duration = 0.0f; // Instantané
+    EventData.Description = FString::Printf(TEXT("Water rose by %.1f units"), Amount);
+    EventData.Duration = 0.0f; // Instantaneous
     
-    // Notification Blueprint
+    // Blueprint notification
     OnEventTriggered(EventData);
     
-    UE_LOG(LogTemp, Log, TEXT("L'eau a baissé de %.1f unités"), Amount);
+    UE_LOG(LogTemp, Log, TEXT("Water rose by %.1f units"), Amount);
+    
+    // Check if any characters are in danger
+    CheckForDangerousWaterLevel();
 }
-
 // ===== FONCTIONS DES TREMBLEMENTS DE TERRE =====
 
 void AEnvironmentalEventsManager::TriggerEarthquake(float Intensity, FVector Location)
@@ -520,7 +530,6 @@ void AEnvironmentalEventsManager::ShakeCamera(float Intensity)
             float ShakeDuration = FMath::Min(EarthquakeDuration, 5.0f);
             
             // Lancer un camera shake
-            PC->PlayerCameraManager->StartCameraShake(CameraShakeClass, Intensity);
             
             UE_LOG(LogTemp, Verbose, TEXT("Camera shake appliqué au joueur: Intensité=%.2f, Durée=%.1f"),
                 Intensity, ShakeDuration);
@@ -529,7 +538,6 @@ void AEnvironmentalEventsManager::ShakeCamera(float Intensity)
 }
 
 // ===== FONCTIONS DE NOTIFICATION =====
-
 void AEnvironmentalEventsManager::NotifyTurnEnded_Implementation()
 {
     UE_LOG(LogTemp, Log, TEXT("EnvironmentalEventsManager: Turn ended notification received"));
@@ -542,48 +550,39 @@ void AEnvironmentalEventsManager::NotifyTurnEnded_Implementation()
     
     // Update turn counter
     TurnCounter++;
+    
+    // Check if it's time for a random event
+    if (bEnableRandomEvents && TurnCounter >= TurnsUntilNextEvent)
+    {
+        TriggerRandomEvent();
+        TurnCounter = 0;
+    }
 }
+
 // ===== FONCTIONS UTILITAIRES =====
 
-AEnvironmentalEventsManager* AEnvironmentalEventsManager::GetEventsManager(const UObject* WorldContextObject)
-{
-    if (!WorldContextObject || !WorldContextObject->GetWorld())
-    {
-        return nullptr;
-    }
-    
-    // Chercher l'instance existante
-    TArray<AActor*> FoundActors;
-    UGameplayStatics::GetAllActorsOfClass(WorldContextObject->GetWorld(), AEnvironmentalEventsManager::StaticClass(), FoundActors);
-    
-    if (FoundActors.Num() > 0)
-    {
-        return Cast<AEnvironmentalEventsManager>(FoundActors[0]);
-    }
-    
-    return nullptr;
-}
 
 void AEnvironmentalEventsManager::InitializeWaterLevel()
 {
     if (!WaterSystem)
     {
+        UE_LOG(LogTemp, Error, TEXT("WaterSystem component is null in EnvironmentalEventsManager"));
         return;
     }
     
-    // Trouver le niveau moyen du terrain
+    // Find the average terrain height
     float AverageHeight = CalculateAverageTerrainHeight();
     
-    // Définir le niveau initial de l'eau bien en dessous
-    float InitialLevel = AverageHeight - 500.0f; // 500 unités sous le terrain
+    // Set initial water level well below terrain
+    float InitialLevel = AverageHeight - 500.0f; // 500 units below terrain
     
-    // Limiter au niveau minimum configuré
+    // Limit to minimum configured level
     InitialLevel = FMath::Max(InitialLevel, WaterSystem->MinWaterLevel);
     
-    // Initialiser le WaterSystem
+    // Initialize WaterSystem
     WaterSystem->SetWaterLevel(InitialLevel, true);
     
-    UE_LOG(LogTemp, Log, TEXT("Niveau d'eau initialisé à %.1f (terrain à %.1f)"), 
+    UE_LOG(LogTemp, Log, TEXT("Water level initialized to %.1f (terrain at %.1f)"), 
         InitialLevel, AverageHeight);
 }
 
@@ -776,5 +775,27 @@ void AEnvironmentalEventsManager::LowerWater(float Amount)
     
     // Vérifier si des personnages sont en danger
     CheckForDangerousWaterLevel();
+}
+
+
+AEnvironmentalEventsManager* AEnvironmentalEventsManager::GetEventsManager(const UObject* WorldContextObject)
+{
+    if (!WorldContextObject)
+    {
+        return nullptr;
+    }
+
+    UWorld* World = WorldContextObject->GetWorld();
+    if (!World)
+    {
+        return nullptr;
+    }
+
+    for (TActorIterator<AEnvironmentalEventsManager> It(World); It; ++It)
+    {
+        return *It;
+    }
+
+    return nullptr;
 }
 

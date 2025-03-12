@@ -22,6 +22,10 @@
 		{
 			"Name": "FieldSystemPlugin",
 			"Enabled": true
+		},
+		{
+			"Name": "HDRIBackdrop",
+			"Enabled": true
 		}
 	]
 }

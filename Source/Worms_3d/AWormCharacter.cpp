@@ -14,6 +14,7 @@
 //include for   AWormCharacter.cpp(1045): [C2039] 'IsNormalized': is not a member of 'UE::Math::TRotator<double>'
 #include "Math/UnrealMathUtility.h"
 // Ajouter les includes manquants pour les collisions Cannot resolve symbol 'SetCollisionEnabled'
+#include "EnvironmentalEventsManager.h"
 #include "WormGameState.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
@@ -391,7 +392,23 @@ void AWormCharacter::Tick(float DeltaTime)
 
     // Mise à jour de la rotation de l'arme
     UpdateWeaponRotation();
-    
+    if (GetWorld())
+    {
+        // Find water manager
+        AEnvironmentalEventsManager* WaterManager = AEnvironmentalEventsManager::GetEventsManager(GetWorld());
+        if (WaterManager && WaterManager->WaterSystem)
+        {
+            float WaterLevel = WaterManager->WaterSystem->GetCurrentWaterLevel();
+            float CharacterZ = GetActorLocation().Z;
+            
+            // If underwater, apply damage
+            if (CharacterZ < WaterLevel)
+            {
+                // Let the water system handle the kill
+                WaterManager->WaterSystem->KillCharacterInWater(this);
+            }
+        }
+    }
     // Gestion du mouvement et des points de mouvement
     if (bIsMyTurn && HasAuthority())
     {

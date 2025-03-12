@@ -7,22 +7,6 @@
 
 
 
-UINTERFACE(MinimalAPI)
-class UWaterSystemInterface : public UInterface
-{
-    GENERATED_BODY()
-};
-
-class WORMS_3D_API IWaterSystemInterface
-{
-    GENERATED_BODY()
-
-public:
-    // Method to notify the water system about turn end
-    UFUNCTION(BlueprintNativeEvent, Category = "Water System")
-    void NotifyTurnEnded();
-};
-
 
 // Types d'événements environnementaux
 UENUM(BlueprintType, meta = (Bitflags))
@@ -82,7 +66,9 @@ public:
     virtual void Tick(float DeltaTime) override;
 
     // ===== PROPRIÉTÉS GÉNÉRALES =====
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Events")
+    UWaterSystem* WaterSystem;
+
+    UPROPERTY(Replicated, EditDefaultsOnly, BlueprintReadOnly, Category = "Events")
     EEventType ActiveEventTypes;
     
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Events")
@@ -95,8 +81,12 @@ public:
     int32 MaxTurnsBetweenEvents = 3;
     
     // ===== PROPRIÉTÉS DE L'EAU =====
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Events|Water")
+    UPROPERTY(Replicated, EditDefaultsOnly, BlueprintReadOnly, Category = "Events|Water")
     bool bEnableWaterEvents = true;
+
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Events|Water")
+    bool bIsWaterRisingActive;
+
     
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Events|Water")
     bool bRiseAfterEachTurn = true;
@@ -165,7 +155,7 @@ public:
     
     UFUNCTION(BlueprintCallable, Category = "Events|Water")
     void LowerWater(float Amount = 0.0f);
-    
+
     // --- Tremblement de terre ---
     UFUNCTION(BlueprintCallable, Category = "Events|Earthquake")
     void TriggerEarthquake(float Intensity = 1.0f, FVector Location = FVector::ZeroVector);
@@ -197,10 +187,11 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Events", meta = (WorldContext = "WorldContextObject"))
     static AEnvironmentalEventsManager* GetEventsManager(const UObject* WorldContextObject);
 
+
+    
 protected:
     // ===== COMPOSANTS =====
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UWaterSystem* WaterSystem;
     
     // ===== VARIABLES INTERNES =====
     
@@ -209,14 +200,20 @@ protected:
     int32 TurnsUntilNextEvent;
     
     // --- Eau ---
-    bool bIsWaterRisingActive;
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Events|Water")
     float TimeUntilNextWaterEvent;
+
     int32 TurnsUntilNextWaterRise;
     
     // --- Tremblement de terre ---
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Events|Earthquake")
     bool bIsEarthquakeActive;
+
     float TimeUntilNextEarthquake;
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Events|Earthquake")
     float CurrentEarthquakeIntensity;
+
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Events|Earthquake")
     FVector CurrentEarthquakeLocation;
     
     // ===== TIMERS =====
@@ -237,7 +234,8 @@ protected:
     
     void ChooseNextEvent();
     EEventType SelectRandomEventType();
-    
+    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
     // ===== FONCTIONS BLUEPRINT =====
     UFUNCTION(BlueprintImplementableEvent, Category = "Events")
     void CreateEnvironmentalEventIndicators();

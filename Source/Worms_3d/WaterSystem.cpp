@@ -4,6 +4,7 @@
 #include "Sound/SoundCue.h"
 #include "Particles/ParticleSystemComponent.h"
 #include "AWormCharacter.h"
+#include "EnvironmentalEventsManager.h"
 #include "WormGameState.h"
 #include "WormGameMode.h"
 #include "Engine/World.h"
@@ -91,7 +92,10 @@ void UWaterSystem::BeginPlay()
     TargetWaterLevel = InitialWaterLevel;
     UpdateWaterMeshAndVolume();
     
-    // Démarrer le cycle si nécessaire
+    // Add persistent effects
+    AddPersistentWaterEffects();
+    
+    // Start automatic cycle if needed
     if (bAutomaticCycleActive)
     {
         StartAutomaticCycle(CycleDuration);
@@ -137,20 +141,26 @@ void UWaterSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorCom
 
 void UWaterSystem::SetWaterLevel(float NewLevel, bool bImmediate)
 {
-    // Limiter la hauteur à la plage configurée
+    // Limit height to configured range
     NewLevel = FMath::Clamp(NewLevel, MinWaterLevel, MaxWaterLevel);
     
-    // Définir si l'eau monte ou descend
+    // Determine if water is rising or lowering
     bIsWaterRising = (NewLevel > CurrentWaterLevel);
     
-    // Stocker la cible
+    // Store target
     TargetWaterLevel = NewLevel;
     
-    // Si changement immédiat, mettre à jour directement
+    // If immediate change, update directly
     if (bImmediate)
     {
         CurrentWaterLevel = TargetWaterLevel;
         UpdateWaterMeshAndVolume();
+        
+        // Send visual update to clients
+        if (GetOwnerRole() == ROLE_Authority)
+        {
+            Multicast_UpdateWaterVisuals(CurrentWaterLevel);
+        }
     }
     
     UE_LOG(LogTemp, Verbose, TEXT("Water level changing to %.1f (currently: %.1f, %s)"), 
@@ -387,4 +397,134 @@ TArray<AActor*> UWaterSystem::GetActorsInWater() const
     }
     
     return Result;
+}
+
+void UWaterSystem::NotifyTurnEnded_Implementation()
+{
+    // Handle turn-end water rising if set to rise after each turn
+    AActor* Owner = GetOwner();
+    if (!Owner)
+    {
+        return;
+    }
+
+    AEnvironmentalEventsManager* EventsManager = Cast<AEnvironmentalEventsManager>(Owner);
+    if (EventsManager && EventsManager->bIsWaterRisingActive && EventsManager->bRiseAfterEachTurn)
+    {
+        UE_LOG(LogTemp, Log, TEXT("WaterSystem: Turn ended - raising water"));
+        
+        // Raise water by the configured amount
+        RaiseWaterLevel(EventsManager->WaterRisePerTurn);
+    }
+}
+
+
+void UWaterSystem::Multicast_UpdateWaterVisuals_Implementation(float NewWaterLevel)
+{
+    // Only update visuals on clients
+    if (GetOwnerRole() < ROLE_Authority)
+    {
+        CurrentWaterLevel = NewWaterLevel;
+        UpdateWaterMeshAndVolume();
+    }
+}
+
+
+void UWaterSystem::AddPersistentWaterEffects()
+{
+    // Create ambient water sound if specified
+    if (WaterAmbientSound && !WaterAmbientSoundComponent)
+    {
+        WaterAmbientSoundComponent = UGameplayStatics::SpawnSoundAttached(
+            WaterAmbientSound,
+            WaterMeshComponent,
+            NAME_None,
+            FVector::ZeroVector,
+            EAttachLocation::KeepRelativeOffset,
+            true,
+            1.0f,  // Volume
+            1.0f,  // Pitch
+            0.0f,  // Start time
+            nullptr,
+            nullptr,
+            true   // Auto-destroy
+        );
+        
+        // Adjust sound volume based on water level
+        if (WaterAmbientSoundComponent)
+        {
+            // Higher volume as water rises
+            float LevelRatio = FMath::GetMappedRangeValueClamped(
+                FVector2D(MinWaterLevel, MaxWaterLevel),
+                FVector2D(0.2f, 1.0f),
+                CurrentWaterLevel
+            );
+            
+            WaterAmbientSoundComponent->SetVolumeMultiplier(LevelRatio);
+        }
+    }
+    
+    // Update sound volume when water level changes
+    if (WaterAmbientSoundComponent)
+    {
+        float LevelRatio = FMath::GetMappedRangeValueClamped(
+            FVector2D(MinWaterLevel, MaxWaterLevel),
+            FVector2D(0.2f, 1.0f),
+            CurrentWaterLevel
+        );
+        
+        WaterAmbientSoundComponent->SetVolumeMultiplier(LevelRatio);
+    }
+    
+    // Add periodic ripple effects for visual interest
+    if (GetWorld() && RippleEffect)
+    {
+        // Create a timer to spawn random ripples on the water surface
+        if (!GetWorld()->GetTimerManager().IsTimerActive(RippleTimerHandle))
+        {
+            GetWorld()->GetTimerManager().SetTimer(
+                RippleTimerHandle,
+                this,
+                &UWaterSystem::SpawnRandomRipple,
+                2.0f,  // Every 2 seconds
+                true   // Looping
+            );
+        }
+    }
+}
+
+void UWaterSystem::SpawnRandomRipple()
+{
+    if (!GetWorld() || !RippleEffect || !WaterMeshComponent)
+    {
+        return;
+    }
+    
+    // Get the water mesh bounds
+    FVector Origin, Extent;
+    WaterMeshComponent->GetLocalBounds(Origin, Extent);
+    
+    // Calculate world bounds
+    FVector WorldOrigin = WaterMeshComponent->GetComponentLocation() + WaterMeshComponent->GetComponentTransform().TransformVector(Origin);
+    FVector WorldExtent = Extent * WaterMeshComponent->GetComponentScale();
+    
+    // Generate a random position on the water surface
+    float RandomX = FMath::RandRange(WorldOrigin.X - WorldExtent.X * 0.8f, WorldOrigin.X + WorldExtent.X * 0.8f);
+    float RandomY = FMath::RandRange(WorldOrigin.Y - WorldExtent.Y * 0.8f, WorldOrigin.Y + WorldExtent.Y * 0.8f);
+    
+    // Create ripple at water surface
+    FVector RippleLocation = FVector(RandomX, RandomY, CurrentWaterLevel + 1.0f);
+    
+    // Random scale for variety
+    float RippleScale = FMath::RandRange(0.5f, 1.5f);
+    
+    // Spawn the ripple effect
+    UGameplayStatics::SpawnEmitterAtLocation(
+        GetWorld(),
+        RippleEffect,
+        RippleLocation,
+        FRotator(90.0f, 0.0f, 0.0f),  // Face upward
+        FVector(RippleScale),
+        true
+    );
 }
