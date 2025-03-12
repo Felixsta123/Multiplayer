@@ -27,59 +27,78 @@ void UWaterSystem::BeginPlay()
 {
     Super::BeginPlay();
     
-    // Créer le mesh d'eau
+    // S'assurer que le propriétaire est valide
+    if (!GetOwner())
+    {
+        UE_LOG(LogTemp, Error, TEXT("WaterSystem owner is null"));
+        return;
+    }
+    
+    // Créer le mesh d'eau s'il n'existe pas encore
     if (!WaterMeshComponent)
     {
         WaterMeshComponent = NewObject<UStaticMeshComponent>(GetOwner(), TEXT("WaterMesh"));
-        WaterMeshComponent->SetupAttachment(GetOwner()->GetRootComponent());
-        WaterMeshComponent->RegisterComponent();
-        
-        if (WaterMesh)
+        if (WaterMeshComponent)
         {
-            WaterMeshComponent->SetStaticMesh(WaterMesh);
-        }
-        else 
-        {
-            UE_LOG(LogTemp, Warning, TEXT("WaterSystem: Aucun mesh d'eau assigné, utilisation d'un plan par défaut"));
-            // On pourrait charger un mesh de plan par défaut ici
-        }
-        
-        // Configurer la physique et les collisions
-        WaterMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision); // L'eau n'a pas de collisions physiques
-        WaterMeshComponent->SetGenerateOverlapEvents(false);
-        WaterMeshComponent->SetCastShadow(false);
-        
-        // Créer et appliquer le matériau dynamique
-        if (WaterMaterial)
-        {
-            WaterDynamicMaterial = UMaterialInstanceDynamic::Create(WaterMaterial, this);
-            WaterDynamicMaterial->SetVectorParameterValue(TEXT("WaterColor"), WaterColor);
-            WaterMeshComponent->SetMaterial(0, WaterDynamicMaterial);
+            WaterMeshComponent->SetupAttachment(GetOwner()->GetRootComponent());
+            WaterMeshComponent->RegisterComponent();
+            
+            if (WaterMesh)
+            {
+                WaterMeshComponent->SetStaticMesh(WaterMesh);
+            }
+            else 
+            {
+                UE_LOG(LogTemp, Warning, TEXT("WaterSystem: No water mesh assigned, using default plane"));
+                // Vous pourriez charger un mesh de plan par défaut ici
+            }
+            
+            // Configurer la physique et les collisions
+            WaterMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision); // L'eau n'a pas de collisions physiques
+            WaterMeshComponent->SetGenerateOverlapEvents(false);
+            WaterMeshComponent->SetCastShadow(false);
+            
+            // Rendre l'eau semi-transparente
+            WaterMeshComponent->SetTranslucentSortPriority(0);
+            
+            // Créer et appliquer le matériau dynamique
+            if (WaterMaterial)
+            {
+                WaterDynamicMaterial = UMaterialInstanceDynamic::Create(WaterMaterial, this);
+                if (WaterDynamicMaterial)
+                {
+                    WaterDynamicMaterial->SetVectorParameterValue(TEXT("WaterColor"), WaterColor);
+                    WaterMeshComponent->SetMaterial(0, WaterDynamicMaterial);
+                }
+            }
         }
     }
     
-    // Créer le volume de détection
+    // Créer le volume de détection s'il n'existe pas encore
     if (!WaterVolumeComponent)
     {
         WaterVolumeComponent = NewObject<UBoxComponent>(GetOwner(), TEXT("WaterVolume"));
-        WaterVolumeComponent->SetupAttachment(GetOwner()->GetRootComponent());
-        WaterVolumeComponent->RegisterComponent();
-        
-        // Configurer la détection de collision
-        WaterVolumeComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-        WaterVolumeComponent->SetCollisionResponseToAllChannels(ECR_Overlap);
-        WaterVolumeComponent->SetGenerateOverlapEvents(true);
-        
-        // Lier le callback d'overlap
-        WaterVolumeComponent->OnComponentBeginOverlap.AddDynamic(this, &UWaterSystem::OnWaterOverlap);
+        if (WaterVolumeComponent)
+        {
+            WaterVolumeComponent->SetupAttachment(GetOwner()->GetRootComponent());
+            WaterVolumeComponent->RegisterComponent();
+            
+            // Configurer la détection de collision
+            WaterVolumeComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+            WaterVolumeComponent->SetCollisionResponseToAllChannels(ECR_Overlap);
+            WaterVolumeComponent->SetGenerateOverlapEvents(true);
+            
+            // Lier le callback d'overlap
+            WaterVolumeComponent->OnComponentBeginOverlap.AddDynamic(this, &UWaterSystem::OnWaterOverlap);
+        }
     }
     
     // Configurer le son d'ambiance
-    if (WaterAmbientSound)
+    if (WaterAmbientSound && !WaterAmbientSoundComponent)
     {
         WaterAmbientSoundComponent = UGameplayStatics::SpawnSoundAttached(
             WaterAmbientSound,
-            WaterMeshComponent,
+            WaterMeshComponent ? WaterMeshComponent : GetOwner()->GetRootComponent(),
             NAME_None,
             FVector::ZeroVector,
             EAttachLocation::KeepRelativeOffset,
@@ -103,6 +122,7 @@ void UWaterSystem::BeginPlay()
     
     UE_LOG(LogTemp, Log, TEXT("WaterSystem initialized at level %.1f"), CurrentWaterLevel);
 }
+
 
 void UWaterSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
@@ -225,6 +245,7 @@ void UWaterSystem::OnWaterOverlap(UPrimitiveComponent* OverlappedComponent, AAct
     }
 }
 
+
 void UWaterSystem::UpdateWaterMeshAndVolume()
 {
     if (!WaterMeshComponent || !WaterVolumeComponent || !GetOwner())
@@ -241,14 +262,14 @@ void UWaterSystem::UpdateWaterMeshAndVolume()
     WaterMeshComponent->SetWorldLocation(MeshLocation);
     
     // Mise à l'échelle pour couvrir toute la carte
-    WaterMeshComponent->SetWorldScale3D(FVector(WorldSize / 100.0f)); // Ajuster selon la taille de votre mesh
+    WaterMeshComponent->SetWorldScale3D(FVector(WorldSize / 100.0f, WorldSize / 100.0f, 1.0f)); // Ajuster selon la taille de votre mesh
     
-    // Mise à jour du volume de détection
+    // Mise à jour du volume de détection (plus grand que la partie visible)
     FVector VolumeOrigin = MeshLocation;
     VolumeOrigin.Z = CurrentWaterLevel - 100.0f; // Légèrement sous la surface pour détecter correctement
     
     WaterVolumeComponent->SetWorldLocation(VolumeOrigin);
-    WaterVolumeComponent->SetBoxExtent(FVector(WorldSize, WorldSize, 100.0f)); // Hauteur de détection arbitraire
+    WaterVolumeComponent->SetBoxExtent(FVector(WorldSize, WorldSize, 200.0f)); // Hauteur de détection plus grande
     
     // Mettre à jour les effets visuels de l'eau
     if (WaterDynamicMaterial)
@@ -256,8 +277,21 @@ void UWaterSystem::UpdateWaterMeshAndVolume()
         // Ajouter du temps pour l'animation des vagues
         float Time = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
         WaterDynamicMaterial->SetScalarParameterValue(TEXT("Time"), Time);
+        
+        // Mettre à jour la couleur en fonction de la profondeur
+        float DepthFactor = FMath::GetMappedRangeValueClamped(
+            FVector2D(MinWaterLevel, MaxWaterLevel),
+            FVector2D(0.2f, 1.0f),
+            CurrentWaterLevel
+        );
+        
+        FLinearColor AdjustedColor = WaterColor;
+        AdjustedColor.A = FMath::Clamp(WaterColor.A * DepthFactor, 0.5f, 0.9f);
+        
+        WaterDynamicMaterial->SetVectorParameterValue(TEXT("WaterColor"), AdjustedColor);
     }
 }
+
 
 void UWaterSystem::ApplyUnderwaterEffects(AActor* Actor, bool bIsUnderwater)
 {

@@ -8,6 +8,9 @@
 #include "Engine/World.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Net/UnrealNetwork.h"
+// MODIFICATION 1: Dans EnvironmentalEventsManager.cpp
+// Modifier le constructeur pour initialiser le WaterSystem correctement
+// Vers la ligne 14, mettre à jour:
 
 AEnvironmentalEventsManager::AEnvironmentalEventsManager()
 {
@@ -17,6 +20,14 @@ AEnvironmentalEventsManager::AEnvironmentalEventsManager()
     WaterSystem = CreateDefaultSubobject<UWaterSystem>(TEXT("WaterSystem"));
     RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
     
+    // S'assurer que le WaterSystem est attaché au Root pour être positionné correctement
+    if (WaterSystem)
+    {
+        // Pas besoin d'attacher explicitement - CreateDefaultSubobject le fait déjà
+        // Mais on définit les paramètres initiaux
+        WaterSystem->SetIsReplicated(true);
+    }
+    
     // Initialize variables for water
     bIsWaterRisingActive = false;
     TimeUntilNextWaterEvent = InitialWaterDelay;
@@ -25,7 +36,6 @@ AEnvironmentalEventsManager::AEnvironmentalEventsManager()
     
     // Make sure the actor replicates
     bReplicates = true;
-    WaterSystem->SetIsReplicated(true);
     
     // Initialize other event systems
     bIsEarthquakeActive = false;
@@ -43,6 +53,7 @@ AEnvironmentalEventsManager::AEnvironmentalEventsManager()
     // Initialize turn system
     TurnsUntilNextEvent = 1;
 }
+
 
 
 void AEnvironmentalEventsManager::BeginPlay()
@@ -154,14 +165,13 @@ void AEnvironmentalEventsManager::GetLifetimeReplicatedProps(TArray<FLifetimePro
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     
-    
-    // Add water system properties to replicate
+    // Corriger la réplication de ActiveEventTypes
+    DOREPLIFETIME(AEnvironmentalEventsManager, ActiveEventTypes);
     DOREPLIFETIME(AEnvironmentalEventsManager, bIsWaterRisingActive);
     DOREPLIFETIME(AEnvironmentalEventsManager, TimeUntilNextWaterEvent);
     DOREPLIFETIME(AEnvironmentalEventsManager, bIsEarthquakeActive);
     DOREPLIFETIME(AEnvironmentalEventsManager, CurrentEarthquakeIntensity);
     DOREPLIFETIME(AEnvironmentalEventsManager, CurrentEarthquakeLocation);
-    DOREPLIFETIME(AEnvironmentalEventsManager, ActiveEventTypes);
 }
 
 // ===== FONCTIONS DE GESTION DES ÉVÉNEMENTS =====
@@ -560,8 +570,6 @@ void AEnvironmentalEventsManager::NotifyTurnEnded_Implementation()
 }
 
 // ===== FONCTIONS UTILITAIRES =====
-
-
 void AEnvironmentalEventsManager::InitializeWaterLevel()
 {
     if (!WaterSystem)
@@ -581,6 +589,10 @@ void AEnvironmentalEventsManager::InitializeWaterLevel()
     
     // Initialize WaterSystem
     WaterSystem->SetWaterLevel(InitialLevel, true);
+    
+    // Configurer les limites d'eau basées sur le terrain
+    WaterSystem->MinWaterLevel = InitialLevel;
+    WaterSystem->MaxWaterLevel = AverageHeight + 100.0f; // Légèrement au-dessus du terrain moyen
     
     UE_LOG(LogTemp, Log, TEXT("Water level initialized to %.1f (terrain at %.1f)"), 
         InitialLevel, AverageHeight);

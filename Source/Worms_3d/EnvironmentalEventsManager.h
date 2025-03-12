@@ -66,6 +66,7 @@ public:
     virtual void Tick(float DeltaTime) override;
 
     // ===== PROPRIÉTÉS GÉNÉRALES =====
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", Instanced)
     UWaterSystem* WaterSystem;
 
     UPROPERTY(Replicated, EditDefaultsOnly, BlueprintReadOnly, Category = "Events")
@@ -95,7 +96,7 @@ public:
     bool bWaterRiseFaster = false;
     
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Events|Water")
-    float WaterRisePerTurn = 30.0f;
+    float WaterRisePerTurn = 150.0f;
     
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Events|Water")
     float WaterRiseInterval = 60.0f;
