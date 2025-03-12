@@ -10,6 +10,7 @@
 #include "Blueprint/WidgetBlueprintLibrary.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Worms_3d/AVoxelBuilding.h"
+#include "Worms_3d/EnvironmentalEventsManager.h"
 #include "Worms_3d/GameInitFactorySubsystem.h"
 #include "Worms_3d/VoxelTerrainSettings.h"
 #include "Worms_3d/WormGameInstance.h"
@@ -265,12 +266,12 @@ void AWormGameMode::EndCurrentTurn()
         IWaterSystemInterface* WaterInterface = Cast<IWaterSystemInterface>(WaterSystemManager);
         if (WaterInterface)
         {
-            // Interface pour appeler des méthodes spécifiques
+            // Use interface to call methods
             WaterInterface->Execute_NotifyTurnEnded(WaterSystemManager);
         }
         else
         {
-            // Alternative avec appel direct de fonction nommée si l'interface n'est pas utilisée
+            // Alternative direct function call if interface isn't used
             UFunction* TurnEndedFunction = WaterSystemManager->FindFunction(FName("NotifyTurnEnded"));
             if (TurnEndedFunction)
             {
@@ -830,16 +831,16 @@ void AWormGameMode::StartRestartSequence()
 
 void AWormGameMode::InitializeWaterSystem()
 {
-    // Vérifier si un gestionnaire d'eau existe déjà
+    // Check if a water manager already exists
     TArray<AActor*> FoundActors;
     UGameplayStatics::GetAllActorsOfClass(GetWorld(), WaterSystemManagerClass, FoundActors);
     
     if (FoundActors.Num() > 0)
     {
         WaterSystemManager = FoundActors[0];
-        UE_LOG(LogTemp, Log, TEXT("Gestionnaire d'eau existant trouvé: %s"), *WaterSystemManager->GetName());
+        UE_LOG(LogTemp, Log, TEXT("Found existing water manager: %s"), *WaterSystemManager->GetName());
     }
-    // Si aucun gestionnaire n'existe, en créer un
+    // If no manager exists, create one
     else if (WaterSystemManagerClass)
     {
         FActorSpawnParameters SpawnParams;
@@ -854,15 +855,15 @@ void AWormGameMode::InitializeWaterSystem()
         
         if (WaterSystemManager)
         {
-            UE_LOG(LogTemp, Log, TEXT("Gestionnaire d'eau créé"));
+            UE_LOG(LogTemp, Log, TEXT("Water manager created successfully"));
         }
         else
         {
-            UE_LOG(LogTemp, Error, TEXT("Échec de la création du gestionnaire d'eau"));
+            UE_LOG(LogTemp, Error, TEXT("Failed to create water manager"));
         }
     }
     else
     {
-        UE_LOG(LogTemp, Warning, TEXT("WaterSystemManagerClass non définie dans le GameMode"));
+        UE_LOG(LogTemp, Warning, TEXT("WaterSystemManagerClass not set in GameMode"));
     }
 }

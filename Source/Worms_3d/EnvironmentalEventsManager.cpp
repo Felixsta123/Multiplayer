@@ -530,31 +530,19 @@ void AEnvironmentalEventsManager::ShakeCamera(float Intensity)
 
 // ===== FONCTIONS DE NOTIFICATION =====
 
-void AEnvironmentalEventsManager::NotifyTurnEnded()
+void AEnvironmentalEventsManager::NotifyTurnEnded_Implementation()
 {
-    if (!HasAuthority())
-    {
-        return;
-    }
+    UE_LOG(LogTemp, Log, TEXT("EnvironmentalEventsManager: Turn ended notification received"));
     
-    TurnCounter++;
-    
-    // Vérifier si c'est le moment pour un événement basé sur les tours
-    if (--TurnsUntilNextEvent <= 0)
-    {
-        TriggerRandomEvent();
-    }
-    
-    // Si l'eau monte à chaque tour et qu'elle est active
-    if (bRiseAfterEachTurn && bIsWaterRisingActive && EnumHasAnyFlags(ActiveEventTypes, EEventType::Water))
+    // If water is active and should rise after each turn
+    if (bIsWaterRisingActive && bRiseAfterEachTurn && EnumHasAnyFlags(ActiveEventTypes, EEventType::Water))
     {
         RaiseWater();
     }
     
-    UE_LOG(LogTemp, Log, TEXT("Tour %d terminé, %d tours avant le prochain événement"),
-        TurnCounter, TurnsUntilNextEvent);
+    // Update turn counter
+    TurnCounter++;
 }
-
 // ===== FONCTIONS UTILITAIRES =====
 
 AEnvironmentalEventsManager* AEnvironmentalEventsManager::GetEventsManager(const UObject* WorldContextObject)
@@ -789,4 +777,4 @@ void AEnvironmentalEventsManager::LowerWater(float Amount)
     // Vérifier si des personnages sont en danger
     CheckForDangerousWaterLevel();
 }
-    
+

@@ -5,6 +5,25 @@
 #include "WaterSystem.h"
 #include "EnvironmentalEventsManager.generated.h"
 
+
+
+UINTERFACE(MinimalAPI)
+class UWaterSystemInterface : public UInterface
+{
+    GENERATED_BODY()
+};
+
+class WORMS_3D_API IWaterSystemInterface
+{
+    GENERATED_BODY()
+
+public:
+    // Method to notify the water system about turn end
+    UFUNCTION(BlueprintNativeEvent, Category = "Water System")
+    void NotifyTurnEnded();
+};
+
+
 // Types d'événements environnementaux
 UENUM(BlueprintType, meta = (Bitflags))
 enum class EEventType : uint8
@@ -85,7 +104,7 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Events|Water")
     bool bWaterRiseFaster = false;
     
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Events|Water", meta = (EditCondition = "bRiseAfterEachTurn"))
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Events|Water")
     float WaterRisePerTurn = 30.0f;
     
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Events|Water")
@@ -171,7 +190,7 @@ public:
     void OnEarthquakeEnd();
     
     // ===== LIAISON AVEC LE SYSTÈME DE TOURS =====
-    UFUNCTION(BlueprintCallable, Category = "Events")
+    UFUNCTION(BlueprintNativeEvent, Category = "Water")
     void NotifyTurnEnded();
     
     // ===== OBTENTION D'UNE RÉFÉRENCE =====
