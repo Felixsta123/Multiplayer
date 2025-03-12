@@ -6,6 +6,7 @@
 #include "../AWormCharacter.h"
 #include "Worms_3d/AVoxelBuilding.h" // Added VoxelBuilding include
 #include "../W_GameLoadingScreen.h"
+#include "../WaterSystem.h"
 #include "WormGameMode.generated.h"
 
 UCLASS()
@@ -63,6 +64,15 @@ public:
     UPROPERTY(BlueprintReadWrite, Category = "Turns")
     float RemainingTurnTime;
 
+    // Ajouter dans la déclaration de classe:
+     UPROPERTY(EditDefaultsOnly, Category = "Water System")
+     TSubclassOf<AActor> WaterSystemManagerClass;
+    
+     UPROPERTY(BlueprintReadOnly, Category = "Water System")
+     AActor* WaterSystemManager;
+    
+     UFUNCTION(BlueprintCallable, Category = "Water System")
+     void InitializeWaterSystem();
     
     // Available weapon types for distribution to players
     UPROPERTY(EditDefaultsOnly, Category = "Weapons")

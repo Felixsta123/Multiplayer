@@ -45,7 +45,9 @@ void AWormGameMode::BeginPlay()
     {
         // Setup the game initialization manager
         GameInitManager = SetupGameInitialization();
-        
+        //TODO: move the next function in the game init manager
+        InitializeWaterSystem();
+
         // Let the game init manager handle the initialization sequence
         // (it will call our functions in the proper order)
     }
@@ -258,6 +260,24 @@ void AWormGameMode::StartNextTurn()
 void AWormGameMode::EndCurrentTurn()
 {
     // Cancel current timer
+    if (WaterSystemManager)
+    {
+        IWaterSystemInterface* WaterInterface = Cast<IWaterSystemInterface>(WaterSystemManager);
+        if (WaterInterface)
+        {
+            // Interface pour appeler des méthodes spécifiques
+            WaterInterface->Execute_NotifyTurnEnded(WaterSystemManager);
+        }
+        else
+        {
+            // Alternative avec appel direct de fonction nommée si l'interface n'est pas utilisée
+            UFunction* TurnEndedFunction = WaterSystemManager->FindFunction(FName("NotifyTurnEnded"));
+            if (TurnEndedFunction)
+            {
+                WaterSystemManager->ProcessEvent(TurnEndedFunction, nullptr);
+            }
+        }
+    }
     GetWorldTimerManager().ClearTimer(TurnTimerHandle);
     
     // Get active controller
@@ -804,5 +824,45 @@ void AWormGameMode::StartRestartSequence()
     else
     {
         UE_LOG(LogTemp, Error, TEXT("Cannot restart: GameInitManager is null"));
+    }
+}
+
+
+void AWormGameMode::InitializeWaterSystem()
+{
+    // Vérifier si un gestionnaire d'eau existe déjà
+    TArray<AActor*> FoundActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), WaterSystemManagerClass, FoundActors);
+    
+    if (FoundActors.Num() > 0)
+    {
+        WaterSystemManager = FoundActors[0];
+        UE_LOG(LogTemp, Log, TEXT("Gestionnaire d'eau existant trouvé: %s"), *WaterSystemManager->GetName());
+    }
+    // Si aucun gestionnaire n'existe, en créer un
+    else if (WaterSystemManagerClass)
+    {
+        FActorSpawnParameters SpawnParams;
+        SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+        
+        WaterSystemManager = GetWorld()->SpawnActor<AActor>(
+            WaterSystemManagerClass,
+            FVector::ZeroVector,
+            FRotator::ZeroRotator,
+            SpawnParams
+        );
+        
+        if (WaterSystemManager)
+        {
+            UE_LOG(LogTemp, Log, TEXT("Gestionnaire d'eau créé"));
+        }
+        else
+        {
+            UE_LOG(LogTemp, Error, TEXT("Échec de la création du gestionnaire d'eau"));
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("WaterSystemManagerClass non définie dans le GameMode"));
     }
 }
