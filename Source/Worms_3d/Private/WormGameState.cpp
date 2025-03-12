@@ -229,24 +229,57 @@ void AWormGameState::CheckGameOverCondition()
 {
     if (HasAuthority() && !bGameOver)
     {
-        // Count alive players
-        int32 AliveCount = 0;
-        FString LastAlivePlayerName = TEXT("");
+        UE_LOG(LogTemp, Warning, TEXT("Checking game over condition"));
         
-        for (int32 i = 0; i < PlayerNames.Num(); i++)
+        // Méthode directe: Compter le nombre de personnages vivants dans le monde
+        TArray<AActor*> AllWormChars;
+        UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormCharacter::StaticClass(), AllWormChars);
+        
+        int32 AliveCount = 0;
+        AWormCharacter* LastAliveChar = nullptr;
+        
+        for (AActor* Actor : AllWormChars)
         {
-            if (PlayerIsAlive.IsValidIndex(i) && PlayerIsAlive[i])
+            AWormCharacter* Character = Cast<AWormCharacter>(Actor);
+            if (Character && Character->GetHealth() > 0)
             {
                 AliveCount++;
-                LastAlivePlayerName = PlayerNames[i];
+                LastAliveChar = Character;
+                UE_LOG(LogTemp, Warning, TEXT("Character %s is alive with health %.1f"), 
+                   *Character->GetName(), Character->GetHealth());
+            }
+            else if (Character)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("Character %s is dead with health %.1f"), 
+                   *Character->GetName(), Character->GetHealth());
             }
         }
         
-        // Game over when only one player remains
-        if (AliveCount <= 1 && !LastAlivePlayerName.IsEmpty())
+        UE_LOG(LogTemp, Warning, TEXT("Found %d alive characters"), AliveCount);
+        
+        // Game over si un seul joueur est encore vivant
+        if (AliveCount <= 1 && LastAliveChar)
         {
-            UE_LOG(LogTemp, Warning, TEXT("Game over! Winner: %s"), *LastAlivePlayerName);
-            TriggerGameOver(LastAlivePlayerName);
+            UE_LOG(LogTemp, Warning, TEXT("Game over! Winner is %s"), *LastAliveChar->GetName());
+            
+            // Trouver le nom du joueur gagnant
+             WinnerName = LastAliveChar->GetName();
+            AController* WinnerController = LastAliveChar->GetController();
+            
+            if (WinnerController)
+            {
+                // Trouver l'index du contrôleur pour obtenir le nom correct
+                for (int32 i = 0; i < PlayerNames.Num(); i++)
+                {
+                    if (WinnerController == UGameplayStatics::GetPlayerController(GetWorld(), i))
+                    {
+                        WinnerName = PlayerNames[i];
+                        break;
+                    }
+                }
+            }
+            
+            TriggerGameOver(WinnerName);
         }
     }
 }

@@ -701,9 +701,16 @@ void AWormCharacter::SpawnCurrentWeapon()
 }
 void AWormCharacter::ApplyDamageToWorm(float DamageAmount, FVector ImpactDirection)
 {
+    // Valeur de santé avant d'appliquer les dégâts
+    float PreviousHealth = Health;
+    
     // Appliquer les dégâts
     Health = FMath::Max(0.0f, Health - DamageAmount);
-        
+    
+    // Log pour voir les changements de santé
+    UE_LOG(LogTemp, Warning, TEXT("Character %s: Health changed from %.1f to %.1f (damage: %.1f)"), 
+           *GetName(), PreviousHealth, Health, DamageAmount);
+    
     // L'impulsion est déjà incluse dans ImpactDirection, ne pas multiplier à nouveau
     // Juste normaliser pour être sûr
     ApplyMovementImpulse(ImpactDirection.GetSafeNormal(), ImpactDirection.Size());
@@ -721,19 +728,53 @@ void AWormCharacter::ApplyDamageToWorm(float DamageAmount, FVector ImpactDirecti
     // Vérifier si le personnage est mort
     if (Health <= 0)
     {
+        UE_LOG(LogTemp, Warning, TEXT("Character %s died!"), *GetName());
+    
         // Update player alive status in game state
         AWormGameState* GameState = Cast<AWormGameState>(UGameplayStatics::GetGameState(this));
         if (GameState)
         {
-            // Find this character's name in the player names array
-            FString MyName = GetName();
-            int32 MyIndex = GameState->PlayerNames.Find(MyName);
-            if (MyIndex != INDEX_NONE)
+            // Trouver notre index
+            int32 MyIndex = -1;
+        
+            AController* MyController = GetController();
+            if (MyController)
             {
-                GameState->PlayerIsAlive[MyIndex] = false;
+                // Chercher cet index parmi tous les contrôleurs
+                for (int32 i = 0; i < GameState->PlayerNames.Num(); i++)
+                {
+                    if (MyController == UGameplayStatics::GetPlayerController(GetWorld(), i))
+                    {
+                        MyIndex = i;
+                        break;
+                    }
+                }
             
-                // Check if game is over
-                GameState->CheckGameOverCondition();
+                // Si on n'a pas trouvé par le contrôleur, essayer avec l'index du joueur
+                if (MyIndex == -1 && GameState->PlayerNames.Num() > 0)
+                {
+                    // Solution de secours : utiliser index 0 si c'est le joueur local, 1 sinon
+                    MyIndex = IsLocallyControlled() ? 0 : 1;
+                    UE_LOG(LogTemp, Warning, TEXT("Using fallback index %d for %s"), MyIndex, *GetName());
+                }
+            
+                // Si on a trouvé un index valide, marquer le joueur comme mort
+                if (MyIndex != INDEX_NONE && GameState->PlayerIsAlive.IsValidIndex(MyIndex))
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("Setting player at index %d as not alive"), MyIndex);
+                    GameState->PlayerIsAlive[MyIndex] = false;
+                
+                    // Vérifier la condition de fin de partie
+                    GameState->CheckGameOverCondition();
+                }
+                else
+                {
+                    UE_LOG(LogTemp, Error, TEXT("Invalid player index %d"), MyIndex);
+                }
+            }
+            else
+            {
+                UE_LOG(LogTemp, Error, TEXT("Character %s has no controller!"), *GetName());
             }
         }
     }
