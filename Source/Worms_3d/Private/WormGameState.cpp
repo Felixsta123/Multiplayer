@@ -3,6 +3,7 @@
 #include "Net/Core/PushModel/PushModel.h"
 #include "Kismet/GameplayStatics.h"
 #include "WormGameMode.h"
+#include "WormPlayerController.h"
 #include "Worms_3d/AVoxelBuilding.h"
 
 AWormGameState::AWormGameState()
@@ -34,40 +35,48 @@ void AWormGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 
 void AWormGameState::UpdatePlayerList(const TArray<AController*>& Controllers)
 {
-    // Empty lists
     PlayerNames.Empty();
     PlayerIsAlive.Empty();
     
-    UE_LOG(LogTemp, Log, TEXT("Updating player list with %d controllers"), Controllers.Num());
-    
-    // Add name of each player and their status
     for (AController* Controller : Controllers)
     {
         if (Controller)
         {
-            FString PlayerName = Controller->GetName();
-            bool IsAlive = false;
+            FString PlayerName;
+            AWormPlayerController* WPC = Cast<AWormPlayerController>(Controller);
             
-            // Check if controller has a pawn and if it's alive
+            // Si c'est un WormPlayerController avec un nom personnalisé, utiliser ce nom
+            if (WPC && !WPC->PlayerSettings.MyPlayerName.IsEmpty())
+            {
+                PlayerName = WPC->PlayerSettings.MyPlayerName.ToString();
+            }
+            else
+            {
+                // Sinon, fallback au nom du Pawn
+                if (Controller->GetPawn())
+                {
+                    PlayerName = Controller->GetPawn()->GetName();
+                }
+                else
+                {
+                    PlayerName = Controller->GetName();
+                }
+            }
+            
+            bool IsAlive = false;
             AWormCharacter* Character = nullptr;
+            
             if (Controller->GetPawn())
             {
                 Character = Cast<AWormCharacter>(Controller->GetPawn());
-                PlayerName = Controller->GetPawn()->GetName();
             }
             
-            // Determine if player is alive
             IsAlive = (Character && Character->GetHealth() > 0);
             
             PlayerNames.Add(PlayerName);
             PlayerIsAlive.Add(IsAlive);
-            
-            UE_LOG(LogTemp, Log, TEXT("Added player: %s (Alive: %s)"), 
-                *PlayerName, IsAlive ? TEXT("Yes") : TEXT("No"));
         }
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Player list updated, now contains %d players"), PlayerNames.Num());
 }
 
 // Improve GetRemainingPlayersCount to only count alive players

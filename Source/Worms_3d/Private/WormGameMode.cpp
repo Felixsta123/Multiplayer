@@ -6,6 +6,7 @@
 #include "Blueprint/UserWidget.h"
 #include "Kismet/GameplayStatics.h"
 #include "WormGameState.h"
+#include "WormPlayerController.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Worms_3d/AVoxelBuilding.h"
@@ -187,31 +188,38 @@ void AWormGameMode::StartNextTurn()
 
     // Get active controller
     AController* ActiveController = AllPlayerControllers[CurrentPlayerIndex];
-    UE_LOG(LogTemp, Log, TEXT("Starting turn for player index %d: %s"),
-        CurrentPlayerIndex, *ActiveController->GetName());
-
-    // Make sure to use pawn name and not controller
     FString PlayerName;
-    AWormCharacter* ActiveCharacter = GetWormCharacterFromController(ActiveController);
-    if (ActiveCharacter)
+    AWormPlayerController* WPC = Cast<AWormPlayerController>(ActiveController);
+
+    if (WPC && !WPC->PlayerSettings.MyPlayerName.IsEmpty())
     {
-        PlayerName = ActiveCharacter->GetName();
+        PlayerName = WPC->PlayerSettings.MyPlayerName.ToString();
     }
     else
     {
-        PlayerName = ActiveController->GetName();
+        // Fallback to pawn name if necessary
+        AWormCharacter* ActiveCharacter = GetWormCharacterFromController(ActiveController);
+        if (ActiveCharacter)
+        {
+            PlayerName = ActiveCharacter->GetName();
+        }
+        else
+        {
+            PlayerName = ActiveController->GetName();
+        }
     }
 
-    // IMPORTANT: Use new function to define active player with correct name
+    // Use the retrieved name
     if (WormGS)
     {
         WormGS->SetCurrentPlayerByIndex(CurrentPlayerIndex);
+        WormGS->CurrentPlayerName = PlayerName; // Ensure this line is present
         WormGS->TurnDuration = TurnDuration;
 
-        // Additional logging
-        UE_LOG(LogTemp, Log, TEXT("Turn duration set to %.1f seconds, player name: %s"),
-            TurnDuration, *WormGS->CurrentPlayerName);
+        // Force network update
+        WormGS->ForceNetUpdate();
     }
+
 
     // Deactivate all characters
     for (AController* Controller : AllPlayerControllers)
@@ -227,9 +235,9 @@ void AWormGameMode::StartNextTurn()
              Character->AttachWeaponToSocket(Character->CurrentWeapon);
         }
     }
-
+    
     // Activate character of active controller
-    ActiveCharacter = GetWormCharacterFromController(ActiveController);
+    AWormCharacter* ActiveCharacter = GetWormCharacterFromController(ActiveController);
     if (ActiveCharacter)
     {
         ActiveCharacter->SetIsMyTurn(true);
