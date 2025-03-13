@@ -570,7 +570,6 @@ void AEnvironmentalEventsManager::NotifyTurnEnded_Implementation()
     }
 }
 
-// ===== FONCTIONS UTILITAIRES =====
 void AEnvironmentalEventsManager::InitializeWaterLevel()
 {
     if (!WaterSystem)
@@ -593,7 +592,8 @@ void AEnvironmentalEventsManager::InitializeWaterLevel()
     
     // Configurer les limites d'eau basées sur le terrain
     WaterSystem->MinWaterLevel = InitialLevel;
-    WaterSystem->MaxWaterLevel = AverageHeight + 100.0f; // Légèrement au-dessus du terrain moyen
+   // WaterSystem->MaxWaterLevel = AverageHeight + 100.0f; // Légèrement au-dessus du terrain moyen
+    WaterSystem->MaxWaterLevel = 1000; // Légèrement au-dessus du terrain moyen
     
     UE_LOG(LogTemp, Log, TEXT("Water level initialized to %.1f (terrain at %.1f)"), 
         InitialLevel, AverageHeight);
