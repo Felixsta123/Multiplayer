@@ -290,7 +290,7 @@ void AEnvironmentalEventsManager::RaiseWater(float Amount)
     }
     
     // Make the water rise (not lower)
-    WaterSystem->RaiseWaterLevel(Amount);
+    WaterSystem->SetWaterLevel(WaterSystem->GetCurrentWaterLevel() + Amount, false);
     
     // Create an event for notification
     FEnvironmentalEventData EventData;
@@ -303,11 +303,12 @@ void AEnvironmentalEventsManager::RaiseWater(float Amount)
     // Blueprint notification
     OnEventTriggered(EventData);
     
-    UE_LOG(LogTemp, Log, TEXT("Water rose by %.1f units"), Amount);
+    UE_LOG(LogTemp, Log, TEXT("Water rose by %.1f units. Current level: %.1f"), Amount, WaterSystem->GetCurrentWaterLevel());
     
     // Check if any characters are in danger
     CheckForDangerousWaterLevel();
 }
+
 // ===== FONCTIONS DES TREMBLEMENTS DE TERRE =====
 
 void AEnvironmentalEventsManager::TriggerEarthquake(float Intensity, FVector Location)

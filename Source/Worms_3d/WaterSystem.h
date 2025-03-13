@@ -90,7 +90,6 @@ public:
 
 	void KillCharacterInWater(AActor* Character);
 
-public:
     // Paramètres d'apparence de l'eau
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water|Appearance")
     UStaticMesh* WaterMesh;
@@ -109,7 +108,7 @@ public:
     float MinWaterLevel = -1000.0f;
     
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water|Behavior")
-    float MaxWaterLevel = 500.0f;
+    float MaxWaterLevel = 5000.0f;
     
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water|Behavior")
     float WaterRiseSpeed = 20.0f;
@@ -139,7 +138,13 @@ public:
     // Paramètres du post-process subaquatique
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water|Underwater")
     bool bEnableUnderwaterEffects = true;
-    
+
+
+	UFUNCTION(NetMulticast, Reliable)
+	void Multicast_SetWaterLevel(float NewLevel, bool bImmediate);
+
+	UFUNCTION(Server, Reliable)
+	void Server_SetWaterLevel(float NewLevel, bool bImmediate);
 protected:
     // Composants internes
     UPROPERTY()
@@ -154,9 +159,12 @@ protected:
     UPROPERTY()
     APostProcessVolume* UnderwaterPostProcess;
     
-    // Variables d'état
-    float CurrentWaterLevel;
-    float TargetWaterLevel;
+	UPROPERTY(Replicated)
+	float CurrentWaterLevel;
+
+	UPROPERTY(Replicated)
+	float TargetWaterLevel;
+
     bool bIsWaterRising;
     
     // Variables pour cycle automatique

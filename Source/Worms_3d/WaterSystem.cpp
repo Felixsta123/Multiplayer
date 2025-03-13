@@ -9,6 +9,7 @@
 #include "WormGameMode.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
+#include "Net/Core/PushModel/PushModel.h"
 
 UWaterSystem::UWaterSystem()
 {
@@ -121,8 +122,16 @@ void UWaterSystem::BeginPlay()
     }
     
     UE_LOG(LogTemp, Log, TEXT("WaterSystem initialized at level %.1f"), CurrentWaterLevel);
+    
 }
 
+void UWaterSystem::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+    
+    DOREPLIFETIME(UWaterSystem, CurrentWaterLevel);
+    DOREPLIFETIME(UWaterSystem, TargetWaterLevel);
+}
 
 void UWaterSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
@@ -158,34 +167,51 @@ void UWaterSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorCom
         HandleCycleUpdate(DeltaTime);
     }
 }
-
 void UWaterSystem::SetWaterLevel(float NewLevel, bool bImmediate)
 {
-    // Limit height to configured range
+    if (!GetOwner() || !GetOwner()->HasAuthority())
+    {
+        Server_SetWaterLevel(NewLevel, bImmediate);
+        return;
+    }
+
     NewLevel = FMath::Clamp(NewLevel, MinWaterLevel, MaxWaterLevel);
-    
-    // Determine if water is rising or lowering
     bIsWaterRising = (NewLevel > CurrentWaterLevel);
-    
-    // Store target
     TargetWaterLevel = NewLevel;
-    
-    // If immediate change, update directly
+
     if (bImmediate)
     {
         CurrentWaterLevel = TargetWaterLevel;
         UpdateWaterMeshAndVolume();
-        
-        // Send visual update to clients
-        if (GetOwnerRole() == ROLE_Authority)
-        {
-            Multicast_UpdateWaterVisuals(CurrentWaterLevel);
-        }
     }
-    
-    UE_LOG(LogTemp, Verbose, TEXT("Water level changing to %.1f (currently: %.1f, %s)"), 
-        TargetWaterLevel, CurrentWaterLevel, bIsWaterRising ? TEXT("rising") : TEXT("lowering"));
+
+    // Force replication
+    MARK_PROPERTY_DIRTY_FROM_NAME(UWaterSystem, CurrentWaterLevel, this);
+    MARK_PROPERTY_DIRTY_FROM_NAME(UWaterSystem, TargetWaterLevel, this);
+
+    // Notify all clients
+    Multicast_SetWaterLevel(NewLevel, bImmediate);
 }
+
+void UWaterSystem::Server_SetWaterLevel_Implementation(float NewLevel, bool bImmediate)
+{
+    SetWaterLevel(NewLevel, bImmediate);
+}
+
+void UWaterSystem::Multicast_SetWaterLevel_Implementation(float NewLevel, bool bImmediate)
+{
+    if (!GetOwner()->HasAuthority())
+    {
+        TargetWaterLevel = NewLevel;
+        if (bImmediate)
+        {
+            CurrentWaterLevel = NewLevel;
+        }
+        UpdateWaterMeshAndVolume();
+    }
+}
+
+
 
 void UWaterSystem::RaiseWaterLevel(float AmountToRaise)
 {
