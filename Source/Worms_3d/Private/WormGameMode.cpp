@@ -127,126 +127,77 @@ AWormCharacter* AWormGameMode::GetWormCharacterFromController(AController* Contr
 
 void AWormGameMode::StartNextTurn()
 {
-    // Check if there are active controllers
-    if (AllPlayerControllers.Num() == 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("No active controllers found!"));
-        return;
-    }
+    if (AllPlayerControllers.Num() == 0) return;
 
-    // First, recollect controllers to ensure our list is up to date
-    GatherAllPlayerControllers();
-
-    // Check if the game is over
-    if (CheckGameEndCondition())
-    {
-        // Handle game end
-        return;
-    }
-
-    // Update GameState - IMPORTANT: do this BEFORE changing active player
     AWormGameState* WormGS = GetGameState<AWormGameState>();
-    if (WormGS)
+    if (!WormGS) return;
+
+    // Progression des index
+    CurrentCharacterIndex++;
+    if (CurrentCharacterIndex >= CharactersPerTeam)
     {
-        // First, update player list with freshly collected list
-        WormGS->UpdatePlayerList(AllPlayerControllers);
+        CurrentCharacterIndex = 0;
+        CurrentTeamIndex = (CurrentTeamIndex + 1) % NumTeams;
     }
-    
-    // Find next valid player
-    int32 OriginalIndex = CurrentPlayerIndex;
-    bool FoundValidPlayer = false;
+
+    // Recherche du prochain personnage valide
+    bool foundValidCharacter = false;
+    int32 originalTeamIndex = CurrentTeamIndex;
+    int32 originalCharIndex = CurrentCharacterIndex;
 
     do {
-        // Move to next player
-        CurrentPlayerIndex = (CurrentPlayerIndex + 1) % AllPlayerControllers.Num();
-
-        // Check if this player is valid (alive)
-        AController* Controller = AllPlayerControllers[CurrentPlayerIndex];
-        AWormCharacter* Character = GetWormCharacterFromController(Controller);
-
-        if (Character && Character->GetHealth() > 0)
+        TArray<AWormCharacter*> TeamMembers = WormGS->GetTeamMembers(CurrentTeamIndex);
+        if (TeamMembers.IsValidIndex(CurrentCharacterIndex))
         {
-            FoundValidPlayer = true;
-            break;
+            AWormCharacter* Character = TeamMembers[CurrentCharacterIndex];
+            if (Character && Character->GetHealth() > 0)
+            {
+                foundValidCharacter = true;
+                break;
+            }
         }
 
-        // If we've done a full loop and haven't found a valid player
-        if (CurrentPlayerIndex == OriginalIndex)
+        // Passage au personnage/équipe suivant si non valide
+        CurrentCharacterIndex++;
+        if (CurrentCharacterIndex >= CharactersPerTeam)
         {
-            UE_LOG(LogTemp, Warning, TEXT("No valid players found for next turn!"));
-            return;
+            CurrentCharacterIndex = 0;
+            CurrentTeamIndex = (CurrentTeamIndex + 1) % NumTeams;
         }
 
-    } while (!FoundValidPlayer);
+    } while (!foundValidCharacter && 
+             (CurrentTeamIndex != originalTeamIndex || 
+              CurrentCharacterIndex != originalCharIndex));
 
-    // Get active controller
-    AController* ActiveController = AllPlayerControllers[CurrentPlayerIndex];
-    FString PlayerName;
-    AWormPlayerController* WPC = Cast<AWormPlayerController>(ActiveController);
-
-    if (WPC && !WPC->PlayerSettings.MyPlayerName.IsEmpty())
+    if (!foundValidCharacter)
     {
-        PlayerName = WPC->PlayerSettings.MyPlayerName.ToString();
+        CheckGameEndCondition();
+        return;
     }
-    else
+
+    // Activation du personnage
+    TArray<AWormCharacter*> TeamMembers = WormGS->GetTeamMembers(CurrentTeamIndex);
+    if (TeamMembers.IsValidIndex(CurrentCharacterIndex))
     {
-        // Fallback to pawn name if necessary
-        AWormCharacter* ActiveCharacter = GetWormCharacterFromController(ActiveController);
+        AWormCharacter* ActiveCharacter = TeamMembers[CurrentCharacterIndex];
         if (ActiveCharacter)
         {
-            PlayerName = ActiveCharacter->GetName();
-        }
-        else
-        {
-            PlayerName = ActiveController->GetName();
-        }
-    }
+            // Désactiver tous les autres personnages
+            for (AController* Controller : AllPlayerControllers)
+            {
+                if (AWormCharacter* Character = GetWormCharacterFromController(Controller))
+                {
+                    Character->SetIsMyTurn(Character == ActiveCharacter);
+                }
+            }
 
-    // Use the retrieved name
-    if (WormGS)
-    {
-        WormGS->SetCurrentPlayerByIndex(CurrentPlayerIndex);
-        WormGS->CurrentPlayerName = PlayerName; // Ensure this line is present
-        WormGS->TurnDuration = TurnDuration;
-
-        // Force network update
-        WormGS->ForceNetUpdate();
-    }
-
-
-    // Deactivate all characters
-    for (AController* Controller : AllPlayerControllers)
-    {
-        AWormCharacter* Character = GetWormCharacterFromController(Controller);
-        if (Character)
-        {
-            Character->SetIsMyTurn(false);
-        }
-        if (Character && Character->CurrentWeapon)
-        {
-            // Force weapon synchronization for each player
-             Character->AttachWeaponToSocket(Character->CurrentWeapon);
+            // Mise à jour du GameState
+            WormGS->SetCurrentPlayerByIndex(CurrentTeamIndex * CharactersPerTeam + CurrentCharacterIndex);
+            StartTurnTimer();
         }
     }
-    
-    // Activate character of active controller
-    AWormCharacter* ActiveCharacter = GetWormCharacterFromController(ActiveController);
-    if (ActiveCharacter)
-    {
-        ActiveCharacter->SetIsMyTurn(true);
-
-        // Log to verify character is activated
-        UE_LOG(LogTemp, Log, TEXT("Activated character: %s (Is it local: %s)"),
-            *ActiveCharacter->GetName(),
-            ActiveController->IsLocalController() ? TEXT("Yes") : TEXT("No"));
-    }
-
-    // Call turn start event
-    OnTurnStarted(ActiveController);
-
-    // Start timer for this turn
-    GetWorldTimerManager().SetTimer(TurnTimerHandle, this, &AWormGameMode::OnTurnTimeExpired, TurnDuration, false);
 }
+
 
 void AWormGameMode::EndCurrentTurn()
 {
@@ -879,10 +830,16 @@ void AWormGameMode::CheckAllPlayersReady()
         GameInitManager = SetupGameInitialization();
         UE_LOG(LogTemp, Log, TEXT("All players ready, starting initialization sequence : %d"), ReadyPlayers.Num());
         // Show loading screen first
+        // Par défaut, on commence avec la première équipe et le premier personnage
+        CurrentTeamIndex = 0;
+        CurrentCharacterIndex = 0;
         AWormGameState* WormGS = GetGameState<AWormGameState>();
         if (WormGS && WormGS->LoadingManager)
         {
+            NumTeams = ExpectedPlayers;
             WormGS->ShowLoadingScreen(10.0f);
+            WormGS->InitializeTeams(NumTeams);
+
         }
         
         // Start initialization after brief delay
@@ -899,5 +856,16 @@ void AWormGameMode::CheckAllPlayersReady()
             1.0f,
             false
         );
+    }
+}
+
+void AWormGameMode::StartTurnTimer()
+{
+    GetWorldTimerManager().SetTimer(TurnTimerHandle, this, &AWormGameMode::OnTurnTimeExpired, TurnDuration, false);
+    
+    AWormGameState* WormGS = GetGameState<AWormGameState>();
+    if (WormGS)
+    {
+        WormGS->RemainingTurnTime = TurnDuration;
     }
 }

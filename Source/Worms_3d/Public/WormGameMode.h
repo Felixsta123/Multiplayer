@@ -126,7 +126,23 @@ public:
     void ShowGameOverWidget();
     void StartRestartSequence();
     virtual void NotifyPlayerReady(APlayerController* PC);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Teams")
+    int32 NumTeams;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Teams")
+    int32 CharactersPerTeam = 3;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Teams")
+    int32 CurrentTeamIndex;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Teams")
+    int32 CurrentCharacterIndex;
+
+    UFUNCTION()
+    void StartTurnTimer();
+    // Offset pour les positions de spawn d'une même équipe
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Setup")
+    float TeamSpawnOffset = 100.0f;
 protected:
     // Miscellaneous variables 
     UPROPERTY(BlueprintReadWrite, Category = "Game")

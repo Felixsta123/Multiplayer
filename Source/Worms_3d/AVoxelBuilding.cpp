@@ -122,6 +122,7 @@ void AImprovedVoxelBuilding::InitializeVoxelGrid()
 
 void AImprovedVoxelBuilding::CreateMesh()
 {
+    UE_LOG(LogTemp, Warning, TEXT("Creating building mesh"));
     // Optimization 1: Pre-allocate arrays with estimated capacity
     const int32 EstimatedFaces = GridSizeX * GridSizeY * GridSizeZ * 3; // Conservative estimate
     const int32 EstimatedVertices = EstimatedFaces * 4;

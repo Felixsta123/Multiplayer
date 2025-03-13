@@ -96,24 +96,6 @@ int32 AWormGameState::GetRemainingPlayersCount() const
     return AliveCount;
 }
 
-// Add this function to update active player
-void AWormGameState::SetCurrentPlayer(int32 PlayerIndex)
-{
-    CurrentPlayerIndex = PlayerIndex;
-    
-    // Update active player name for easier replication
-    if (PlayerNames.IsValidIndex(CurrentPlayerIndex))
-    {
-        CurrentPlayerName = PlayerNames[CurrentPlayerIndex];
-        UE_LOG(LogTemp, Log, TEXT("Current player set to: %s (index: %d)"), 
-            *CurrentPlayerName, CurrentPlayerIndex);
-    }
-    else
-    {
-        CurrentPlayerName = TEXT("No active player");
-        UE_LOG(LogTemp, Warning, TEXT("Invalid player index: %d"), CurrentPlayerIndex);
-    }
-}
 
 void AWormGameState::SetCurrentPlayerByIndex(int32 NewIndex)
 {
@@ -343,23 +325,42 @@ void AWormGameState::Multicast_ShowGameOverWidget_Implementation()
         }
     }
 }
-TArray<FString> AWormGameState::GetPlayersRankedByDamage() const
+
+
+TArray<AWormCharacter*> AWormGameState::GetTeamMembers(int32 TeamIndex) const
 {
-    TArray<FString> RankedPlayers;
-    
-    // Create a copy we can sort
-    TArray<FPlayerDamageInfo> SortedDamageStats = PlayerDamageDealt;
-    
-    // Sort by damage (descending)
-    SortedDamageStats.Sort([](const FPlayerDamageInfo& A, const FPlayerDamageInfo& B) {
-        return A.DamageValue > B.DamageValue;
-    });
-    
-    // Extract names in order
-    for (const auto& DamageInfo : SortedDamageStats)
+    if (Teams.IsValidIndex(TeamIndex))
     {
-        RankedPlayers.Add(DamageInfo.PlayerName);
+        return Teams[TeamIndex].TeamMembers;
+    }
+    return TArray<AWormCharacter*>();
+}
+
+void AWormGameState::InitializeTeams(int32 NumTeams)
+{
+    Teams.Empty();
+    
+    for (int32 i = 0; i < NumTeams; i++)
+    {
+        FTeamInfo NewTeam;
+        NewTeam.TeamId = i;
+        NewTeam.TeamName = FString::Printf(TEXT("Team %d"), i + 1);
+        // Assigner une couleur unique à chaque équipe
+        float Hue = (float)i / NumTeams;
+        NewTeam.TeamColor = FLinearColor::MakeFromHSV8(Hue * 255, 200, 200);
+        Teams.Add(NewTeam);
     }
     
-    return RankedPlayers;
+    ForceNetUpdate();
+}
+
+void AWormGameState::AddCharacterToTeam(AWormCharacter* Character, int32 TeamId)
+{
+    if (!Character) return;
+    
+    if (Teams.IsValidIndex(TeamId))
+    {
+        Teams[TeamId].TeamMembers.Add(Character);
+        ForceNetUpdate();
+    }
 }

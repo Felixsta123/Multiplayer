@@ -161,7 +161,13 @@ public:
 
     // Count of diagnostic attempts for this instance
     UPROPERTY()
-    int32 DiagnosticCount;  
+    int32 DiagnosticCount;
+
+    UPROPERTY(Replicated, BlueprintReadWrite, Category = "Team")
+    int32 TeamId;
+
+    UPROPERTY(Replicated, BlueprintReadWrite, Category = "Team")
+    int32 CharacterIndexInTeam;
 protected:
     // === ÉTAT DU PERSONNAGE ===
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Worm")

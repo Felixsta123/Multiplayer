@@ -1,10 +1,14 @@
 ﻿#include "PlayerSpawnManager.h"
+
+#include "AWormCharacter.h"
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/PlayerState.h"
 #include "GameFramework/Character.h"
 #include "Components/CapsuleComponent.h"
 #include "EngineUtils.h"
+#include "WormGameMode.h"
+#include "WormGameState.h"
 #include "WormPlayerController.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PawnMovementComponent.h"
@@ -105,133 +109,72 @@ void UPlayerSpawnManager::TeleportPlayersToPositions(const TArray<FVector>& Spaw
             i, LocationIndex, bSuccess ? TEXT("Success") : TEXT("Failed"));
     }
 }
+
 void UPlayerSpawnManager::TeleportPlayersToBuildings()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Téléportation des joueurs sur les bâtiments..."));
+    TArray<AImprovedVoxelBuilding*> Buildings = AImprovedVoxelBuilding::FindAllVoxelBuildings(this);
+    if (Buildings.Num() == 0) return;
+
+    AWormGameMode* GameMode = Cast<AWormGameMode>(GetWorld()->GetAuthGameMode());
+    if (!GameMode || GameMode->NumTeams == 0) return;
+
+    // Répartir les bâtiments entre les équipes
+    int32 BuildingsPerTeam = FMath::Max(1, Buildings.Num() / GameMode->NumTeams);
     
-    // 1. Get the buildings
-    TArray<AImprovedVoxelBuilding*> VoxelBuildings = AImprovedVoxelBuilding::FindAllVoxelBuildings(this);
-    
-    if (VoxelBuildings.Num() == 0) {
-        UE_LOG(LogTemp, Error, TEXT("Aucun bâtiment voxel trouvé"));
-        return;
-    }
-    
-    // 2. Get spawn points directly from buildings
-    TArray<FVector> SpawnLocations;
-    
-    for (int32 i = 0; i < VoxelBuildings.Num(); i++) {
-        AImprovedVoxelBuilding* Building = VoxelBuildings[i];
-        if (!Building) continue;
+    for (int32 TeamIndex = 0; TeamIndex < GameMode->NumTeams; TeamIndex++)
+    {
+        // Base building index for this team
+        int32 BaseBuildingIndex = TeamIndex * BuildingsPerTeam;
+        AImprovedVoxelBuilding* TeamBuilding = Buildings[BaseBuildingIndex % Buildings.Num()];
         
-        // Use pre-calculated spawn point with extra height for safety
-        FVector SpawnPoint = Building->GetTopSpawnPoint() + FVector(0, 0, 200.0f);
-        SpawnLocations.Add(SpawnPoint);
-        
-        UE_LOG(LogTemp, Warning, TEXT("Point de spawn %d: %s"), i, *SpawnPoint.ToString());
-        
-        // Visualize spawn point
-        DrawDebugSphere(GetWorld(), SpawnPoint, 25.0f, 8, FColor::Yellow, false, 10.0f);
-    }
-    
-    // 3. Get controllers
-    TArray<APlayerController*> PlayerControllers;
-    for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It) {
-        APlayerController* PC = It->Get();
-        if (PC) {
-            PlayerControllers.Add(PC);
-        }
-    }
-    
-    // 4. Spawn players with delay between each
-    for (int32 i = 0; i < PlayerControllers.Num(); i++) {
-        APlayerController* PC = PlayerControllers[i];
-        if (!PC) continue;
-        
-        AWormPlayerController* WPC = Cast<AWormPlayerController>(PC);
-        if (!WPC) continue;
-        
-        // Choose a position (cycling if more players than positions)
-        int32 PosIndex = i % SpawnLocations.Num();
-        FVector SpawnPos = SpawnLocations[PosIndex];
-        
-        // Destroy old pawn to avoid conflicts
-        if (PC->GetPawn()) {
-            PC->GetPawn()->Destroy();
-            PC->UnPossess();
-        }
-        
-        // Progressive delay between each spawn - increased delays for network safety
-        float Delay = 1.5f + (i * 0.8f);
-        
-        FTimerHandle SpawnTimer;
-        FTimerDelegate SpawnDelegate;
-        
-        // Use weak pointers for safety
-        TWeakObjectPtr<APlayerController> WeakPC(PC);
-        TWeakObjectPtr<AWormPlayerController> WeakWPC(WPC);
-        
-        SpawnDelegate.BindLambda([this, WeakPC, WeakWPC, SpawnPos, i]() {
-            // Safety check
-            if (!WeakPC.IsValid() || !WeakWPC.IsValid()) {
-                UE_LOG(LogTemp, Error, TEXT("Invalid controller in spawn delegate"));
-                return;
-            }
-            
-            // Check character class
-            UClass* CharClass = WeakWPC->PlayerSettings.MyPlayerCharacter;
-            if (!CharClass) {
-                UE_LOG(LogTemp, Error, TEXT("Pas de classe de personnage pour le joueur %d"), i);
-                return;
-            }
-            
-            // Spawn character with non-colliding approach
-            FActorSpawnParameters SpawnParams;
-            SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-            
-            UE_LOG(LogTemp, Warning, TEXT("Spawn du personnage [%s] pour %s à %s"), 
-                *CharClass->GetName(), *WeakPC->GetName(), *SpawnPos.ToString());
-            
-            APawn* NewPawn = GetWorld()->SpawnActor<APawn>(CharClass, SpawnPos, FRotator::ZeroRotator, SpawnParams);
-            
-            if (NewPawn) {
-                // Possess the new pawn
-                WeakPC->Possess(NewPawn);
-                
-                // Stabilize the character with delayed movement enabling
-                UCharacterMovementComponent* MovementComp = 
-                    Cast<UCharacterMovementComponent>(NewPawn->GetMovementComponent());
-                
-                if (MovementComp) {
-                    // Disable movement temporarily and reset velocity
-                    MovementComp->StopMovementImmediately();
-                    MovementComp->Velocity = FVector::ZeroVector;
-                    MovementComp->DisableMovement();
-                    
-                    // Schedule multiple movement re-enabling attempts
-                    for (float EnableDelay : {0.5f, 1.0f, 2.0f}) {
-                        FTimerHandle EnableMovementTimer;
-                        TWeakObjectPtr<UCharacterMovementComponent> WeakMovement(MovementComp);
-                        
-                        GetWorld()->GetTimerManager().SetTimer(
-                            EnableMovementTimer, 
-                            [WeakMovement]() {
-                                if (WeakMovement.IsValid()) {
-                                    WeakMovement->SetMovementMode(MOVE_Walking);
-                                }
-                            }, 
-                            EnableDelay, 
-                            false
-                        );
+        // Get base spawn position for team
+        FVector BaseSpawnPoint = TeamBuilding->GetTopSpawnPoint() + FVector(0, 0, 200.0f);
+
+        // Spawn each character for this team
+        for (int32 CharIndex = 0; CharIndex < GameMode->CharactersPerTeam; CharIndex++)
+        {
+            // Calculate offset for this character
+            float AngleStep = 360.0f / GameMode->CharactersPerTeam;
+            float CurrentAngle = AngleStep * CharIndex;
+            FVector Offset = FVector(
+                FMath::Cos(FMath::DegreesToRadians(CurrentAngle)) * GameMode->TeamSpawnOffset,
+                FMath::Sin(FMath::DegreesToRadians(CurrentAngle)) * GameMode->TeamSpawnOffset,
+                0
+            );
+
+            FVector SpawnLocation = BaseSpawnPoint + Offset;
+
+            // Get the controller for this team
+            AController* Controller = GameMode->AllPlayerControllers[TeamIndex];
+            AWormPlayerController* WPC = Cast<AWormPlayerController>(Controller);
+
+            if (WPC && WPC->PlayerSettings.MyPlayerCharacter)
+            {
+                FActorSpawnParameters SpawnParams;
+                SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+                AWormCharacter* Character = GetWorld()->SpawnActor<AWormCharacter>(
+                    WPC->PlayerSettings.MyPlayerCharacter,
+                    SpawnLocation,
+                    FRotator::ZeroRotator,
+                    SpawnParams
+                );
+
+                if (Character)
+                {
+                    Character->TeamId = TeamIndex;
+                    Character->CharacterIndexInTeam = CharIndex;
+                    WPC->Possess(Character);
+
+                    // Add to team in GameState
+                    AWormGameState* WormGS = GetWorld()->GetGameState<AWormGameState>();
+                    if (WormGS)
+                    {
+                        WormGS->AddCharacterToTeam(Character, TeamIndex);
                     }
                 }
-            } else {
-                UE_LOG(LogTemp, Error, TEXT("Failed to spawn character for player %d"), i);
             }
-        });
-        
-        GetWorld()->GetTimerManager().SetTimer(SpawnTimer, SpawnDelegate, Delay, false);
-        UE_LOG(LogTemp, Warning, TEXT("Programmation spawn joueur %d dans %.1f secondes"), i, Delay);
+        }
     }
 }
 FVector UPlayerSpawnManager::FindSpawnLocationOnBuilding(AImprovedVoxelBuilding* Building, TArray<FVector>& ExistingLocations)

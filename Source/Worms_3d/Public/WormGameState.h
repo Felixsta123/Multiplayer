@@ -23,6 +23,25 @@ struct FPlayerDamageInfo
     FPlayerDamageInfo(const FString& InName, float InDamage) 
         : PlayerName(InName), DamageValue(InDamage) {}
 };
+USTRUCT(BlueprintType)
+struct FTeamInfo
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 TeamId;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString TeamName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FLinearColor TeamColor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<AWormCharacter*> TeamMembers;
+
+    FTeamInfo() : TeamId(-1) {}
+};
 
 UCLASS()
 class WORMS_3D_API AWormGameState : public AGameState
@@ -57,10 +76,7 @@ public:
     // Network loading manager component for synchronized loading screens
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Loading")
     UNetworkLoadingManager* LoadingManager;
-
-    UFUNCTION(BlueprintCallable, Category = "Game")
-    void SetCurrentPlayer(int32 PlayerIndex);
-
+    
     UFUNCTION(BlueprintCallable, Category = "Game")
     int32 GetRemainingPlayersCount() const;
     
@@ -118,8 +134,20 @@ public:
     void TriggerGameOver(const FString& Winner);
     void ShowGameOverWidget();
 
-    UFUNCTION(BlueprintCallable, Category = "Game")
-    TArray<FString> GetPlayersRankedByDamage() const;
+
     UFUNCTION(NetMulticast, Reliable)
     void Multicast_ShowGameOverWidget();
+
+    UPROPERTY(Replicated, BlueprintReadWrite, Category = "Teams")
+    TArray<FTeamInfo> Teams;
+
+    // Après les autres fonctions
+    UFUNCTION(BlueprintCallable, Category = "Teams")
+    TArray<AWormCharacter*> GetTeamMembers(int32 TeamIndex) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Teams")
+    void InitializeTeams(int32 NumTeams);
+
+    UFUNCTION(BlueprintCallable, Category = "Teams")
+    void AddCharacterToTeam(AWormCharacter* Character, int32 TeamId);
 };
