@@ -3,6 +3,7 @@
 #include "Net/Core/PushModel/PushModel.h"
 #include "Kismet/GameplayStatics.h"
 #include "WormGameMode.h"
+#include "WormPlayerController.h"
 #include "Worms_3d/AVoxelBuilding.h"
 
 AWormGameState::AWormGameState()
@@ -27,44 +28,55 @@ void AWormGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
     DOREPLIFETIME(AWormGameState, PlayerNames);
     DOREPLIFETIME(AWormGameState, PlayerIsAlive);
     DOREPLIFETIME(AWormGameState, CurrentPlayerName);
+    DOREPLIFETIME(AWormGameState, bGameOver);
+    DOREPLIFETIME(AWormGameState, WinnerName);
+    DOREPLIFETIME(AWormGameState, PlayerDamageDealt);
 }
 
 void AWormGameState::UpdatePlayerList(const TArray<AController*>& Controllers)
 {
-    // Empty lists
     PlayerNames.Empty();
     PlayerIsAlive.Empty();
     
-    UE_LOG(LogTemp, Log, TEXT("Updating player list with %d controllers"), Controllers.Num());
-    
-    // Add name of each player and their status
     for (AController* Controller : Controllers)
     {
         if (Controller)
         {
-            FString PlayerName = Controller->GetName();
-            bool IsAlive = false;
+            FString PlayerName;
+            AWormPlayerController* WPC = Cast<AWormPlayerController>(Controller);
             
-            // Check if controller has a pawn and if it's alive
+            // Si c'est un WormPlayerController avec un nom personnalisé, utiliser ce nom
+            if (WPC && !WPC->PlayerSettings.MyPlayerName.IsEmpty())
+            {
+                PlayerName = WPC->PlayerSettings.MyPlayerName.ToString();
+            }
+            else
+            {
+                // Sinon, fallback au nom du Pawn
+                if (Controller->GetPawn())
+                {
+                    PlayerName = Controller->GetPawn()->GetName();
+                }
+                else
+                {
+                    PlayerName = Controller->GetName();
+                }
+            }
+            
+            bool IsAlive = false;
             AWormCharacter* Character = nullptr;
+            
             if (Controller->GetPawn())
             {
                 Character = Cast<AWormCharacter>(Controller->GetPawn());
-                PlayerName = Controller->GetPawn()->GetName();
             }
             
-            // Determine if player is alive
             IsAlive = (Character && Character->GetHealth() > 0);
             
             PlayerNames.Add(PlayerName);
             PlayerIsAlive.Add(IsAlive);
-            
-            UE_LOG(LogTemp, Log, TEXT("Added player: %s (Alive: %s)"), 
-                *PlayerName, IsAlive ? TEXT("Yes") : TEXT("No"));
         }
     }
-    
-    UE_LOG(LogTemp, Log, TEXT("Player list updated, now contains %d players"), PlayerNames.Num());
 }
 
 // Improve GetRemainingPlayersCount to only count alive players
@@ -180,4 +192,174 @@ void AWormGameState::DismissLoadingScreen()
     {
         UE_LOG(LogTemp, Error, TEXT("LoadingManager not found in GameState!"));
     }
+}
+
+
+void AWormGameState::AddDamageDealt(const FString& PlayerName, float Damage)
+{
+    if (HasAuthority())
+    {
+        // Find existing entry for this player
+        bool bFoundPlayer = false;
+        for (int32 i = 0; i < PlayerDamageDealt.Num(); i++)
+        {
+            if (PlayerDamageDealt[i].PlayerName == PlayerName)
+            {
+                PlayerDamageDealt[i].DamageValue += Damage;
+                bFoundPlayer = true;
+                UE_LOG(LogTemp, Log, TEXT("Player %s has dealt %.1f total damage"), 
+                    *PlayerName, PlayerDamageDealt[i].DamageValue);
+                break;
+            }
+        }
+        
+        // If player not found, add new entry
+        if (!bFoundPlayer)
+        {
+            PlayerDamageDealt.Add(FPlayerDamageInfo(PlayerName, Damage));
+            UE_LOG(LogTemp, Log, TEXT("Player %s has dealt %.1f damage (first record)"), *PlayerName, Damage);
+        }
+        
+        // Force replication
+        MARK_PROPERTY_DIRTY_FROM_NAME(AWormGameState, PlayerDamageDealt, this);
+    }
+}
+
+void AWormGameState::CheckGameOverCondition()
+{
+    if (HasAuthority() && !bGameOver)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Checking game over condition"));
+        
+        // Méthode directe: Compter le nombre de personnages vivants dans le monde
+        TArray<AActor*> AllWormChars;
+        UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormCharacter::StaticClass(), AllWormChars);
+        
+        int32 AliveCount = 0;
+        AWormCharacter* LastAliveChar = nullptr;
+        
+        for (AActor* Actor : AllWormChars)
+        {
+            AWormCharacter* Character = Cast<AWormCharacter>(Actor);
+            if (Character && Character->GetHealth() > 0)
+            {
+                AliveCount++;
+                LastAliveChar = Character;
+                UE_LOG(LogTemp, Warning, TEXT("Character %s is alive with health %.1f"), 
+                   *Character->GetName(), Character->GetHealth());
+            }
+            else if (Character)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("Character %s is dead with health %.1f"), 
+                   *Character->GetName(), Character->GetHealth());
+            }
+        }
+        
+        UE_LOG(LogTemp, Warning, TEXT("Found %d alive characters"), AliveCount);
+        
+        // Game over si un seul joueur est encore vivant
+        if (AliveCount <= 1 && LastAliveChar)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Game over! Winner is %s"), *LastAliveChar->GetName());
+            
+            // Trouver le nom du joueur gagnant
+             WinnerName = LastAliveChar->GetName();
+            AController* WinnerController = LastAliveChar->GetController();
+            
+            if (WinnerController)
+            {
+                // Trouver l'index du contrôleur pour obtenir le nom correct
+                for (int32 i = 0; i < PlayerNames.Num(); i++)
+                {
+                    if (WinnerController == UGameplayStatics::GetPlayerController(GetWorld(), i))
+                    {
+                        WinnerName = PlayerNames[i];
+                        break;
+                    }
+                }
+            }
+            
+            TriggerGameOver(WinnerName);
+        }
+    }
+}
+
+void AWormGameState::TriggerGameOver(const FString& Winner)
+{
+    if (HasAuthority() && !bGameOver)
+    {
+        bGameOver = true;
+        WinnerName = Winner;
+        
+        // Force replication
+        MARK_PROPERTY_DIRTY_FROM_NAME(AWormGameState, bGameOver, this);
+        MARK_PROPERTY_DIRTY_FROM_NAME(AWormGameState, WinnerName, this);
+        
+        // Broadcast event to all clients
+        OnGameOver.Broadcast(Winner);
+        
+        UE_LOG(LogTemp, Warning, TEXT("Game over triggered! Winner: %s"), *Winner);
+        
+        // Show results widget after a short delay
+        FTimerHandle ShowWidgetTimerHandle;
+        GetWorld()->GetTimerManager().SetTimer(
+            ShowWidgetTimerHandle,
+            this,
+            &AWormGameState::ShowGameOverWidget,
+            2.0f, // 2 second delay before showing widget
+            false
+        );
+    }
+}
+
+void AWormGameState::ShowGameOverWidget()
+{
+    // Use RPC to show the widget on all clients
+    Multicast_ShowGameOverWidget();
+}
+
+void AWormGameState::Multicast_ShowGameOverWidget_Implementation()
+{
+    // Find the Game Mode
+    AWormGameMode* GameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(this));
+    if (GameMode)
+    {
+        GameMode->ShowGameOverWidget();
+    }
+    
+    // Also show it on listen server or in standalone
+    if (GetWorld()->GetNetMode() == NM_ListenServer || GetWorld()->GetNetMode() == NM_Standalone)
+    {
+        // Get the local player controller
+        APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+        if (PC)
+        {
+            // Try to show the widget directly on this machine
+            AWormGameMode* LocalGameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(GetWorld()));
+            if (LocalGameMode)
+            {
+                LocalGameMode->ShowGameOverWidget();
+            }
+        }
+    }
+}
+TArray<FString> AWormGameState::GetPlayersRankedByDamage() const
+{
+    TArray<FString> RankedPlayers;
+    
+    // Create a copy we can sort
+    TArray<FPlayerDamageInfo> SortedDamageStats = PlayerDamageDealt;
+    
+    // Sort by damage (descending)
+    SortedDamageStats.Sort([](const FPlayerDamageInfo& A, const FPlayerDamageInfo& B) {
+        return A.DamageValue > B.DamageValue;
+    });
+    
+    // Extract names in order
+    for (const auto& DamageInfo : SortedDamageStats)
+    {
+        RankedPlayers.Add(DamageInfo.PlayerName);
+    }
+    
+    return RankedPlayers;
 }

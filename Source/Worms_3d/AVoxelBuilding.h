@@ -66,22 +66,22 @@ public:
     virtual void OnConstruction(const FTransform& Transform) override;
     
     // Properties to configure the building
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", Replicated)
     int32 GridSizeX;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", Replicated)
     int32 GridSizeY;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", Replicated)
     int32 GridSizeZ;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", Replicated)
     float VoxelSize;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", Replicated)
     float SmoothingFactor;
     
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", Replicated)
     bool bUseRandomColors;
     
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", meta = (EditCondition = "!bUseRandomColors"))
@@ -138,7 +138,12 @@ public:
     // RPC multicast pour synchroniser la destruction sur tous les clients
     UFUNCTION(NetMulticast, Reliable)
     void Multicast_DestroyVoxelsAt(FVector Location, FVector ImpactNormal, float Radius);
-
+    UPROPERTY(BlueprintReadOnly, Category = "Building")
+    FVector TopSpawnPoint;
+    
+    // Fonction pour obtenir le point de spawn
+    UFUNCTION(BlueprintCallable, Category = "Building")
+    FVector GetTopSpawnPoint() const { return TopSpawnPoint; }
 protected:
     virtual void BeginPlay() override;
     

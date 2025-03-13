@@ -6,6 +6,7 @@
 #include "../AWormCharacter.h"
 #include "Worms_3d/AVoxelBuilding.h" // Added VoxelBuilding include
 #include "../W_GameLoadingScreen.h"
+#include "../WaterSystem.h"
 #include "WormGameMode.generated.h"
 
 UCLASS()
@@ -63,6 +64,15 @@ public:
     UPROPERTY(BlueprintReadWrite, Category = "Turns")
     float RemainingTurnTime;
 
+    // Ajouter dans la déclaration de classe:
+     UPROPERTY(EditDefaultsOnly, Category = "Water System")
+     TSubclassOf<AActor> WaterSystemManagerClass;
+    
+     UPROPERTY(BlueprintReadOnly, Category = "Water System")
+     AActor* WaterSystemManager;
+    
+     UFUNCTION(BlueprintCallable, Category = "Water System")
+     void InitializeWaterSystem();
     
     // Available weapon types for distribution to players
     UPROPERTY(EditDefaultsOnly, Category = "Weapons")
@@ -107,7 +117,14 @@ public:
     // Function to collect all controllers
     UFUNCTION(BlueprintCallable, Category = "Game")
     void GatherAllPlayerControllers();
-    
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI")
+    TSubclassOf<UUserWidget> GameOverWidgetClass;
+
+    UFUNCTION(BlueprintCallable, Category = "Game")
+    void ShowGameOverWidget();
+    void StartRestartSequence();
+    virtual void NotifyPlayerReady(APlayerController* PC);
+
 protected:
     // Miscellaneous variables 
     UPROPERTY(BlueprintReadWrite, Category = "Game")
@@ -116,15 +133,10 @@ protected:
     UPROPERTY(BlueprintReadWrite, Category = "Game")
     bool local;
     
-
+    TArray<APlayerController*> ReadyPlayers;
+    virtual void CheckAllPlayersReady();
     // Turn timer handle
     FTimerHandle TurnTimerHandle;
-    
-    // Delayed spawn timer handles
-    FTimerHandle TerrainSpawnTimerHandle;
-    FTimerHandle VoxelBuildingsSpawnTimerHandle;
-    FTimerHandle WeaponSpawnTimerHandle;
-
 
     // Function called when time expires
     UFUNCTION()

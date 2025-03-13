@@ -45,10 +45,12 @@ public:
     UFUNCTION(BlueprintCallable, Category = "UI")
     void CreatePlayerUI();
     bool ServerSetPlayerSettings_Validate(const FPlayerData& NewSettings);
-
+    virtual void OnNetCleanup(class UNetConnection* Connection) override;
+    virtual void AcknowledgePossession(class APawn* P) override;
 private:
     FTimerHandle UICheckTimerHandle;
     FTimerHandle PlayerUITimerHandle;
+    bool bIsFullyInitialized;
 
     void CheckAndCreateUI();
 };

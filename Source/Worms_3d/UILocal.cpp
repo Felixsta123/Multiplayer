@@ -1,5 +1,6 @@
 ﻿#include "UILocal.h"
 #include "AWormCharacter.h"
+#include "WormPlayerController.h"
 #include "WormWeapon.h"
 #include "Kismet/GameplayStatics.h"
 #include "Components/TextBlock.h"
@@ -84,11 +85,24 @@ void UWormPlayerUI::UpdatePlayerInfo()
     // Mise à jour du nom du personnage
     if (CharacterNameText)
     {
-        FString PlayerName = PlayerCharacter->GetName();
-        // Simplifier le nom en enlevant le préfixe BP_ et autres nomenclatures
-        PlayerName.ReplaceInline(TEXT("BP_"), TEXT(""));
-        PlayerName.ReplaceInline(TEXT("Character"), TEXT(""));
-        PlayerName.ReplaceInline(TEXT("_C"), TEXT(""));
+        FString PlayerName;
+        APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+        AWormPlayerController* WPC = Cast<AWormPlayerController>(PC);
+        
+        if (WPC && !WPC->PlayerSettings.MyPlayerName.IsEmpty())
+        {
+            PlayerName = WPC->PlayerSettings.MyPlayerName.ToString();
+        }
+        else if (PlayerCharacter)
+        {
+            // Fallback au nom du Pawn
+            PlayerName = PlayerCharacter->GetName();
+            // Simplifier le nom en enlevant le préfixe BP_ et autres nomenclatures
+            PlayerName.ReplaceInline(TEXT("BP_"), TEXT(""));
+            PlayerName.ReplaceInline(TEXT("Character"), TEXT(""));
+            PlayerName.ReplaceInline(TEXT("_C"), TEXT(""));
+        }
+        
         CharacterNameText->SetText(FText::FromString(PlayerName));
     }
     

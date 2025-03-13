@@ -6,10 +6,15 @@
 #include "Blueprint/UserWidget.h"
 #include "Kismet/GameplayStatics.h"
 #include "WormGameState.h"
+#include "WormPlayerController.h"
+#include "Blueprint/WidgetBlueprintLibrary.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Worms_3d/AVoxelBuilding.h"
+#include "Worms_3d/EnvironmentalEventsManager.h"
 #include "Worms_3d/GameInitFactorySubsystem.h"
 #include "Worms_3d/VoxelTerrainSettings.h"
+#include "Worms_3d/WormGameInstance.h"
+#include "Worms_3d/W_GameResultsScreen.h"
 
 AWormGameMode::AWormGameMode()
 {
@@ -36,34 +41,17 @@ void AWormGameMode::BeginPlay()
 {
     Super::BeginPlay();
     
-    // If using game init manager, set it up first and let it handle initialization
+    // Setup game initialization manager
     if (bUseGameInitManager)
     {
-        // Setup the game initialization manager
         GameInitManager = SetupGameInitialization();
+        InitializeWaterSystem();
         
-        // Let the game init manager handle the initialization sequence
-        // (it will call our functions in the proper order)
-    }
-    else
-    {
-        // Use original initialization logic
-        // Collect all controllers
-        GatherAllPlayerControllers();
-        
-        // Collect spawn points
-        UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), SpawnPoints);
-        
-        // Initialize voxel buildings first (changed order to prioritize voxel buildings)
-        GetWorldTimerManager().SetTimer(VoxelBuildingsSpawnTimerHandle, this, &AWormGameMode::GenerateVoxelBuildings, 1.0f, false);
-
-        // Initialize weapons for all players
-        GetWorldTimerManager().SetTimer(WeaponSpawnTimerHandle, this, &AWormGameMode::InitializeWeaponsForAllPlayers, 1.5f, false);
-     
-        // Start first turn after a delay
-        GetWorldTimerManager().SetTimer(TurnTimerHandle, this, &AWormGameMode::StartNextTurn, 2.5f, false);
+        // Initialization sequence will now be triggered by CheckAllPlayersReady
+        // when all players have confirmed readiness
     }
 }
+
 
 void AWormGameMode::Tick(float DeltaTime)
 {
@@ -184,31 +172,38 @@ void AWormGameMode::StartNextTurn()
 
     // Get active controller
     AController* ActiveController = AllPlayerControllers[CurrentPlayerIndex];
-    UE_LOG(LogTemp, Log, TEXT("Starting turn for player index %d: %s"),
-        CurrentPlayerIndex, *ActiveController->GetName());
-
-    // Make sure to use pawn name and not controller
     FString PlayerName;
-    AWormCharacter* ActiveCharacter = GetWormCharacterFromController(ActiveController);
-    if (ActiveCharacter)
+    AWormPlayerController* WPC = Cast<AWormPlayerController>(ActiveController);
+
+    if (WPC && !WPC->PlayerSettings.MyPlayerName.IsEmpty())
     {
-        PlayerName = ActiveCharacter->GetName();
+        PlayerName = WPC->PlayerSettings.MyPlayerName.ToString();
     }
     else
     {
-        PlayerName = ActiveController->GetName();
+        // Fallback to pawn name if necessary
+        AWormCharacter* ActiveCharacter = GetWormCharacterFromController(ActiveController);
+        if (ActiveCharacter)
+        {
+            PlayerName = ActiveCharacter->GetName();
+        }
+        else
+        {
+            PlayerName = ActiveController->GetName();
+        }
     }
 
-    // IMPORTANT: Use new function to define active player with correct name
+    // Use the retrieved name
     if (WormGS)
     {
         WormGS->SetCurrentPlayerByIndex(CurrentPlayerIndex);
+        WormGS->CurrentPlayerName = PlayerName; // Ensure this line is present
         WormGS->TurnDuration = TurnDuration;
 
-        // Additional logging
-        UE_LOG(LogTemp, Log, TEXT("Turn duration set to %.1f seconds, player name: %s"),
-            TurnDuration, *WormGS->CurrentPlayerName);
+        // Force network update
+        WormGS->ForceNetUpdate();
     }
+
 
     // Deactivate all characters
     for (AController* Controller : AllPlayerControllers)
@@ -224,9 +219,9 @@ void AWormGameMode::StartNextTurn()
              Character->AttachWeaponToSocket(Character->CurrentWeapon);
         }
     }
-
+    
     // Activate character of active controller
-    ActiveCharacter = GetWormCharacterFromController(ActiveController);
+    AWormCharacter* ActiveCharacter = GetWormCharacterFromController(ActiveController);
     if (ActiveCharacter)
     {
         ActiveCharacter->SetIsMyTurn(true);
@@ -247,6 +242,24 @@ void AWormGameMode::StartNextTurn()
 void AWormGameMode::EndCurrentTurn()
 {
     // Cancel current timer
+    if (WaterSystemManager)
+    {
+        IWaterSystemInterface* WaterInterface = Cast<IWaterSystemInterface>(WaterSystemManager);
+        if (WaterInterface)
+        {
+            // Use interface to call methods
+            WaterInterface->Execute_NotifyTurnEnded(WaterSystemManager);
+        }
+        else
+        {
+            // Alternative direct function call if interface isn't used
+            UFunction* TurnEndedFunction = WaterSystemManager->FindFunction(FName("NotifyTurnEnded"));
+            if (TurnEndedFunction)
+            {
+                WaterSystemManager->ProcessEvent(TurnEndedFunction, nullptr);
+            }
+        }
+    }
     GetWorldTimerManager().ClearTimer(TurnTimerHandle);
     
     // Get active controller
@@ -402,6 +415,7 @@ void AWormGameMode::GenerateVoxelBuildings()
             Building->bSpawnDebrisOnDestruction = Settings.bSpawnDebrisOnDestruction;
             Building->DebrisAmountMultiplier = Settings.DebrisAmountMultiplier;
             Building->bSpawnImpactCloud = Settings.bSpawnImpactCloud;
+            Building->ForceNetUpdate();
 
             // Generate building
             Building->GenerateBuilding();
@@ -619,20 +633,232 @@ AGameInitManager* AWormGameMode::SetupGameInitialization()
         AWormGameState* WormGS = GetGameState<AWormGameState>();
         if (WormGS && WormGS->LoadingManager)
         {
-            // Make sure GameInitManager and LoadingManager use the same widget class
             if (LoadingWidgetClass)
             {
                 WormGS->LoadingManager->LoadingWidgetClass = LoadingWidgetClass;
-                // Also set in GameInitManager for consistency
                 GameInitManager->LoadingWidgetClass = LoadingWidgetClass;
             }
-            UE_LOG(LogTemp, Log, TEXT("NetworkLoadingManager in GameState configured with correct widget class"));
-        }
-        else
-        {
-            UE_LOG(LogTemp, Error, TEXT("WARNING: No NetworkLoadingManager found in GameState - loading screens won't be networked!"));
         }
     }
 
     return GameInitManager;
+}
+
+void AWormGameMode::ShowGameOverWidget()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Showing game over widget"));
+    
+    // Get Game State for results data
+    AWormGameState* WormGS = GetGameState<AWormGameState>();
+    if (!WormGS)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Cannot show game over widget: GameState not valid"));
+        return;
+    }
+
+    if (!GameOverWidgetClass)
+    {
+        UE_LOG(LogTemp, Error, TEXT("GameOverWidgetClass not set in GameMode!"));
+        return;
+    }
+    
+    // Get local player controller
+    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+    if (!PC)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Cannot show game over widget: PlayerController not found"));
+        return;
+    }
+    
+    // Create the widget
+    UUserWidget* GameOverWidget = CreateWidget<UUserWidget>(PC, GameOverWidgetClass);
+    if (!GameOverWidget)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Failed to create GameOverWidget"));
+        return;
+    }
+    
+    // Try to cast to your specific widget class to set up data
+    UW_GameResultsScreen* ResultsWidget = Cast<UW_GameResultsScreen>(GameOverWidget);
+    if (ResultsWidget)
+    {
+        // Pass game results directly from GameState to the widget
+        ResultsWidget->DisplayResults(WormGS->WinnerName, WormGS->PlayerDamageDealt);
+    }
+    
+    // Show the widget
+    GameOverWidget->AddToViewport(1000); // High Z-order to be on top
+    
+    // Set input mode to UI
+    PC->SetInputMode(FInputModeUIOnly());
+    PC->bShowMouseCursor = true;
+    
+    // Freeze the game
+    UGameplayStatics::SetGamePaused(GetWorld(), true);
+}
+
+
+void AWormGameMode::StartRestartSequence()
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("Starting game restart sequence"));
+    
+    // Reset game state
+    AWormGameState* WormGS = GetGameState<AWormGameState>();
+    if (WormGS)
+    {
+        WormGS->bGameOver = false;
+        WormGS->WinnerName = TEXT("");
+        WormGS->PlayerDamageDealt.Empty();
+        
+        // Force replication
+        WormGS->ForceNetUpdate();
+    }
+    // Clear any existing game over widget from all screens
+    for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+    {
+        APlayerController* PC = It->Get();
+        if (PC)
+        {
+            // Check if our results widget is showing and remove it
+            TArray<UUserWidget*> AllWidgets;
+            UWidgetBlueprintLibrary::GetAllWidgetsOfClass(GetWorld(), AllWidgets, UW_GameResultsScreen::StaticClass(), false);
+            for (UUserWidget* Widget : AllWidgets)
+            {
+                if (Widget && Widget->IsInViewport())
+                {
+                    Widget->RemoveFromParent();
+                }
+            }
+        }
+    }
+    // Reset all characters
+    for (FConstControllerIterator It = GetWorld()->GetControllerIterator(); It; ++It)
+    {
+        AController* Controller = It->Get();
+        if (Controller)
+        {
+            // Respawn controlled characters
+            if (Controller->GetPawn())
+            {
+                Controller->GetPawn()->Destroy();
+            }
+            
+            // Force possession of a new character when restart completes
+            // This will be handled by GameInitManager for player positioning
+        }
+    }
+    
+    // Destroy existing voxel buildings
+    TArray<AImprovedVoxelBuilding*> ExistingBuildings = AImprovedVoxelBuilding::FindAllVoxelBuildings(this);
+    for (AImprovedVoxelBuilding* Building : ExistingBuildings)
+    {
+        if (Building)
+        {
+            Building->Destroy();
+        }
+    }
+    // Clean up any leftover weapons
+    TArray<AActor*> LeftoverWeapons;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormWeapon::StaticClass(), LeftoverWeapons);
+    for (AActor* Weapon : LeftoverWeapons)
+    {
+        if (Weapon)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Cleaning up leftover weapon: %s"), *Weapon->GetName());
+            Weapon->Destroy();
+        }
+    }
+    // Use GameInitManager to handle the restart
+    if (GameInitManager)
+    {
+        // Show loading screen first
+        if (WormGS && WormGS->LoadingManager)
+        {
+            WormGS->ShowLoadingScreen(10.0f);
+        }
+
+        // Start initialization sequence after a short delay
+        FTimerHandle RestartTimerHandle;
+        GetWorld()->GetTimerManager().SetTimer(
+            RestartTimerHandle,
+            [this]() {
+                if (GameInitManager)
+                {
+                    GameInitManager->StartInitializationSequence();
+                }
+            },
+            1.0f, // Small delay to ensure everything is ready
+            false
+        );
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("Cannot restart: GameInitManager is null"));
+    }
+}
+
+
+void AWormGameMode::InitializeWaterSystem()
+{
+    // Check if a water manager already exists
+    TArray<AActor*> FoundActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), WaterSystemManagerClass, FoundActors);
+    
+    if (FoundActors.Num() > 0)
+    {
+        WaterSystemManager = FoundActors[0];
+        UE_LOG(LogTemp, Log, TEXT("Found existing water manager: %s"), *WaterSystemManager->GetName());
+    }
+    // If no manager exists, create one
+    else if (WaterSystemManagerClass)
+    {
+        FActorSpawnParameters SpawnParams;
+        SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+        
+        WaterSystemManager = GetWorld()->SpawnActor<AActor>(
+            WaterSystemManagerClass,
+            FVector::ZeroVector,
+            FRotator::ZeroRotator,
+            SpawnParams
+        );
+        
+        if (WaterSystemManager)
+        {
+            UE_LOG(LogTemp, Log, TEXT("Water manager created successfully"));
+        }
+        else
+        {
+            UE_LOG(LogTemp, Error, TEXT("Failed to create water manager"));
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("WaterSystemManagerClass not set in GameMode"));
+    }
+}
+
+void AWormGameMode::NotifyPlayerReady(APlayerController* PC)
+{
+    if (!ReadyPlayers.Contains(PC))
+    {
+        ReadyPlayers.Add(PC);
+        CheckAllPlayersReady();
+    }
+}
+
+void AWormGameMode::CheckAllPlayersReady()
+{
+    if (ReadyPlayers.Num() == NumPlayers)
+    {
+        // Tous les joueurs sont prêts, démarrer l'initialisation
+        if (GameInitManager)
+        {
+            GameInitManager->StartInitializationSequence();
+        }
+    }
 }

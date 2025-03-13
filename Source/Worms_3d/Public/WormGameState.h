@@ -6,6 +6,23 @@
 #include "Worms_3d/AVoxelBuilding.h"
 #include "../NetworkLoadingManager.h"
 #include "WormGameState.generated.h"
+//struct that holds player DamagePlayerNames;DamageValues
+USTRUCT(BlueprintType)
+struct FPlayerDamageInfo
+{
+    GENERATED_BODY()
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString PlayerName;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float DamageValue;
+    
+    FPlayerDamageInfo() : DamageValue(0.0f) {}
+    
+    FPlayerDamageInfo(const FString& InName, float InDamage) 
+        : PlayerName(InName), DamageValue(InDamage) {}
+};
 
 UCLASS()
 class WORMS_3D_API AWormGameState : public AGameState
@@ -74,4 +91,35 @@ public:
     
     UFUNCTION(BlueprintCallable, Category = "Loading")
     void DismissLoadingScreen();
+
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Game")
+    bool bGameOver;
+
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Game")
+    FString WinnerName;
+
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Game")
+    TArray<FPlayerDamageInfo> PlayerDamageDealt;
+
+    // Add this delegate for game over events
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGameOverEvent, const FString&, WinnerName);
+
+    UPROPERTY(BlueprintAssignable, Category = "Game")
+    FOnGameOverEvent OnGameOver;
+
+    // Add these functions
+    UFUNCTION(BlueprintCallable, Category = "Game")
+    void AddDamageDealt(const FString& PlayerName, float Damage);
+
+    UFUNCTION(BlueprintCallable, Category = "Game")
+    void CheckGameOverCondition();
+
+    UFUNCTION(BlueprintCallable, Category = "Game")
+    void TriggerGameOver(const FString& Winner);
+    void ShowGameOverWidget();
+
+    UFUNCTION(BlueprintCallable, Category = "Game")
+    TArray<FString> GetPlayersRankedByDamage() const;
+    UFUNCTION(NetMulticast, Reliable)
+    void Multicast_ShowGameOverWidget();
 };

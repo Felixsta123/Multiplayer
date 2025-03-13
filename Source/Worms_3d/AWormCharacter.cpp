@@ -15,6 +15,8 @@
 //include for   AWormCharacter.cpp(1045): [C2039] 'IsNormalized': is not a member of 'UE::Math::TRotator<double>'
 #include "Math/UnrealMathUtility.h"
 // Ajouter les includes manquants pour les collisions Cannot resolve symbol 'SetCollisionEnabled'
+#include "EnvironmentalEventsManager.h"
+#include "WormGameState.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
 
@@ -49,7 +51,9 @@ AWormCharacter::AWormCharacter()
     GetCharacterMovement()->AirControl = 0.8f;
     GetCharacterMovement()->JumpZVelocity = 600.0f;
     GetCharacterMovement()->BrakingDecelerationWalking = 2000.0f;
-    
+    // Dans le constructeur du personnage qui ne s'oriente pas correctement
+    GetCharacterMovement()->bOrientRotationToMovement = true; // Activer cette propriété
+    GetCharacterMovement()->RotationRate = FRotator(0.0f, 540.0f, 0.0f); // Vitesse de rotation
     // Configuration du système de caméra
     InitializeCameraSystem();
 }
@@ -160,34 +164,41 @@ void AWormCharacter::BeginPlay()
 
 void AWormCharacter::SetupWeaponDiagnostic()
 {
-    // Ne configurer que pour les clients et limiter à 3 tentatives maximum
+    // Only setup for clients and limit to 3 attempts max per instance
     if (!HasAuthority() && IsLocallyControlled())
     {
         UE_LOG(LogTemp, Warning, TEXT("[CLIENT] Configuration du diagnostic d'arme pour %s"), *GetName());
         
-        static int32 DiagnosticCount = 0;
-        FTimerHandle DiagnosticTimerHandle;
+        // Make this instance-specific rather than static
+        DiagnosticCount = 0;
+        TWeakObjectPtr<AWormCharacter> WeakThis(this);
         
+        FTimerHandle DiagnosticTimerHandle;
         GetWorld()->GetTimerManager().SetTimer(
             DiagnosticTimerHandle,
-            [this]() {
-                if (DiagnosticCount < 3) // Limiter à 3 diagnostics
-                {
-                    DiagnoseWeapons();
-                    DiagnosticCount++;
+            [WeakThis]() {
+                // Safety check to ensure character still exists
+                if (!WeakThis.IsValid())
+                    return;
                     
-                    // Force la création d'arme uniquement après la 2ème tentative et seulement si nécessaire
-                    if (DiagnosticCount >= 2 && !CurrentWeapon && AvailableWeapons.Num() > 0)
+                if (WeakThis->DiagnosticCount < 3) // Limit to 3 diagnostics
+                {
+                    WeakThis->DiagnoseWeapons();
+                    WeakThis->DiagnosticCount++;
+                    
+                    // Force weapon creation only after the 2nd attempt and only if necessary
+                    if (WeakThis->DiagnosticCount >= 2 && !WeakThis->CurrentWeapon && WeakThis->AvailableWeapons.Num() > 0)
                     {
-                        OnRep_CurrentWeaponIndex();
+                        WeakThis->OnRep_CurrentWeaponIndex();
                     }
                 }
             },
-            2.0f,  // Premier diagnostic après 2 secondes
-            false   // Ne pas répéter
+            2.0f,  // First diagnostic after 2 seconds
+            false   // Don't repeat
         );
     }
 }
+
 void AWormCharacter::PossessedBy(AController* NewController)
 {
     Super::PossessedBy(NewController);
@@ -399,7 +410,23 @@ void AWormCharacter::Tick(float DeltaTime)
 
     // Mise à jour de la rotation de l'arme
     UpdateWeaponRotation();
-    
+    if (GetWorld())
+    {
+        // Find water manager
+        AEnvironmentalEventsManager* WaterManager = AEnvironmentalEventsManager::GetEventsManager(GetWorld());
+        if (WaterManager && WaterManager->WaterSystem)
+        {
+            float WaterLevel = WaterManager->WaterSystem->GetCurrentWaterLevel();
+            float CharacterZ = GetActorLocation().Z;
+            
+            // If underwater, apply damage
+            if (CharacterZ < WaterLevel)
+            {
+                // Let the water system handle the kill
+                WaterManager->WaterSystem->KillCharacterInWater(this);
+            }
+        }
+    }
     // Gestion du mouvement et des points de mouvement
     if (bIsMyTurn && HasAuthority())
     {
@@ -644,45 +671,26 @@ void AWormCharacter::Server_SwitchWeapon_Implementation(int32 WeaponIndex)
 
 void AWormCharacter::SpawnCurrentWeapon()
 {
-    // Vérification d'autorité
-    if (!HasAuthority())
-    {
-        return;
-    }
+    if (!HasAuthority()) return;
     
-    // Vérifier l'index valide avant tout
     if (!AvailableWeapons.IsValidIndex(CurrentWeaponIndex))
     {
         return;
     }
 
-    // Nettoyage plus strict de l'arme existante
     if (CurrentWeapon)
     {
-        AWormWeapon* WeaponToDestroy = CurrentWeapon;
+        CurrentWeapon->Destroy();
         CurrentWeapon = nullptr;
-        WeaponToDestroy->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
-        GetWorld()->DestroyActor(WeaponToDestroy);
     }
 
-    // Obtenir la transformation du socket pour le spawn
-    FTransform SpawnTransform;
-    if (USkeletalMeshComponent* Meshss = GetMesh())
-    {
-        SpawnTransform = Meshss->GetSocketTransform(WeaponSocketName);
-    }
-    else
-    {
-        return;
-    }
-
-    // Spawn avec vérification du propriétaire
+    FTransform SpawnTransform = GetMesh()->GetSocketTransform(WeaponSocketName);
+    
     FActorSpawnParameters SpawnParams;
     SpawnParams.Owner = this;
     SpawnParams.Instigator = this;
     SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
-    // Création de l'arme
     CurrentWeapon = GetWorld()->SpawnActor<AWormWeapon>(
         AvailableWeapons[CurrentWeaponIndex],
         SpawnTransform,
@@ -691,15 +699,14 @@ void AWormCharacter::SpawnCurrentWeapon()
 
     if (CurrentWeapon)
     {
-        // Attachement direct avec une seule méthode
+        // Attacher avec des règles strictes d'attachement
         CurrentWeapon->AttachToComponent(GetMesh(),
             FAttachmentTransformRules::SnapToTargetIncludingScale,
             WeaponSocketName);
             
-        // Force une update réseau
+        // Force update réseau et multicast
         ForceNetUpdate();
         
-        // Attendre un court instant avant de propager aux clients
         FTimerHandle TimerHandle;
         GetWorld()->GetTimerManager().SetTimer(TimerHandle, [this]()
         {
@@ -707,21 +714,85 @@ void AWormCharacter::SpawnCurrentWeapon()
         }, 0.1f, false);
     }
 }
+
 void AWormCharacter::ApplyDamageToWorm(float DamageAmount, FVector ImpactDirection)
 {
+    // Valeur de santé avant d'appliquer les dégâts
+    float PreviousHealth = Health;
+    
     // Appliquer les dégâts
     Health = FMath::Max(0.0f, Health - DamageAmount);
-        
+    
+    // Log pour voir les changements de santé
+    UE_LOG(LogTemp, Warning, TEXT("Character %s: Health changed from %.1f to %.1f (damage: %.1f)"), 
+           *GetName(), PreviousHealth, Health, DamageAmount);
+    
     // L'impulsion est déjà incluse dans ImpactDirection, ne pas multiplier à nouveau
     // Juste normaliser pour être sûr
     ApplyMovementImpulse(ImpactDirection.GetSafeNormal(), ImpactDirection.Size());
-        
+    AActor* DamageInstigator = GetInstigator();
+    if (DamageInstigator)
+    {
+        // Get the game state to record damage
+        AWormGameState* GameState = Cast<AWormGameState>(UGameplayStatics::GetGameState(this));
+        if (GameState)
+        {
+            FString InstigatorName = DamageInstigator->GetName();
+            GameState->AddDamageDealt(InstigatorName, DamageAmount);
+        }
+    }
     // Vérifier si le personnage est mort
     if (Health <= 0)
     {
-        // Désactiver les collisions et le mouvement seulement si mort
-        GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-        GetCharacterMovement()->DisableMovement();
+        UE_LOG(LogTemp, Warning, TEXT("Character %s died!"), *GetName());
+    
+        // Update player alive status in game state
+        AWormGameState* GameState = Cast<AWormGameState>(UGameplayStatics::GetGameState(this));
+        if (GameState)
+        {
+            // Trouver notre index
+            int32 MyIndex = -1;
+        
+            AController* MyController = GetController();
+            if (MyController)
+            {
+                // Chercher cet index parmi tous les contrôleurs
+                for (int32 i = 0; i < GameState->PlayerNames.Num(); i++)
+                {
+                    if (MyController == UGameplayStatics::GetPlayerController(GetWorld(), i))
+                    {
+                        MyIndex = i;
+                        break;
+                    }
+                }
+            
+                // Si on n'a pas trouvé par le contrôleur, essayer avec l'index du joueur
+                if (MyIndex == -1 && GameState->PlayerNames.Num() > 0)
+                {
+                    // Solution de secours : utiliser index 0 si c'est le joueur local, 1 sinon
+                    MyIndex = IsLocallyControlled() ? 0 : 1;
+                    UE_LOG(LogTemp, Warning, TEXT("Using fallback index %d for %s"), MyIndex, *GetName());
+                }
+            
+                // Si on a trouvé un index valide, marquer le joueur comme mort
+                if (MyIndex != INDEX_NONE && GameState->PlayerIsAlive.IsValidIndex(MyIndex))
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("Setting player at index %d as not alive"), MyIndex);
+                    GameState->PlayerIsAlive[MyIndex] = false;
+                
+                    // Vérifier la condition de fin de partie
+                    GameState->CheckGameOverCondition();
+                }
+                else
+                {
+                    UE_LOG(LogTemp, Error, TEXT("Invalid player index %d"), MyIndex);
+                }
+            }
+            else
+            {
+                UE_LOG(LogTemp, Error, TEXT("Character %s has no controller!"), *GetName());
+            }
+        }
     }
     else
     {
@@ -1064,35 +1135,38 @@ void AWormCharacter::Server_UpdateWeaponRotation_Implementation(FRotator NewRota
         return;
     }
 
-    // Calculer les angles relatifs au personnage
+    // Calculer les angles relatifs
     const FRotator ActorRotation = GetActorRotation();
     float DeltaYaw = FMath::FindDeltaAngleDegrees(ActorRotation.Yaw, NewRotation.Yaw);
     
-    // Clamper les angles avec une tolérance plus large
-    const float Tolerance = 10.0f;
-    float ClampedPitch = FMath::ClampAngle(NewRotation.Pitch, -MaxPitchAngle - Tolerance, MaxPitchAngle + Tolerance);
-    float ClampedYaw = FMath::ClampAngle(DeltaYaw, -MaxYawAngle - Tolerance, MaxYawAngle + Tolerance);
+    float ClampedPitch = FMath::ClampAngle(NewRotation.Pitch, -MaxPitchAngle, MaxPitchAngle);
+    float ClampedYaw = FMath::ClampAngle(DeltaYaw, -MaxYawAngle, MaxYawAngle);
     
-    // Construire la rotation finale
     FRotator SafeRotation(ClampedPitch, ActorRotation.Yaw + ClampedYaw, 0.0f);
 
-    // Appliquer la rotation
     if (CurrentWeapon)
     {
-        CurrentWeapon->SetActorRotation(SafeRotation);
+        // Même logique d'attachement que dans UpdateWeaponRotation
+        FTransform SocketTransform = GetMesh()->GetSocketTransform(WeaponSocketName);
+        FTransform WeaponTransform = CurrentWeapon->GetActorTransform();
+        
+        WeaponTransform.SetRotation(SafeRotation.Quaternion());
+        WeaponTransform.SetLocation(SocketTransform.GetLocation());
+        
+        CurrentWeapon->SetActorTransform(WeaponTransform);
+        
+        // Propager aux autres clients
         Multicast_UpdateWeaponRotation(SafeRotation);
     }
 }
-
 void AWormCharacter::UpdateWeaponRotation()
 {
-    // Vérifications de base
+    // Ne mettre à jour que pour le controller local
     if (!IsLocallyControlled() || !CurrentWeapon || !bIsMyTurn)
     {
         return;
     }
 
-    // Obtenir les rotations nécessaires
     const FRotator ActorRotation = GetActorRotation();
     const FRotator ControlRotation = GetControlRotation();
     
@@ -1100,10 +1174,7 @@ void AWormCharacter::UpdateWeaponRotation()
     FRotator TargetRotation;
     if (bIsInFirstPersonMode)
     {
-        // Calculer les deltas d'angles
         float DeltaYaw = FMath::FindDeltaAngleDegrees(ActorRotation.Yaw, ControlRotation.Yaw);
-        
-        // Appliquer les limites
         float ClampedYaw = FMath::ClampAngle(DeltaYaw, -MaxYawAngle, MaxYawAngle);
         float ClampedPitch = FMath::ClampAngle(ControlRotation.Pitch, -MaxPitchAngle, MaxPitchAngle);
         
@@ -1111,20 +1182,27 @@ void AWormCharacter::UpdateWeaponRotation()
     }
     else
     {
-        // En TPS, simplement aligner avec le personnage
         TargetRotation = FRotator(0.0f, ActorRotation.Yaw, 0.0f);
     }
 
-    // Appliquer localement
+    // Mise à jour locale
     if (CurrentWeapon)
     {
-        CurrentWeapon->SetActorRotation(TargetRotation);
+        // Garder l'attachement au socket tout en appliquant la rotation relative
+        FTransform SocketTransform = GetMesh()->GetSocketTransform(WeaponSocketName);
+        FTransform WeaponTransform = CurrentWeapon->GetActorTransform();
+        
+        // Appliquer la nouvelle rotation tout en préservant l'attachement
+        WeaponTransform.SetRotation(TargetRotation.Quaternion());
+        WeaponTransform.SetLocation(SocketTransform.GetLocation());
+        
+        CurrentWeapon->SetActorTransform(WeaponTransform);
     }
     
     // Throttling des envois réseau
     static float LastSendTime = 0.0f;
     const float CurrentTime = GetWorld()->GetTimeSeconds();
-    const float MinTimeBetweenUpdates = 0.05f; // 20 updates par seconde
+    const float MinTimeBetweenUpdates = 0.05f;
     
     if (CurrentTime - LastSendTime >= MinTimeBetweenUpdates) 
     {
@@ -1135,35 +1213,51 @@ void AWormCharacter::UpdateWeaponRotation()
         }
     }
 }
-
 void AWormCharacter::Multicast_UpdateWeaponRotation_Implementation(FRotator NewRotation)
 {
     // Ne pas appliquer sur le client qui a envoyé la rotation
     if (!IsLocallyControlled() && CurrentWeapon)
     {
-        CurrentWeapon->SetActorRotation(NewRotation);
+        FTransform SocketTransform = GetMesh()->GetSocketTransform(WeaponSocketName);
+        FTransform WeaponTransform = CurrentWeapon->GetActorTransform();
+        
+        WeaponTransform.SetRotation(NewRotation.Quaternion());
+        WeaponTransform.SetLocation(SocketTransform.GetLocation());
+        
+        CurrentWeapon->SetActorTransform(WeaponTransform);
     }
 }
 
+
+
 void AWormCharacter::AttachWeaponToSocket(AWormWeapon* Weapon)
 {
-    if (!Weapon || !GetMesh())
+    if (!Weapon || !IsValid(Weapon) || !GetMesh() || !IsValid(GetMesh()))
     {
+        UE_LOG(LogTemp, Error, TEXT("AttachWeaponToSocket: Invalid weapon or mesh"));
         return;
     }
 
-    // Détacher d'abord
+    // Detach first
     Weapon->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
     
-    // Réattacher avec des règles strictes
+    // Check socket exists
+    if (!GetMesh()->DoesSocketExist(WeaponSocketName)) {
+        UE_LOG(LogTemp, Error, TEXT("Socket '%s' does not exist on character mesh"), *WeaponSocketName.ToString());
+        return;
+    }
+    
+    // Reattach with strict rules
     Weapon->AttachToComponent(GetMesh(),
         FAttachmentTransformRules::SnapToTargetIncludingScale,
         WeaponSocketName);
         
-    // S'assurer que l'arme est visible
+    // Ensure weapon is visible
     Weapon->EnsureWeaponVisibility();
+    
+    UE_LOG(LogTemp, Log, TEXT("Weapon %s attached to socket %s"), 
+        *Weapon->GetName(), *WeaponSocketName.ToString());
 }
-
 
 
 void AWormCharacter::ToggleCameraMode(bool bUseFPSCamera)
@@ -1268,56 +1362,113 @@ void AWormCharacter::OnRep_Health()
         PlayAnimMontage(DeathMontage);
     }
 }
-
 void AWormCharacter::OnRep_CurrentWeaponIndex()
 {
-    // Ne rien faire sur le serveur
+    // Don't do anything on the server
     if (HasAuthority())
     {
         return;
     }
 
-    // Vérification index valide
+    // Valid index check
     if (!AvailableWeapons.IsValidIndex(CurrentWeaponIndex))
     {
+        UE_LOG(LogTemp, Warning, TEXT("Invalid weapon index: %d (AvailableWeapons: %d)"), 
+               CurrentWeaponIndex, AvailableWeapons.Num());
         return;
     }
 
-    // Vérifier si on a déjà la bonne arme
+    // Check if we already have the right weapon
     if (CurrentWeapon && CurrentWeapon->IsA(AvailableWeapons[CurrentWeaponIndex]))
     {
+        UE_LOG(LogTemp, Log, TEXT("Already have correct weapon type: %s"), *CurrentWeapon->GetName());
+        // Just re-attach to ensure proper socket placement
         AttachWeaponToSocket(CurrentWeapon);
         return;
     }
 
-    // Destruction propre de l'arme existante
+    // Cleaner weapon destruction with added safety
     if (CurrentWeapon)
     {
         AWormWeapon* WeaponToDestroy = CurrentWeapon;
-        CurrentWeapon = nullptr;
+        CurrentWeapon = nullptr; // Clear reference first
+        
+        // Detach before destruction
         WeaponToDestroy->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
-        WeaponToDestroy->Destroy();
+        
+        // Destroy with delay to avoid race conditions
+        FTimerHandle DestroyTimer;
+        TWeakObjectPtr<AWormWeapon> WeakWeapon(WeaponToDestroy);
+        GetWorld()->GetTimerManager().SetTimer(
+            DestroyTimer,
+            [WeakWeapon]() {
+                if (WeakWeapon.IsValid()) {
+                    WeakWeapon->Destroy();
+                }
+            },
+            0.1f,
+            false
+        );
     }
 
-    // Création de la nouvelle arme avec la transformation du socket
+    // More safety checks before weapon creation
+    if (!IsValid(this) || !GetWorld() || !GetMesh()) {
+        UE_LOG(LogTemp, Error, TEXT("Cannot create weapon - invalid character state"));
+        return;
+    }
+
+    // Get the socket transform for spawning
     FTransform SpawnTransform = GetMesh()->GetSocketTransform(WeaponSocketName);
     
     FActorSpawnParameters SpawnParams;
     SpawnParams.Owner = this;
     SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
+    // Get the weapon class with safety check
+    TSubclassOf<AWormWeapon> WeaponClass = AvailableWeapons[CurrentWeaponIndex];
+    if (!WeaponClass) {
+        UE_LOG(LogTemp, Error, TEXT("NULL weapon class at index %d"), CurrentWeaponIndex);
+        return;
+    }
+
+    // Create the new weapon
     CurrentWeapon = GetWorld()->SpawnActor<AWormWeapon>(
-        AvailableWeapons[CurrentWeaponIndex],
+        WeaponClass,
         SpawnTransform,
         SpawnParams
     );
 
     if (CurrentWeapon)
     {
+        UE_LOG(LogTemp, Log, TEXT("Successfully created weapon: %s"), *CurrentWeapon->GetName());
+        
+        // Attach with improved rules and multiple safety attempts
         AttachWeaponToSocket(CurrentWeapon);
-        CurrentWeapon->EnsureWeaponVisibility();
+        
+        // Schedule multiple visibility checks to ensure weapon remains visible
+        for (float Delay : {0.2f, 0.5f, 1.0f, 2.0f}) {
+            FTimerHandle VisibilityTimer;
+            TWeakObjectPtr<AWormCharacter> WeakThis(this);
+            TWeakObjectPtr<AWormWeapon> WeakWeapon(CurrentWeapon);
+            
+            GetWorld()->GetTimerManager().SetTimer(
+                VisibilityTimer,
+                [WeakThis, WeakWeapon]() {
+                    if (WeakThis.IsValid() && WeakWeapon.IsValid()) {
+                        WeakWeapon->EnsureWeaponVisibility();
+                    }
+                },
+                Delay,
+                false
+            );
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("Failed to create weapon of class %s"), *WeaponClass->GetName());
     }
 }
+
 
 void AWormCharacter::PlayHitReaction()
 {
