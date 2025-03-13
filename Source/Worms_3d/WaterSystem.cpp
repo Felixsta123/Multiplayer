@@ -131,6 +131,8 @@ void UWaterSystem::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLife
     
     DOREPLIFETIME(UWaterSystem, CurrentWaterLevel);
     DOREPLIFETIME(UWaterSystem, TargetWaterLevel);
+    DOREPLIFETIME(UWaterSystem, bIsWaterRising);
+
 }
 
 void UWaterSystem::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -202,14 +204,21 @@ void UWaterSystem::Multicast_SetWaterLevel_Implementation(float NewLevel, bool b
 {
     if (!GetOwner()->HasAuthority())
     {
+        // Update target level
+        bIsWaterRising = (NewLevel > CurrentWaterLevel);
         TargetWaterLevel = NewLevel;
+        
+        // If immediate, update current level too
         if (bImmediate)
         {
             CurrentWaterLevel = NewLevel;
+            UpdateWaterMeshAndVolume();
         }
-        UpdateWaterMeshAndVolume();
+        // Otherwise, let Tick component handle the smooth animation
+        // No need to force update here, as tick will handle it
     }
 }
+
 
 
 

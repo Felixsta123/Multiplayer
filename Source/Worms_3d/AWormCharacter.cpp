@@ -653,45 +653,26 @@ void AWormCharacter::Server_SwitchWeapon_Implementation(int32 WeaponIndex)
 
 void AWormCharacter::SpawnCurrentWeapon()
 {
-    // Vérification d'autorité
-    if (!HasAuthority())
-    {
-        return;
-    }
+    if (!HasAuthority()) return;
     
-    // Vérifier l'index valide avant tout
     if (!AvailableWeapons.IsValidIndex(CurrentWeaponIndex))
     {
         return;
     }
 
-    // Nettoyage plus strict de l'arme existante
     if (CurrentWeapon)
     {
-        AWormWeapon* WeaponToDestroy = CurrentWeapon;
+        CurrentWeapon->Destroy();
         CurrentWeapon = nullptr;
-        WeaponToDestroy->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
-        GetWorld()->DestroyActor(WeaponToDestroy);
     }
 
-    // Obtenir la transformation du socket pour le spawn
-    FTransform SpawnTransform;
-    if (USkeletalMeshComponent* Meshss = GetMesh())
-    {
-        SpawnTransform = Meshss->GetSocketTransform(WeaponSocketName);
-    }
-    else
-    {
-        return;
-    }
-
-    // Spawn avec vérification du propriétaire
+    FTransform SpawnTransform = GetMesh()->GetSocketTransform(WeaponSocketName);
+    
     FActorSpawnParameters SpawnParams;
     SpawnParams.Owner = this;
     SpawnParams.Instigator = this;
     SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
-    // Création de l'arme
     CurrentWeapon = GetWorld()->SpawnActor<AWormWeapon>(
         AvailableWeapons[CurrentWeaponIndex],
         SpawnTransform,
@@ -700,15 +681,14 @@ void AWormCharacter::SpawnCurrentWeapon()
 
     if (CurrentWeapon)
     {
-        // Attachement direct avec une seule méthode
+        // Attacher avec des règles strictes d'attachement
         CurrentWeapon->AttachToComponent(GetMesh(),
             FAttachmentTransformRules::SnapToTargetIncludingScale,
             WeaponSocketName);
             
-        // Force une update réseau
+        // Force update réseau et multicast
         ForceNetUpdate();
         
-        // Attendre un court instant avant de propager aux clients
         FTimerHandle TimerHandle;
         GetWorld()->GetTimerManager().SetTimer(TimerHandle, [this]()
         {
@@ -716,6 +696,7 @@ void AWormCharacter::SpawnCurrentWeapon()
         }, 0.1f, false);
     }
 }
+
 void AWormCharacter::ApplyDamageToWorm(float DamageAmount, FVector ImpactDirection)
 {
     // Valeur de santé avant d'appliquer les dégâts
@@ -1136,35 +1117,38 @@ void AWormCharacter::Server_UpdateWeaponRotation_Implementation(FRotator NewRota
         return;
     }
 
-    // Calculer les angles relatifs au personnage
+    // Calculer les angles relatifs
     const FRotator ActorRotation = GetActorRotation();
     float DeltaYaw = FMath::FindDeltaAngleDegrees(ActorRotation.Yaw, NewRotation.Yaw);
     
-    // Clamper les angles avec une tolérance plus large
-    const float Tolerance = 10.0f;
-    float ClampedPitch = FMath::ClampAngle(NewRotation.Pitch, -MaxPitchAngle - Tolerance, MaxPitchAngle + Tolerance);
-    float ClampedYaw = FMath::ClampAngle(DeltaYaw, -MaxYawAngle - Tolerance, MaxYawAngle + Tolerance);
+    float ClampedPitch = FMath::ClampAngle(NewRotation.Pitch, -MaxPitchAngle, MaxPitchAngle);
+    float ClampedYaw = FMath::ClampAngle(DeltaYaw, -MaxYawAngle, MaxYawAngle);
     
-    // Construire la rotation finale
     FRotator SafeRotation(ClampedPitch, ActorRotation.Yaw + ClampedYaw, 0.0f);
 
-    // Appliquer la rotation
     if (CurrentWeapon)
     {
-        CurrentWeapon->SetActorRotation(SafeRotation);
+        // Même logique d'attachement que dans UpdateWeaponRotation
+        FTransform SocketTransform = GetMesh()->GetSocketTransform(WeaponSocketName);
+        FTransform WeaponTransform = CurrentWeapon->GetActorTransform();
+        
+        WeaponTransform.SetRotation(SafeRotation.Quaternion());
+        WeaponTransform.SetLocation(SocketTransform.GetLocation());
+        
+        CurrentWeapon->SetActorTransform(WeaponTransform);
+        
+        // Propager aux autres clients
         Multicast_UpdateWeaponRotation(SafeRotation);
     }
 }
-
 void AWormCharacter::UpdateWeaponRotation()
 {
-    // Vérifications de base
+    // Ne mettre à jour que pour le controller local
     if (!IsLocallyControlled() || !CurrentWeapon || !bIsMyTurn)
     {
         return;
     }
 
-    // Obtenir les rotations nécessaires
     const FRotator ActorRotation = GetActorRotation();
     const FRotator ControlRotation = GetControlRotation();
     
@@ -1172,10 +1156,7 @@ void AWormCharacter::UpdateWeaponRotation()
     FRotator TargetRotation;
     if (bIsInFirstPersonMode)
     {
-        // Calculer les deltas d'angles
         float DeltaYaw = FMath::FindDeltaAngleDegrees(ActorRotation.Yaw, ControlRotation.Yaw);
-        
-        // Appliquer les limites
         float ClampedYaw = FMath::ClampAngle(DeltaYaw, -MaxYawAngle, MaxYawAngle);
         float ClampedPitch = FMath::ClampAngle(ControlRotation.Pitch, -MaxPitchAngle, MaxPitchAngle);
         
@@ -1183,20 +1164,27 @@ void AWormCharacter::UpdateWeaponRotation()
     }
     else
     {
-        // En TPS, simplement aligner avec le personnage
         TargetRotation = FRotator(0.0f, ActorRotation.Yaw, 0.0f);
     }
 
-    // Appliquer localement
+    // Mise à jour locale
     if (CurrentWeapon)
     {
-        CurrentWeapon->SetActorRotation(TargetRotation);
+        // Garder l'attachement au socket tout en appliquant la rotation relative
+        FTransform SocketTransform = GetMesh()->GetSocketTransform(WeaponSocketName);
+        FTransform WeaponTransform = CurrentWeapon->GetActorTransform();
+        
+        // Appliquer la nouvelle rotation tout en préservant l'attachement
+        WeaponTransform.SetRotation(TargetRotation.Quaternion());
+        WeaponTransform.SetLocation(SocketTransform.GetLocation());
+        
+        CurrentWeapon->SetActorTransform(WeaponTransform);
     }
     
     // Throttling des envois réseau
     static float LastSendTime = 0.0f;
     const float CurrentTime = GetWorld()->GetTimeSeconds();
-    const float MinTimeBetweenUpdates = 0.05f; // 20 updates par seconde
+    const float MinTimeBetweenUpdates = 0.05f;
     
     if (CurrentTime - LastSendTime >= MinTimeBetweenUpdates) 
     {
@@ -1207,15 +1195,22 @@ void AWormCharacter::UpdateWeaponRotation()
         }
     }
 }
-
 void AWormCharacter::Multicast_UpdateWeaponRotation_Implementation(FRotator NewRotation)
 {
     // Ne pas appliquer sur le client qui a envoyé la rotation
     if (!IsLocallyControlled() && CurrentWeapon)
     {
-        CurrentWeapon->SetActorRotation(NewRotation);
+        FTransform SocketTransform = GetMesh()->GetSocketTransform(WeaponSocketName);
+        FTransform WeaponTransform = CurrentWeapon->GetActorTransform();
+        
+        WeaponTransform.SetRotation(NewRotation.Quaternion());
+        WeaponTransform.SetLocation(SocketTransform.GetLocation());
+        
+        CurrentWeapon->SetActorTransform(WeaponTransform);
     }
 }
+
+
 
 void AWormCharacter::AttachWeaponToSocket(AWormWeapon* Weapon)
 {

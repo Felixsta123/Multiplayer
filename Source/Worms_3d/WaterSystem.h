@@ -164,6 +164,7 @@ protected:
 
 	UPROPERTY(Replicated)
 	float TargetWaterLevel;
+	UPROPERTY(Replicated)
 
     bool bIsWaterRising;
     
