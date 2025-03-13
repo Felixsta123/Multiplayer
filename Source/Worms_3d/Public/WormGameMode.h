@@ -117,6 +117,8 @@ public:
     // Function to collect all controllers
     UFUNCTION(BlueprintCallable, Category = "Game")
     void GatherAllPlayerControllers();
+    void PreLogin(const FString& Options, const FString& Address, const FUniqueNetIdRepl& UniqueId,
+                  FString& ErrorMessage);
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI")
     TSubclassOf<UUserWidget> GameOverWidgetClass;
 
@@ -132,7 +134,8 @@ protected:
     
     UPROPERTY(BlueprintReadWrite, Category = "Game")
     bool local;
-    
+    bool bInitializationStarted;
+
     TArray<APlayerController*> ReadyPlayers;
     virtual void CheckAllPlayersReady();
     // Turn timer handle

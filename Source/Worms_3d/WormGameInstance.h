@@ -11,7 +11,8 @@ class WORMS_3D_API UWormGameInstance : public UGameInstance
     
 public:
 	UWormGameInstance();
-	
+	UPROPERTY(BlueprintReadWrite, Category = "Game")
+	int32 ExpectedPlayerCount;
 	// We're removing all game results functionality from GameInstance
 	// to keep it within the GameState/GameMode
 

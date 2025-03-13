@@ -44,11 +44,7 @@ void AWormGameMode::BeginPlay()
     // Setup game initialization manager
     if (bUseGameInitManager)
     {
-        GameInitManager = SetupGameInitialization();
         InitializeWaterSystem();
-        
-        // Initialization sequence will now be triggered by CheckAllPlayersReady
-        // when all players have confirmed readiness
     }
 }
 
@@ -105,6 +101,19 @@ void AWormGameMode::GatherAllPlayerControllers()
     }
 }
 
+
+void AWormGameMode::PreLogin(const FString& Options, const FString& Address, const FUniqueNetIdRepl& UniqueId, FString& ErrorMessage)
+{
+    Super::PreLogin(Options, Address, UniqueId, ErrorMessage);
+    
+    // Get expected players from GameInstance
+    UWormGameInstance* GameInstance = Cast<UWormGameInstance>(GetGameInstance());
+    if (GameInstance)
+    {
+        NumPlayers = GameInstance->ExpectedPlayerCount;
+        UE_LOG(LogTemp, Warning, TEXT("Setting NumPlayers from GameInstance: %d"), NumPlayers);
+    }
+}
 AWormCharacter* AWormGameMode::GetWormCharacterFromController(AController* Controller)
 {
     if (!Controller)
@@ -842,23 +851,53 @@ void AWormGameMode::InitializeWaterSystem()
     }
 }
 
+
 void AWormGameMode::NotifyPlayerReady(APlayerController* PC)
 {
     if (!ReadyPlayers.Contains(PC))
     {
         ReadyPlayers.Add(PC);
+        UE_LOG(LogTemp, Log, TEXT("Player ready: %s (%d/%d)"), 
+            *PC->GetName(), ReadyPlayers.Num(), NumPlayers);
+            
         CheckAllPlayersReady();
     }
 }
 
 void AWormGameMode::CheckAllPlayersReady()
 {
-    if (ReadyPlayers.Num() == NumPlayers)
+    //get the number of players in the instance
+    UWormGameInstance* GameInstance = Cast<UWormGameInstance>(GetGameInstance());
+    int32 ExpectedPlayers = GameInstance ? GameInstance->ExpectedPlayerCount : NumPlayers;
+    
+    UE_LOG(LogTemp, Warning, TEXT("Checking player readiness: Ready=%d, Expected=%d"), 
+        ReadyPlayers.Num(), ExpectedPlayers);
+
+    if (!bInitializationStarted && ReadyPlayers.Num() == ExpectedPlayers)
     {
-        // Tous les joueurs sont prêts, démarrer l'initialisation
-        if (GameInitManager)
+        bInitializationStarted = true;
+        GameInitManager = SetupGameInitialization();
+        UE_LOG(LogTemp, Log, TEXT("All players ready, starting initialization sequence : %d"), ReadyPlayers.Num());
+        // Show loading screen first
+        AWormGameState* WormGS = GetGameState<AWormGameState>();
+        if (WormGS && WormGS->LoadingManager)
         {
-            GameInitManager->StartInitializationSequence();
+            WormGS->ShowLoadingScreen(10.0f);
         }
+        
+        // Start initialization after brief delay
+        FTimerHandle InitTimerHandle;
+        GetWorld()->GetTimerManager().SetTimer(
+            InitTimerHandle,
+            [this]()
+            {
+                if (GameInitManager)
+                {
+                    GameInitManager->StartInitializationSequence();
+                }
+            },
+            1.0f,
+            false
+        );
     }
 }

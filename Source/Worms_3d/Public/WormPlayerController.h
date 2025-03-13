@@ -21,7 +21,7 @@ public:
     // Player settings variable
     UPROPERTY(Replicated, EditAnywhere, BlueprintReadWrite, Category = "Player Settings")
     FPlayerData PlayerSettings;
-    protected:
+protected:
     // La classe du widget UI à créer
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "UI")
     TSubclassOf<UUserWidget> GameUIClass;
@@ -47,6 +47,15 @@ public:
     bool ServerSetPlayerSettings_Validate(const FPlayerData& NewSettings);
     virtual void OnNetCleanup(class UNetConnection* Connection) override;
     virtual void AcknowledgePossession(class APawn* P) override;
+
+    UPROPERTY(ReplicatedUsing = OnRep_IsReady)
+    bool bIsReady;
+    
+    UFUNCTION()
+    void OnRep_IsReady();
+    
+    UFUNCTION(Server, Reliable, WithValidation)
+    void ServerSignalReady();
 private:
     FTimerHandle UICheckTimerHandle;
     FTimerHandle PlayerUITimerHandle;

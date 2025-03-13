@@ -196,10 +196,43 @@ void AWormPlayerController::AcknowledgePossession(APawn* P)
 {
     Super::AcknowledgePossession(P);
     
-    // Notify GameMode that this controller is ready
     if (GetNetMode() != NM_Standalone)
     {
-        AWormGameMode* GameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(this));
+        // Signal ready to server
+        ServerSignalReady();
+    }
+    else
+    {
+        bIsReady = true;
+    }
+}
+
+void AWormPlayerController::OnRep_IsReady()
+{
+    if (bIsReady)
+    {
+        // Client knows it's ready - can prepare UI/etc
+        if (IsLocalController())
+        {
+            // Create UI
+            CreatePlayerUI();
+        }
+    }
+}
+
+bool AWormPlayerController::ServerSignalReady_Validate()
+{
+    return true;
+}
+
+void AWormPlayerController::ServerSignalReady_Implementation()
+{
+    if (!bIsReady)
+    {
+        bIsReady = true;
+        
+        // Notify GameMode
+        AWormGameMode* GameMode = Cast<AWormGameMode>(GetWorld()->GetAuthGameMode());
         if (GameMode)
         {
             GameMode->NotifyPlayerReady(this);
