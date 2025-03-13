@@ -123,6 +123,7 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Game")
     void ShowGameOverWidget();
     void StartRestartSequence();
+    virtual void NotifyPlayerReady(APlayerController* PC);
 
 protected:
     // Miscellaneous variables 
@@ -132,15 +133,10 @@ protected:
     UPROPERTY(BlueprintReadWrite, Category = "Game")
     bool local;
     
-
+    TArray<APlayerController*> ReadyPlayers;
+    virtual void CheckAllPlayersReady();
     // Turn timer handle
     FTimerHandle TurnTimerHandle;
-    
-    // Delayed spawn timer handles
-    FTimerHandle TerrainSpawnTimerHandle;
-    FTimerHandle VoxelBuildingsSpawnTimerHandle;
-    FTimerHandle WeaponSpawnTimerHandle;
-
 
     // Function called when time expires
     UFUNCTION()

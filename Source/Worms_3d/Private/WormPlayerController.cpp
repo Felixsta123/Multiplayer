@@ -1,6 +1,7 @@
 #include "WormPlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "UWormGameUI.h"
+#include "WormGameMode.h"
 #include "WormGameState.h"
 #include "Worms_3d/PlayerSaveGame.h"
 #include "Net/UnrealNetwork.h"
@@ -183,4 +184,25 @@ void AWormPlayerController::ServerSetPlayerSettings_Implementation(const FPlayer
     
     // Mark property as dirty to ensure it's replicated to other clients
     MARK_PROPERTY_DIRTY_FROM_NAME(AWormPlayerController, PlayerSettings, this);
+}
+
+void AWormPlayerController::OnNetCleanup(UNetConnection* Connection)
+{
+    Super::OnNetCleanup(Connection);
+    bIsFullyInitialized = false;
+}
+
+void AWormPlayerController::AcknowledgePossession(APawn* P)
+{
+    Super::AcknowledgePossession(P);
+    
+    // Notify GameMode that this controller is ready
+    if (GetNetMode() != NM_Standalone)
+    {
+        AWormGameMode* GameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(this));
+        if (GameMode)
+        {
+            GameMode->NotifyPlayerReady(this);
+        }
+    }
 }

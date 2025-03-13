@@ -41,36 +41,17 @@ void AWormGameMode::BeginPlay()
 {
     Super::BeginPlay();
     
-    // If using game init manager, set it up first and let it handle initialization
+    // Setup game initialization manager
     if (bUseGameInitManager)
     {
-        // Setup the game initialization manager
         GameInitManager = SetupGameInitialization();
-        //TODO: move the next function in the game init manager
         InitializeWaterSystem();
-
-        // Let the game init manager handle the initialization sequence
-        // (it will call our functions in the proper order)
-    }
-    else
-    {
-        // Use original initialization logic
-        // Collect all controllers
-        GatherAllPlayerControllers();
         
-        // Collect spawn points
-        UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), SpawnPoints);
-        
-        // Initialize voxel buildings first (changed order to prioritize voxel buildings)
-        GetWorldTimerManager().SetTimer(VoxelBuildingsSpawnTimerHandle, this, &AWormGameMode::GenerateVoxelBuildings, 1.0f, false);
-
-        // Initialize weapons for all players
-        GetWorldTimerManager().SetTimer(WeaponSpawnTimerHandle, this, &AWormGameMode::InitializeWeaponsForAllPlayers, 1.5f, false);
-     
-        // Start first turn after a delay
-        GetWorldTimerManager().SetTimer(TurnTimerHandle, this, &AWormGameMode::StartNextTurn, 2.5f, false);
+        // Initialization sequence will now be triggered by CheckAllPlayersReady
+        // when all players have confirmed readiness
     }
 }
+
 
 void AWormGameMode::Tick(float DeltaTime)
 {
@@ -652,18 +633,11 @@ AGameInitManager* AWormGameMode::SetupGameInitialization()
         AWormGameState* WormGS = GetGameState<AWormGameState>();
         if (WormGS && WormGS->LoadingManager)
         {
-            // Make sure GameInitManager and LoadingManager use the same widget class
             if (LoadingWidgetClass)
             {
                 WormGS->LoadingManager->LoadingWidgetClass = LoadingWidgetClass;
-                // Also set in GameInitManager for consistency
                 GameInitManager->LoadingWidgetClass = LoadingWidgetClass;
             }
-            UE_LOG(LogTemp, Log, TEXT("NetworkLoadingManager in GameState configured with correct widget class"));
-        }
-        else
-        {
-            UE_LOG(LogTemp, Error, TEXT("WARNING: No NetworkLoadingManager found in GameState - loading screens won't be networked!"));
         }
     }
 
@@ -865,5 +839,26 @@ void AWormGameMode::InitializeWaterSystem()
     else
     {
         UE_LOG(LogTemp, Warning, TEXT("WaterSystemManagerClass not set in GameMode"));
+    }
+}
+
+void AWormGameMode::NotifyPlayerReady(APlayerController* PC)
+{
+    if (!ReadyPlayers.Contains(PC))
+    {
+        ReadyPlayers.Add(PC);
+        CheckAllPlayersReady();
+    }
+}
+
+void AWormGameMode::CheckAllPlayersReady()
+{
+    if (ReadyPlayers.Num() == NumPlayers)
+    {
+        // Tous les joueurs sont prêts, démarrer l'initialisation
+        if (GameInitManager)
+        {
+            GameInitManager->StartInitializationSequence();
+        }
     }
 }
