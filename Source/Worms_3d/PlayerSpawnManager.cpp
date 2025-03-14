@@ -112,6 +112,10 @@ void UPlayerSpawnManager::TeleportPlayersToPositions(const TArray<FVector>& Spaw
 
 void UPlayerSpawnManager::TeleportPlayersToBuildings()
 {
+    UE_LOG(LogTemp, Warning, TEXT("===================================="));
+    UE_LOG(LogTemp, Warning, TEXT("Starting player teleportation process"));
+    UE_LOG(LogTemp, Warning, TEXT("===================================="));
+
     TArray<AImprovedVoxelBuilding*> Buildings = AImprovedVoxelBuilding::FindAllVoxelBuildings(this);
     if (Buildings.Num() == 0) return;
 
@@ -120,16 +124,22 @@ void UPlayerSpawnManager::TeleportPlayersToBuildings()
 
     // Répartir les bâtiments entre les équipes
     int32 BuildingsPerTeam = FMath::Max(1, Buildings.Num() / GameMode->NumTeams);
+    UE_LOG(LogTemp, Warning, TEXT("Found %d buildings, preparing to spawn %d teams with %d characters each"),
+     Buildings.Num(), GameMode->NumTeams, GameMode->CharactersPerTeam);
+
     
     for (int32 TeamIndex = 0; TeamIndex < GameMode->NumTeams; TeamIndex++)
     {
+        UE_LOG(LogTemp, Warning, TEXT("\nInitializing Team %d:"), TeamIndex);
+
         // Base building index for this team
         int32 BaseBuildingIndex = TeamIndex * BuildingsPerTeam;
         AImprovedVoxelBuilding* TeamBuilding = Buildings[BaseBuildingIndex % Buildings.Num()];
         
         // Get base spawn position for team
         FVector BaseSpawnPoint = TeamBuilding->GetTopSpawnPoint() + FVector(0, 0, 200.0f);
-
+        UE_LOG(LogTemp, Warning, TEXT("Team %d base spawn point: %s"), 
+               TeamIndex, *BaseSpawnPoint.ToString());
         // Spawn each character for this team
         for (int32 CharIndex = 0; CharIndex < GameMode->CharactersPerTeam; CharIndex++)
         {
@@ -160,6 +170,10 @@ void UPlayerSpawnManager::TeleportPlayersToBuildings()
                     SpawnParams
                 );
 
+                UE_LOG(LogTemp, Warning, TEXT("  Spawning Character %d for Team %d:"), CharIndex, TeamIndex);
+                UE_LOG(LogTemp, Warning, TEXT("    - Location: %s"), *SpawnLocation.ToString());
+                UE_LOG(LogTemp, Warning, TEXT("    - Character Class: %s"), 
+                    *WPC->PlayerSettings.MyPlayerCharacter->GetName());
                 if (Character)
                 {
                     Character->TeamId = TeamIndex;
@@ -172,10 +186,15 @@ void UPlayerSpawnManager::TeleportPlayersToBuildings()
                     {
                         WormGS->AddCharacterToTeam(Character, TeamIndex);
                     }
+                    UE_LOG(LogTemp, Warning, TEXT("    - Successfully spawned and added to team"));
+
                 }
             }
         }
     }
+    UE_LOG(LogTemp, Warning, TEXT("===================================="));
+    UE_LOG(LogTemp, Warning, TEXT("Completed player teleportation process"));
+    UE_LOG(LogTemp, Warning, TEXT("===================================="));
 }
 FVector UPlayerSpawnManager::FindSpawnLocationOnBuilding(AImprovedVoxelBuilding* Building, TArray<FVector>& ExistingLocations)
 {

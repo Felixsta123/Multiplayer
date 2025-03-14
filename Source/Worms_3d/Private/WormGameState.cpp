@@ -338,6 +338,10 @@ TArray<AWormCharacter*> AWormGameState::GetTeamMembers(int32 TeamIndex) const
 
 void AWormGameState::InitializeTeams(int32 NumTeams)
 {
+    UE_LOG(LogTemp, Warning, TEXT("========================"));
+    UE_LOG(LogTemp, Warning, TEXT("Initializing %d teams"), NumTeams);
+    UE_LOG(LogTemp, Warning, TEXT("========================"));
+
     Teams.Empty();
     
     for (int32 i = 0; i < NumTeams; i++)
@@ -345,22 +349,56 @@ void AWormGameState::InitializeTeams(int32 NumTeams)
         FTeamInfo NewTeam;
         NewTeam.TeamId = i;
         NewTeam.TeamName = FString::Printf(TEXT("Team %d"), i + 1);
-        // Assigner une couleur unique à chaque équipe
         float Hue = (float)i / NumTeams;
         NewTeam.TeamColor = FLinearColor::MakeFromHSV8(Hue * 255, 200, 200);
         Teams.Add(NewTeam);
+        
+        UE_LOG(LogTemp, Warning, TEXT("Created Team %d - Name: %s"), i, *NewTeam.TeamName);
     }
     
     ForceNetUpdate();
 }
 
+
 void AWormGameState::AddCharacterToTeam(AWormCharacter* Character, int32 TeamId)
 {
-    if (!Character) return;
-    
-    if (Teams.IsValidIndex(TeamId))
+    if (!Character) 
     {
-        Teams[TeamId].TeamMembers.Add(Character);
-        ForceNetUpdate();
+        UE_LOG(LogTemp, Error, TEXT("Attempted to add NULL character to team %d"), TeamId);
+        return;
     }
+    
+    if (!Teams.IsValidIndex(TeamId))
+    {
+        UE_LOG(LogTemp, Error, TEXT("Invalid team index %d when adding character %s"), 
+            TeamId, *Character->GetName());
+        return;
+    }
+
+    Teams[TeamId].TeamMembers.Add(Character);
+    
+    // Log détaillé du personnage ajouté
+    UE_LOG(LogTemp, Warning, TEXT("Added character to Team %d:"), TeamId);
+    UE_LOG(LogTemp, Warning, TEXT("  - Name: %s"), *Character->GetName());
+    UE_LOG(LogTemp, Warning, TEXT("  - Health: %.1f"), Character->GetHealth());
+    UE_LOG(LogTemp, Warning, TEXT("  - TeamId: %d"), Character->TeamId);
+    UE_LOG(LogTemp, Warning, TEXT("  - CharacterIndexInTeam: %d"), Character->CharacterIndexInTeam);
+    
+    // Afficher l'état actuel de l'équipe
+    UE_LOG(LogTemp, Warning, TEXT("Team %d now has %d members:"), 
+        TeamId, Teams[TeamId].TeamMembers.Num());
+    for (int32 i = 0; i < Teams[TeamId].TeamMembers.Num(); i++)
+    {
+        AWormCharacter* TeamMember = Teams[TeamId].TeamMembers[i];
+        if (TeamMember)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("  %d. %s"), i + 1, *TeamMember->GetName());
+        }
+        else
+        {
+            UE_LOG(LogTemp, Error, TEXT("  %d. NULL MEMBER"), i + 1);
+        }
+    }
+
+    ForceNetUpdate();
 }
