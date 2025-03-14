@@ -143,7 +143,18 @@ void AWormGameMode::StartNextTurn()
     do {
         // Get current team's characters
         TArray<AWormCharacter*> TeamMembers = WormGS->GetTeamMembers(CurrentTeamIndex);
-        
+        //For debugging purposes print all the team  and all the team members names
+        UE_LOG(LogTemp, Log, TEXT("Team %d has %d members"), CurrentTeamIndex, TeamMembers.Num());
+        for (int i = 0; i < NumTeams; i++)
+        {
+            TArray<AWormCharacter*> TeamMembersPrint = WormGS->GetTeamMembers(i);
+            UE_LOG(LogTemp, Log, TEXT("Team %d has %d members"), i, TeamMembersPrint.Num());
+            for (int j = 0; j < TeamMembersPrint.Num(); j++)
+            {
+                UE_LOG(LogTemp, Log, TEXT("Team %d member %d: %s"), i, j, *TeamMembersPrint[j]->GetName());
+            }
+        }
+      
         // Check if current character in team is valid and alive
         if (TeamMembers.IsValidIndex(CurrentCharacterIndex))
         {
@@ -153,7 +164,12 @@ void AWormGameMode::StartNextTurn()
                 foundValidCharacter = true;
                 break;
             }
+        } else {
+            // Invalid index, move to next character
+            CurrentCharacterIndex++;
+            UE_LOG(LogTemp, Log, TEXT("Invalid character index, moving to next"));
         }
+        
 
         // Move to next character/team
         CurrentCharacterIndex++;
@@ -187,12 +203,13 @@ void AWormGameMode::StartNextTurn()
             }
         }
 
-        // Update GameState
-        WormGS->SetCurrentPlayerByIndex(CurrentTeamIndex * CharactersPerTeam + CurrentCharacterIndex);
+        // Update GameState with correct individual character index
+        int32 globalCharacterIndex = (CurrentTeamIndex * CharactersPerTeam) + CurrentCharacterIndex;
+        WormGS->SetCurrentPlayerByIndex(globalCharacterIndex);
+        
         StartTurnTimer();
     }
 }
-
 void AWormGameMode::EndCurrentTurn()
 {
     // Cancel current timer

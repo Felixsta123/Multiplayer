@@ -483,6 +483,8 @@ void AWormCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
     DOREPLIFETIME(AWormCharacter, CurrentWeapon);
     DOREPLIFETIME(AWormCharacter, MovementPoints);
     DOREPLIFETIME(AWormCharacter, AvailableWeapons);
+    DOREPLIFETIME(AWormCharacter, CharacterIndexInTeam);
+    DOREPLIFETIME(AWormCharacter, TeamId);
 }
 
 // Fonctions de mouvement legacy
@@ -821,8 +823,14 @@ void AWormCharacter::Multicast_ApplyImpulse_Implementation(FVector Direction, fl
     }
 }
 
+
 void AWormCharacter::SetIsMyTurn(bool bNewTurn)
 {
+    //DEBUG
+    UE_LOG(LogTemp, Warning, TEXT("SetIsMyTurn called"));
+    UE_LOG(LogTemp, Warning, TEXT("bIsMyTurn: %d"), bIsMyTurn);
+    UE_LOG(LogTemp, Warning, TEXT("bNewTurn: %d"), bNewTurn);
+    UE_LOG(LogTemp, Warning, TEXT("bAutoEndTurnTimerActive: %d"), bAutoEndTurnTimerActive);
     // Cette fonction ne devrait être appelée que par le serveur
     if (HasAuthority())
     {
@@ -868,10 +876,10 @@ void AWormCharacter::SetIsMyTurn(bool bNewTurn)
         }
     }
 }
+
 void AWormCharacter::OnTurnChanged_Implementation(bool bIsTurn)
 {
-    // Cette fonction peut être surchargée en Blueprint
-    // Le code C++ par défaut est minimal
+  
 }
 
 bool AWormCharacter::IsPendingKill() const

@@ -83,6 +83,8 @@ void AWormPlayerController::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 
     // Add PlayerSettings to the list of replicated properties
     DOREPLIFETIME(AWormPlayerController, PlayerSettings);
+    DOREPLIFETIME(AWormPlayerController, bIsReady);
+    
 }
 
 void AWormPlayerController::Tick(float DeltaTime)
