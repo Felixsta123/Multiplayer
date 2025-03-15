@@ -19,6 +19,8 @@ class WORMS_3D_API AWormCharacter : public ACharacter
 public:
     AWormCharacter();
 
+    int32 DiagnosticCount = 0;
+
     // === COMPOSANTS DE CAMÉRA ===
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     class USpringArmComponent* CameraBoom;

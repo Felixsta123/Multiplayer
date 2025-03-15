@@ -90,4 +90,6 @@ protected:
     
     // Update center display with weapon info
     void UpdateCenterDisplay();
+
+    
 };

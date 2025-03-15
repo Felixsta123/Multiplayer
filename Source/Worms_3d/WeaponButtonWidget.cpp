@@ -64,8 +64,17 @@ void UWeaponButtonWidget::OnButtonClicked()
 
 void UWeaponButtonWidget::OnButtonHovered()
 {
-	if (ParentWheel)
-	{
-		ParentWheel->SetHighlightedWeapon(WeaponIndex);
-	}
+    if (ParentWheel)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Button %d directly hovered"), WeaponIndex);
+        ParentWheel->SetHighlightedWeapon(WeaponIndex);
+    }
 }
+
+// void UWeaponButtonWidget::OnButtonHovered()
+// {
+// 	if (ParentWheel)
+// 	{
+// 		ParentWheel->SetHighlightedWeapon(WeaponIndex);
+// 	}
+// }

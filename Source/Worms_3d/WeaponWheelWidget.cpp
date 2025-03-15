@@ -54,121 +54,9 @@ void UWeaponWheelWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTi
     // You could add animation or other continuous updates here
 }
 
-FReply UWeaponWheelWidget::NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
-{
-    // Get the local mouse position
-    FVector2D MousePosition = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
-    
-    // Calculate which weapon should be highlighted based on mouse position
-    int32 Index = GetWeaponIndexFromMousePosition(MousePosition);
-    
-    // Update highlighted weapon if needed
-    if (Index != HighlightedIndex && Index >= 0)
-    {
-        SetHighlightedWeapon(Index);
-    }
-    
-    return FReply::Handled();
-}
-
-// void UWeaponWheelWidget::CreateWeaponWheel()
-// {
-//     UE_LOG(LogTemp, Warning, TEXT("CreateWeaponWheel called"));
-//
-//     if (WeaponDataTable)
-//     {
-//         TArray<FName> RowNames = WeaponDataTable->GetRowNames();
-//         UE_LOG(LogTemp, Warning, TEXT("Data table has %d rows:"), RowNames.Num());
-//         for (const FName& Name : RowNames)
-//         {
-//             UE_LOG(LogTemp, Warning, TEXT("  Row name: %s"), *Name.ToString());
-//         }
-//     }
-//     else
-//     {
-//         UE_LOG(LogTemp, Error, TEXT("WeaponDataTable is null in WeaponWheelWidget!"));
-//     }
-//     
-//     // Clear any existing buttons
-//     for (UWeaponButtonWidget* Button : WeaponButtons)
-//     {
-//         if (Button)
-//         {
-//             Button->RemoveFromParent();
-//         }
-//     }
-//     WeaponButtons.Empty();
-//     
-//     if (!OwningCharacter || !WheelCanvas || !WeaponButtonClass)
-//     {
-//         return;
-//     }
-//     
-//     // Get the available weapons
-//     const TArray<TSubclassOf<AWormWeapon>>& AvailableWeapons = OwningCharacter->AvailableWeapons;
-//     int32 WeaponCount = AvailableWeapons.Num();
-//     
-//     if (WeaponCount == 0)
-//     {
-//         return;
-//     }
-//     
-//     // Calculate the center of the canvas
-//     FVector2D CanvasSize = WheelCanvas->GetCachedGeometry().GetLocalSize();
-//     FVector2D Center = CanvasSize * 0.5f;
-//     
-//     // Create a button for each weapon
-//     for (int32 i = 0; i < WeaponCount; ++i)
-//     {
-//         // Calculate the position for this button
-//         float Angle = (2.0f * PI * i) / WeaponCount;
-//         float X = Center.X + WheelRadius * FMath::Cos(Angle);
-//         float Y = Center.Y + WheelRadius * FMath::Sin(Angle);
-//         
-//         // Create the button
-//         UWeaponButtonWidget* ButtonWidget = CreateWidget<UWeaponButtonWidget>(this, WeaponButtonClass);
-//         if (ButtonWidget)
-//         {
-//             // Add to canvas
-//             UCanvasPanelSlot* CanvasSlot = WheelCanvas->AddChildToCanvas(ButtonWidget);
-//             if (CanvasSlot)
-//             {
-//                 // Button size (100x100)
-//                 CanvasSlot->SetSize(FVector2D(100.0f, 100.0f));
-//                 
-//                 // Center the button on its position
-//                 CanvasSlot->SetPosition(FVector2D(X - 50.0f, Y - 50.0f));
-//                 
-//                 // Get weapon data
-//                 FWeaponUIData WeaponData = GetWeaponUIData(AvailableWeapons[i]);
-//                 
-//                 // Initialize the button (using our renamed function)
-//                 ButtonWidget->SetupWeaponButton(i, WeaponData, this);
-//                 
-//                 // Add to our array
-//                 WeaponButtons.Add(ButtonWidget);
-//             }
-//         }
-//     }
-// }
-
 void UWeaponWheelWidget::CreateWeaponWheel()
 {
-    UE_LOG(LogTemp, Warning, TEXT("CreateWeaponWheel called"));
-    
-    if (WeaponDataTable)
-    {
-        TArray<FName> RowNames = WeaponDataTable->GetRowNames();
-        UE_LOG(LogTemp, Warning, TEXT("Data table has %d rows:"), RowNames.Num());
-        for (const FName& Name : RowNames)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("  Row name: %s"), *Name.ToString());
-        }
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("WeaponDataTable is null in WeaponWheelWidget!"));
-    }
+    UE_LOG(LogTemp, Warning, TEXT("CreateWeaponWheel with grid layout on right side"));
     
     // Clear any existing buttons
     for (UWeaponButtonWidget* Button : WeaponButtons)
@@ -196,43 +84,36 @@ void UWeaponWheelWidget::CreateWeaponWheel()
         return;
     }
 
-    // Get viewport size for centering
+    // Get viewport size
     FVector2D ViewportSize;
-    if (GEngine && GEngine->GameViewport) {
-        GEngine->GameViewport->GetViewportSize(ViewportSize);
-    }
-    else {
-        ViewportSize = FVector2D(1920, 1080);
-    }
+    GEngine->GameViewport->GetViewportSize(ViewportSize);
     
-    // Use viewport center
-    FVector2D ScreenCenter = ViewportSize * 0.5f;
-    float ButtonRadius = FMath::Min(ViewportSize.X, ViewportSize.Y) * 0.2f;
+    UE_LOG(LogTemp, Warning, TEXT("Screen dimensions: %.1f x %.1f"), ViewportSize.X, ViewportSize.Y);
     
-    UE_LOG(LogTemp, Warning, TEXT("Screen size: %.1f x %.1f, Center: %.1f, %.1f, ButtonRadius: %.1f"), 
-        ViewportSize.X, ViewportSize.Y, ScreenCenter.X, ScreenCenter.Y, ButtonRadius);
+    // Button size (consistent for all buttons)
+    FVector2D ButtonSize(100.0f, 100.0f);
     
-    // Create buttons around the circle
+    // Grid parameters
+    float RightMargin = 150.0f; // Distance from right edge of screen
+    float TopMargin = 100.0f;   // Distance from top of screen
+    float ButtonPadding = 20.0f; // Space between buttons
+    int32 MaxButtonsPerRow = 2;  // Number of buttons per row
+    
+    // Calculate positions in a grid layout on the right side
     for (int32 i = 0; i < WeaponCount; ++i)
     {
-        // Calculate the position for this button (clockwise from top)
-        float Angle = FMath::DegreesToRadians(270.0f + (360.0f * i) / WeaponCount);
-    
-        // For 2 weapons, place them left and right (170 degree separation)
-        if (WeaponCount == 2) {
-            Angle = FMath::DegreesToRadians(i == 0 ? 180.0f : 0.0f);
-        }
-    
-        float X = ScreenCenter.X + ButtonRadius * FMath::Cos(Angle);
-        float Y = ScreenCenter.Y + ButtonRadius * FMath::Sin(Angle);
-    
-        // Adjust radius based on screen size
-        // float ButtonRadius = FMath::Min(ViewportSize.X, ViewportSize.Y) * 0.2f; // 20% of screen size
-    
-        // float X = ScreenCenter.X + ButtonRadius * FMath::Cos(Angle);
-        // float Y = ScreenCenter.Y + ButtonRadius * FMath::Sin(Angle);
-    
-        // Create the button
+        // Calculate row and column for grid layout
+        int32 Row = i / MaxButtonsPerRow;
+        int32 Col = i % MaxButtonsPerRow;
+        
+        // Calculate position (from top-right corner of screen)
+        float X = ViewportSize.X - RightMargin - ((Col + 1) * (ButtonSize.X + ButtonPadding));
+        float Y = TopMargin + (Row * (ButtonSize.Y + ButtonPadding));
+        
+        UE_LOG(LogTemp, Warning, TEXT("Button %d: grid pos=(%d,%d), screen pos=(%.1f, %.1f)"), 
+            i, Row, Col, X, Y);
+        
+        // Create button widget
         UWeaponButtonWidget* ButtonWidget = CreateWidget<UWeaponButtonWidget>(this, WeaponButtonClass);
         if (ButtonWidget)
         {
@@ -240,51 +121,29 @@ void UWeaponWheelWidget::CreateWeaponWheel()
             UCanvasPanelSlot* CanvasSlot = WheelCanvas->AddChildToCanvas(ButtonWidget);
             if (CanvasSlot)
             {
-                // Button size (100x100)
-                CanvasSlot->SetSize(FVector2D(100.0f, 100.0f));
-            
-                // Center the button on its position (subtract half the button size)
-                CanvasSlot->SetPosition(FVector2D(X - 50.0f, Y - 50.0f));
-            
-                // Set alignment to center
-                CanvasSlot->SetAlignment(FVector2D(0.5f, 0.5f));
-            
+                // Set button size
+                CanvasSlot->SetSize(ButtonSize);
+                
+                // Position on screen
+                CanvasSlot->SetPosition(FVector2D(X, Y));
+                
+                // Use absolute positioning (no alignment)
+                CanvasSlot->SetAlignment(FVector2D(0.0f, 0.0f));
+                
                 // Get weapon data
                 FWeaponUIData WeaponData = GetWeaponUIData(AvailableWeapons[i]);
-            
-                // Initialize the button
+                
+                // Initialize button
                 ButtonWidget->SetupWeaponButton(i, WeaponData, this);
-            
+                
                 // Add to our array
                 WeaponButtons.Add(ButtonWidget);
             }
         }
     }
+    
     UE_LOG(LogTemp, Warning, TEXT("CreateWeaponWheel completed with %d buttons created"), WeaponButtons.Num());
 }
-
-// void UWeaponWheelWidget::SetHighlightedWeapon(int32 WeaponIndex)
-// {
-//     if (WeaponIndex < 0 || WeaponIndex >= WeaponButtons.Num())
-//     {
-//         return;
-//     }
-//     
-//     // Update the highlighted index
-//     HighlightedIndex = WeaponIndex;
-//     
-//     // Update button visuals
-//     for (int32 i = 0; i < WeaponButtons.Num(); ++i)
-//     {
-//         if (WeaponButtons[i])
-//         {
-//             WeaponButtons[i]->SetHighlighted(i == HighlightedIndex);
-//         }
-//     }
-//     
-//     // Update the center display
-//     UpdateCenterDisplay();
-// }
 
 void UWeaponWheelWidget::SelectWeapon(int32 WeaponIndex)
 {
@@ -292,40 +151,6 @@ void UWeaponWheelWidget::SelectWeapon(int32 WeaponIndex)
     {
         OwningCharacter->SelectWeaponFromWheel(WeaponIndex);
     }
-}
-
-int32 UWeaponWheelWidget::GetWeaponIndexFromMousePosition(FVector2D MousePosition)
-{
-    if (WeaponButtons.Num() == 0 || !WheelCanvas)
-    {
-        return -1;
-    }
-    
-    // Get the center of the canvas
-    FVector2D CanvasSize = WheelCanvas->GetCachedGeometry().GetLocalSize();
-    FVector2D Center = CanvasSize * 0.5f;
-    
-    // Calculate the direction vector from center to mouse
-    FVector2D Direction = MousePosition - Center;
-    
-    // Calculate the angle (in radians)
-    float Angle = FMath::Atan2(Direction.Y, Direction.X);
-    
-    // Convert to positive degrees (0-360)
-    float Degrees = FMath::RadiansToDegrees(Angle);
-    if (Degrees < 0.0f)
-    {
-        Degrees += 360.0f;
-    }
-    
-    // Calculate the index based on the angle
-    int32 WeaponCount = WeaponButtons.Num();
-    float SegmentSize = 360.0f / WeaponCount;
-    
-    // Add half a segment to center the selection on the button
-    int32 Index = FMath::FloorToInt((Degrees + (SegmentSize * 0.5f)) / SegmentSize) % WeaponCount;
-    
-    return Index;
 }
 
 FWeaponUIData UWeaponWheelWidget::GetWeaponUIData(TSubclassOf<AWormWeapon> WeaponClass)
@@ -382,52 +207,6 @@ FWeaponUIData UWeaponWheelWidget::GetWeaponUIData(TSubclassOf<AWormWeapon> Weapo
     return WeaponData;
 }
 
-// void UWeaponWheelWidget::UpdateCenterDisplay()
-// {
-//     if (HighlightedIndex >= 0 && HighlightedIndex < WeaponButtons.Num() && OwningCharacter)
-//     {
-//         // Get the weapon class
-//         TSubclassOf<AWormWeapon> WeaponClass = OwningCharacter->AvailableWeapons[HighlightedIndex];
-//         
-//         // Get the weapon data
-//         FWeaponUIData WeaponData = GetWeaponUIData(WeaponClass);
-//         
-//         // Update the text displays
-//         if (SelectedWeaponName)
-//         {
-//             SelectedWeaponName->SetText(FText::FromString(WeaponData.Name));
-//         }
-//         
-//         if (WeaponDescription)
-//         {
-//             WeaponDescription->SetText(FText::FromString(WeaponData.Description));
-//         }
-//     }
-// }
-
-void UWeaponWheelWidget::SetHighlightedWeapon(int32 WeaponIndex)
-{
-    if (WeaponIndex < 0 || WeaponIndex >= WeaponButtons.Num())
-    {
-        return;
-    }
-    
-    // Update the highlighted index
-    HighlightedIndex = WeaponIndex;
-    
-    // Update button visuals
-    for (int32 i = 0; i < WeaponButtons.Num(); ++i)
-    {
-        if (WeaponButtons[i])
-        {
-            WeaponButtons[i]->SetHighlighted(i == HighlightedIndex);
-        }
-    }
-    
-    // Update the center display
-    UpdateCenterDisplay();
-}
-
 void UWeaponWheelWidget::UpdateCenterDisplay()
 {
     if (HighlightedIndex >= 0 && HighlightedIndex < WeaponButtons.Num() && OwningCharacter)
@@ -452,4 +231,105 @@ void UWeaponWheelWidget::UpdateCenterDisplay()
         UE_LOG(LogTemp, Warning, TEXT("Updated center display to: %s - %s"), 
             *WeaponData.Name, *WeaponData.Description);
     }
+}
+int32 UWeaponWheelWidget::GetWeaponIndexFromMousePosition(FVector2D MousePosition)
+{
+    if (WeaponButtons.Num() == 0 || !WheelCanvas)
+    {
+        return -1;
+    }
+    
+    // Check if mouse is directly over any button
+    for (int32 i = 0; i < WeaponButtons.Num(); ++i)
+    {
+        if (WeaponButtons[i])
+        {
+            FGeometry ButtonGeometry = WeaponButtons[i]->GetCachedGeometry();
+            
+            // Convert mouse position to button's local space
+            FVector2D LocalMousePos = ButtonGeometry.AbsoluteToLocal(
+                WheelCanvas->GetCachedGeometry().LocalToAbsolute(MousePosition));
+            
+            FVector2D ButtonSize = ButtonGeometry.GetLocalSize();
+            
+            // Check if mouse is within button bounds
+            if (LocalMousePos.X >= 0 && LocalMousePos.X <= ButtonSize.X &&
+                LocalMousePos.Y >= 0 && LocalMousePos.Y <= ButtonSize.Y)
+            {
+                return i; // Mouse is directly over this button
+            }
+        }
+    }
+    
+    // No button is directly hovered
+    return -1;
+}
+
+FReply UWeaponWheelWidget::NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+    // Get the local mouse position
+    FVector2D MousePosition = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
+    
+    // Calculate which weapon should be highlighted based on mouse position
+    int32 Index = GetWeaponIndexFromMousePosition(MousePosition);
+    
+    // Update highlighted weapon if needed
+    if (Index != HighlightedIndex)
+    {
+        if (Index >= 0)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Highlighting weapon index: %d"), Index);
+            SetHighlightedWeapon(Index);
+        }
+        else if (HighlightedIndex >= 0)
+        {
+            // Clear highlighting when mouse isn't over any button
+            UE_LOG(LogTemp, Warning, TEXT("No button hovered, clearing highlight"));
+            
+            // Option 1: Leave the last highlighted button visible
+            // (do nothing here)
+            
+            // Option 2: Clear the highlight entirely (use this if you want no highlight when not over buttons)
+            // HighlightedIndex = -1;
+            // for (auto* Button : WeaponButtons)
+            // {
+            //     if (Button)
+            //     {
+            //         Button->SetHighlighted(false);
+            //     }
+            // }
+        }
+    }
+    
+    return FReply::Handled();
+}
+
+void UWeaponWheelWidget::SetHighlightedWeapon(int32 WeaponIndex)
+{
+    if (WeaponIndex < 0 || WeaponIndex >= WeaponButtons.Num())
+    {
+        return;
+    }
+    
+    // Debug logging
+    if (HighlightedIndex != WeaponIndex)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Changing highlighted weapon from %d to %d"), 
+            HighlightedIndex, WeaponIndex);
+    }
+    
+    // Update the highlighted index
+    HighlightedIndex = WeaponIndex;
+    
+    // Update button visuals
+    for (int32 i = 0; i < WeaponButtons.Num(); ++i)
+    {
+        if (WeaponButtons[i])
+        {
+            WeaponButtons[i]->SetHighlighted(i == HighlightedIndex);
+        }
+    }
+    
+    // Update the center display
+    UpdateCenterDisplay();
 }
