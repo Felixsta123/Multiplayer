@@ -1,6 +1,6 @@
 ﻿#include "PlayerSpawnManager.h"
 
-#include "AWormCharacter.h"
+#include "Worms_3d/AWormCharacter.h"
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/PlayerState.h"
@@ -12,6 +12,7 @@
 #include "WormPlayerController.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PawnMovementComponent.h"
+#include "Worms_3d/Misc/PlayerDataStruct.h"
 
 UPlayerSpawnManager::UPlayerSpawnManager()
 {
@@ -183,7 +184,13 @@ void UPlayerSpawnManager::TeleportPlayersToBuildings()
                     Character->TeamId = TeamIndex;
                     Character->CharacterIndexInTeam = CharIndex;
                     WPC->Possess(Character);
-
+                    Character->InGameName = GameMode->GetCharacterInGameName(
+                           Character->GetClass(),
+                           TeamIndex,
+                           CharIndex
+                       );
+                
+                
                     // Add to team in GameState
                     AWormGameState* WormGS = GetWorld()->GetGameState<AWormGameState>();
                     if (WormGS)

@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "GameFramework/PlayerStart.h"
-#include "AVoxelBuilding.h"
+#include "Worms_3d/Building/AVoxelBuilding.h"
 
 #include "PlayerSpawnManager.generated.h"
 

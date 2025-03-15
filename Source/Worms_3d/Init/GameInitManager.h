@@ -5,7 +5,7 @@
 #include "GameLoadingWidget.h"
 #include "PlayerSpawnManager.h"
 #include "WormGameState.h"
-#include "W_GameLoadingScreen.h"
+#include "Worms_3d/UI/W_GameLoadingScreen.h"
 #include "GameInitManager.generated.h"
 
 /**

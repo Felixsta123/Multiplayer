@@ -2,7 +2,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/PlayerController.h"
 #include "Blueprint/UserWidget.h"
-#include "AVoxelBuilding.h"
+#include "Worms_3d/Building/AVoxelBuilding.h"
 #include "WormGameMode.h"
 #include "WormGameState.h"
 #include "WormPlayerController.h"

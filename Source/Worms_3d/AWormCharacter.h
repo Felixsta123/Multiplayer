@@ -7,6 +7,7 @@
 #include "InputActionValue.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "Worms_3d/UI/W_NameIndicator.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "AWormCharacter.generated.h"
@@ -67,6 +68,17 @@ public:
 
     UPROPERTY(BlueprintReadOnly, Category = "UI")
     UUserWidget* AimingWidget;
+
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI")
+    TSubclassOf<UWNameIndicatorWidget> NameIndicatorWidgetClass;
+    
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "UI")
+    class UWNameIndicatorWidget* NameIndicatorWidget;
+
+    UPROPERTY(Replicated, BlueprintReadWrite, Category = "Identification")
+    FString InGameName;
+
     // Animation parameter
     UPROPERTY(BlueprintReadOnly, Category = "Animation")
     float AnimationSpeed;
@@ -78,6 +90,8 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Animation")
     void PlayHitReaction();
     void OnSwitchTeamMemberAction(const FInputActionValue& Value);
+    void OnRep_InGameName();
+    void UpdateNameWidget();
     // === FONCTIONS DE JEU PRINCIPALES ===
     
     // Armes
@@ -169,6 +183,9 @@ public:
 
     UPROPERTY(Replicated, BlueprintReadWrite, Category = "Team")
     int32 CharacterIndexInTeam;
+    
+    
+
 protected:
     // === ÉTAT DU PERSONNAGE ===
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Worm")

@@ -11,13 +11,13 @@
 #include "Blueprint/UserWidget.h"
 #include "Components/ProgressBar.h"
 #include "Components/TextBlock.h"
-//include for   AWormCharacter.cpp(1045): [C2039] 'IsNormalized': is not a member of 'UE::Math::TRotator<double>'
 #include "Math/UnrealMathUtility.h"
 // Ajouter les includes manquants pour les collisions Cannot resolve symbol 'SetCollisionEnabled'
-#include "EnvironmentalEventsManager.h"
+#include "Worms_3d/Env/EnvironmentalEventsManager.h"
 #include "WormGameState.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
+#include "Components/WidgetComponent.h"
 
 // Conserve le constructeur existant sans modifications mais améliore la lisibilité
 AWormCharacter::AWormCharacter()
@@ -56,6 +56,7 @@ AWormCharacter::AWormCharacter()
     // Configuration du système de caméra
     // S'assurer que la physique est activée dès le début
     GetCharacterMovement()->UpdateComponentVelocity();
+    
     InitializeCameraSystem();
 }
 
@@ -118,7 +119,8 @@ void AWormCharacter::BeginPlay()
         CurrentCameraDistance = DefaultCameraDistance;
         CameraBoom->TargetArmLength = CurrentCameraDistance;
     }
-    
+    UpdateNameWidget();
+
     // Configuration de l'input pour le joueur local
     if (IsLocallyControlled())
     {
@@ -491,6 +493,7 @@ void AWormCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
     DOREPLIFETIME(AWormCharacter, AvailableWeapons);
     DOREPLIFETIME(AWormCharacter, CharacterIndexInTeam);
     DOREPLIFETIME(AWormCharacter, TeamId);
+    DOREPLIFETIME(AWormCharacter, InGameName);
 }
 
 // Fonctions de mouvement legacy
@@ -1537,4 +1540,13 @@ void AWormCharacter::OnSwitchTeamMemberAction(const FInputActionValue& Value)
     }
     
     UE_LOG(LogTemp, Warning, TEXT("DEBUG: No other valid team members found in team %d"), TeamId);
+}
+
+void AWormCharacter::OnRep_InGameName()
+{
+    UpdateNameWidget();
+}
+
+void AWormCharacter::UpdateNameWidget()
+{
 }

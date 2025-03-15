@@ -4,11 +4,20 @@
 #include "CoreMinimal.h"
 #include "GameFramework/GameMode.h"
 #include "../AWormCharacter.h"
-#include "Worms_3d/AVoxelBuilding.h" // Added VoxelBuilding include
-#include "../W_GameLoadingScreen.h"
-#include "../WaterSystem.h"
+#include "Worms_3d/Building/AVoxelBuilding.h" // Added VoxelBuilding include
+#include "Worms_3d/UI/W_GameLoadingScreen.h"
+#include "Worms_3d/Env//WaterSystem.h"
 #include "WormGameMode.generated.h"
 
+
+USTRUCT(BlueprintType)
+struct FCharacterNameList
+{
+    GENERATED_BODY()
+    
+    UPROPERTY(EditDefaultsOnly, Category = "Names")
+    TArray<FString> Names;
+};
 UCLASS()
 class WORMS_3D_API AWormGameMode : public AGameMode
 {
@@ -55,7 +64,8 @@ public:
     // Index of active controller
     UPROPERTY(BlueprintReadWrite, Category = "Turns")
     int32 CurrentPlayerIndex;
-    
+    UPROPERTY(EditDefaultsOnly, Category = "Identification")
+    TMap<FString, FCharacterNameList> CharacterNamesByType;
     // Turn duration in seconds
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Turns")
     float TurnDuration;
@@ -140,6 +150,7 @@ public:
 
     UFUNCTION()
     void StartTurnTimer();
+    FString GetCharacterInGameName(UClass* CharacterClass, int32 TeamId, int32 CharIndexInTeam);
     // Offset pour les positions de spawn d'une même équipe
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Setup")
     float TeamSpawnOffset = 100.0f;

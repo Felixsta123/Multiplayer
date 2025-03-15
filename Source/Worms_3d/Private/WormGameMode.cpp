@@ -9,12 +9,12 @@
 #include "WormPlayerController.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Worms_3d/AVoxelBuilding.h"
-#include "Worms_3d/EnvironmentalEventsManager.h"
-#include "Worms_3d/GameInitFactorySubsystem.h"
-#include "Worms_3d/VoxelTerrainSettings.h"
-#include "Worms_3d/WormGameInstance.h"
-#include "Worms_3d/W_GameResultsScreen.h"
+#include "Worms_3d/Building/AVoxelBuilding.h"
+#include "Worms_3d/Env/EnvironmentalEventsManager.h"
+#include "Worms_3d/Init/GameInitFactorySubsystem.h"
+#include "Worms_3d/Building/VoxelTerrainSettings.h"
+#include "Worms_3d/Misc/WormGameInstance.h"
+#include "Worms_3d/UI/W_GameResultsScreen.h"
 
 AWormGameMode::AWormGameMode()
 {
@@ -35,6 +35,22 @@ AWormGameMode::AWormGameMode()
     
     UE_LOG(LogTemp, Log, TEXT("WormGameMode constructor - Setting GameStateClass to: %s"), 
         *GameStateClass->GetName());
+    FCharacterNameList LauraNames;
+    LauraNames.Names = { "Athena", "Nova", "Spark" };
+    
+    FCharacterNameList GuyNames;
+    GuyNames.Names = { "Titan", "Specter", "Orion" };
+    
+    FCharacterNameList DavidNames;
+    DavidNames.Names = { "Cipher", "Phoenix", "Echo" };
+    
+    FCharacterNameList EmilyNames;
+    EmilyNames.Names = { "Raven", "Aurora", "Luna" };
+    
+    CharacterNamesByType.Add("Laura", LauraNames);
+    CharacterNamesByType.Add("Guy", GuyNames);
+    CharacterNamesByType.Add("David", DavidNames);
+    CharacterNamesByType.Add("Emily", EmilyNames);
 }
 
 void AWormGameMode::BeginPlay()
@@ -883,3 +899,35 @@ void AWormGameMode::StartTurnTimer()
         WormGS->RemainingTurnTime = TurnDuration;
     }
 }
+FString AWormGameMode::GetCharacterInGameName(UClass* CharacterClass, int32 TeamId, int32 CharIndexInTeam)
+{
+    if (!CharacterClass)
+        return FString("Unknown");
+    
+    // Get the character class name
+    FString ClassName = CharacterClass->GetName();
+    
+    // Find which character type this is
+    FString* FoundType = nullptr;
+    for (const FString& Type : {"Laura", "Guy", "David", "Emily"})
+    {
+        if (ClassName.Contains(Type))
+        {
+            FoundType = &const_cast<FString&>(Type);
+            break;
+        }
+    }
+    
+    if (!FoundType)
+        return FString::Printf(TEXT("Agent %d-%d"), TeamId, CharIndexInTeam);
+    
+    // Get name array for this type
+    FCharacterNameList* NameList = CharacterNamesByType.Find(*FoundType);
+    if (!NameList || NameList->Names.Num() == 0)
+        return FString::Printf(TEXT("%s %d-%d"), *(*FoundType), TeamId, CharIndexInTeam);
+    
+    // Use the character index to pick a name, wrapping around if needed
+    int32 NameIndex = CharIndexInTeam % NameList->Names.Num();
+    return NameList->Names[NameIndex];
+}
+
