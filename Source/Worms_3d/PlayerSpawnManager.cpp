@@ -192,6 +192,31 @@ void UPlayerSpawnManager::TeleportPlayersToBuildings()
             }
         }
     }
+    FTimerHandle PhysicsTimerHandle;
+    GetWorld()->GetTimerManager().SetTimer(
+        PhysicsTimerHandle,
+        [this]() {
+            TArray<AActor*> AllCharacters;
+            UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormCharacter::StaticClass(), AllCharacters);
+            
+            for (AActor* Actor : AllCharacters)
+            {
+                AWormCharacter* Character = Cast<AWormCharacter>(Actor);
+                if (Character && Character->GetCharacterMovement()) 
+                {
+                    // Activer la simulation physique
+                    Character->GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+                    Character->GetCharacterMovement()->GravityScale = 1.5f;
+                    Character->GetCharacterMovement()->AddForce(FVector(0, 0, -980.0f));
+                    Character->GetCharacterMovement()->UpdateComponentVelocity();
+                    
+                    UE_LOG(LogTemp, Warning, TEXT("Activated physics for %s"), *Character->GetName());
+                }
+            }
+        },
+        1.0f, // Délai de 1 seconde après la téléportation
+        false
+    );
     UE_LOG(LogTemp, Warning, TEXT("===================================="));
     UE_LOG(LogTemp, Warning, TEXT("Completed player teleportation process"));
     UE_LOG(LogTemp, Warning, TEXT("===================================="));

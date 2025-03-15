@@ -54,6 +54,9 @@ AWormCharacter::AWormCharacter()
     GetCharacterMovement()->bOrientRotationToMovement = true; // Activer cette propriété
     GetCharacterMovement()->RotationRate = FRotator(0.0f, 540.0f, 0.0f); // Vitesse de rotation
     // Configuration du système de caméra
+    // S'assurer que la physique est activée dès le début
+    GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+    GetCharacterMovement()->UpdateComponentVelocity();
     InitializeCameraSystem();
 }
 
