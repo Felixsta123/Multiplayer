@@ -119,6 +119,13 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
     bool bSpawnImpactCloud;
 
+    // Flag to indicate if this is a stairs building
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", ReplicatedUsing=OnRep_IsStairsBuilding)
+    bool bIsStairsBuilding;
+
+    // Direction of stairs (0-3 for different orientations)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", meta = (EditCondition = "bIsStairsBuilding"), Replicated)
+    int32 StairsDirection;
 
     // Fonction statique pour localiser tous les buildings voxel
     UFUNCTION(BlueprintCallable, Category = "Building", meta = (WorldContext = "WorldContextObject"))
@@ -127,7 +134,11 @@ public:
     // Function to generate the building
     UFUNCTION(BlueprintCallable, Category = "Building")
     void GenerateBuilding();
-    
+
+    // Function to generate a stairs-shaped building
+    UFUNCTION(BlueprintCallable, Category = "Building")
+    void GenerateStairsBuilding();
+
     // Function to destroy part of the building
     UFUNCTION(BlueprintCallable, Category = "Building")
     void DestroyVoxelsAt(FVector Location, FVector ImpactNormal, float Radius);
@@ -140,43 +151,48 @@ public:
     void Multicast_DestroyVoxelsAt(FVector Location, FVector ImpactNormal, float Radius);
     UPROPERTY(BlueprintReadOnly, Category = "Building")
     FVector TopSpawnPoint;
-    
+
     // Fonction pour obtenir le point de spawn
     UFUNCTION(BlueprintCallable, Category = "Building")
     FVector GetTopSpawnPoint() const { return TopSpawnPoint; }
 protected:
     virtual void BeginPlay() override;
-    
+    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+    // Callback when bIsStairsBuilding is replicated
+    UFUNCTION()
+    void OnRep_IsStairsBuilding();
+
     // Procedural mesh component
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     UProceduralMeshComponent* BuildingMesh;
-    
+
     // Voxel data
     TArray<TArray<TArray<FVoxelData>>> VoxelGrid;
     UPROPERTY()
     int32 LastProcessedDestructionCount;
     // Initialize voxel grid
     void InitializeVoxelGrid();
-    
+
     // Create mesh from voxel grid
     void CreateMesh();
     void GenerateOptimizedRayDirections(TArray<FVector>& RayDirections, const FVector& ImpactNormal, int32 NumRays);
 
     // Add only visible faces to reduce polygon count
-    void AddVisibleFacesToMesh(int32 X, int32 Y, int32 Z, TArray<FVector>& Vertices, TArray<int32>& Triangles, 
+    void AddVisibleFacesToMesh(int32 X, int32 Y, int32 Z, TArray<FVector>& Vertices, TArray<int32>& Triangles,
                           TArray<FVector>& Normals, TArray<FVector2D>& UVs, TArray<FColor>& Colors, TArray<FProcMeshTangent>& Tangents,
                           bool bBottomFaceVisible, bool bTopFaceVisible, bool bLeftFaceVisible, bool bRightFaceVisible,
-                          bool bBackFaceVisible, bool bFrontFaceVisible);   
+                          bool bBackFaceVisible, bool bFrontFaceVisible);
     // Helper functions for mesh creation
     void AddFaceTriangles(TArray<int32>& Triangles, int32 BaseIndex, bool bReversed);
     void AddFaceNormals(TArray<FVector>& Normals, FVector Normal, int32 Count);
     void AddFaceUVs(TArray<FVector2D>& UVs);
     void AddFaceColors(TArray<FColor>& Colors, FColor Color, int32 Count);
     void AddFaceTangents(TArray<FProcMeshTangent>& Tangents, FVector Tangent, int32 Count);
-    
+
     // Function to get a random color
     FColor GetRandomColor();
-    UPROPERTY(ReplicatedUsing=OnRep_DestructionHistory)  // ✅ Correct
+    UPROPERTY(ReplicatedUsing=OnRep_DestructionHistory)
     TArray<FVoxelDestructionData> DestructionHistory;
     // Apply deterministic destruction using a seed
     void ApplyDeterministicDestruction(const FVoxelDestructionData& DestructionData);
