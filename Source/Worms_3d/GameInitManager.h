@@ -24,7 +24,10 @@ public:
     //LoadingWidget
     UPROPERTY()
     UW_GameLoadingScreen* LoadingWidget;
-    
+    int MaxCycles;
+    FTimerHandle TurnCycleTimerHandle;
+    int CycleCount;
+
     // Called when the game starts or when spawned
     virtual void BeginPlay() override;
     
@@ -68,7 +71,8 @@ protected:
     
     // Execute the current initialization step
     void ExecuteInitializationStep();
-    
+    void CycleThroughTurns();
+
     // Initialize the network loading system
     void InitializeNetworkLoading();
 };
