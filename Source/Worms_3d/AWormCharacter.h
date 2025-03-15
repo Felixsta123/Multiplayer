@@ -75,6 +75,10 @@ public:
     
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "UI")
     class UWNameIndicatorWidget* NameIndicatorWidget;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "UI")
+    class UWidgetComponent* NameWidgetComponent;
+
     UFUNCTION( Category = "UI")
     void OnRep_InGameName();
 
@@ -92,6 +96,7 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Animation")
     void PlayHitReaction();
     void OnSwitchTeamMemberAction(const FInputActionValue& Value);
+    void InitializeNameWidget();
     void UpdateNameWidget();
     // === FONCTIONS DE JEU PRINCIPALES ===
     

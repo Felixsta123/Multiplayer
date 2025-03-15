@@ -7,11 +7,21 @@ void UWNameIndicatorWidget::NativeConstruct()
 	if (TeamInfo)
 	{
 		TeamInfo->SetText(FText::FromString(TEXT("Team")));
+		// Make sure text is visible with good contrast
+		TeamInfo->SetColorAndOpacity(FSlateColor(FLinearColor(1.0f, 1.0f, 1.0f, 1.0f)));
+		// Optional: Add drop shadow for better visibility
+		TeamInfo->SetShadowOffset(FVector2D(1.0f, 1.0f));
+		TeamInfo->SetShadowColorAndOpacity(FLinearColor(0.0f, 0.0f, 0.0f, 0.7f));
 	}
     
 	if (PlayerName)
 	{
 		PlayerName->SetText(FText::FromString(TEXT("Character")));
+		// Make text white for visibility
+		PlayerName->SetColorAndOpacity(FSlateColor(FLinearColor(1.0f, 1.0f, 1.0f, 1.0f)));
+		// Optional: Add drop shadow for better visibility
+		PlayerName->SetShadowOffset(FVector2D(1.0f, 1.0f));
+		PlayerName->SetShadowColorAndOpacity(FLinearColor(0.0f, 0.0f, 0.0f, 0.7f));
 	}
 }
 
@@ -32,7 +42,12 @@ void UWNameIndicatorWidget::SetNameInfo(int32 InTeamId, const FString& InCharact
 	if (PlayerName)
 	{
 		PlayerName->SetText(FText::FromString(InCharacterName));
+        
+		// Ensure full visibility
+		PlayerName->SetVisibility(ESlateVisibility::Visible);
 	}
+	SetVisibility(ESlateVisibility::Visible);
+
 }
 
 FLinearColor UWNameIndicatorWidget::GetTeamColor(int32 TeamId) const

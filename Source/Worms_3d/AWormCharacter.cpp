@@ -1541,6 +1541,49 @@ void AWormCharacter::OnSwitchTeamMemberAction(const FInputActionValue& Value)
     UE_LOG(LogTemp, Warning, TEXT("DEBUG: No other valid team members found in team %d"), TeamId);
 }
 
+void AWormCharacter::InitializeNameWidget()
+{
+    // Skip if already initialized
+    if (NameWidgetComponent && NameWidgetComponent->GetWidget())
+        return;
+    
+    // Create widget component if it doesn't exist
+    if (!NameWidgetComponent)
+    {
+        NameWidgetComponent = NewObject<UWidgetComponent>(this, TEXT("NameIndicatorWidget"));
+        NameWidgetComponent->SetupAttachment(GetRootComponent());
+        NameWidgetComponent->RegisterComponent();
+        
+        // Configure widget component
+        NameWidgetComponent->SetWidgetSpace(EWidgetSpace::Screen);
+        NameWidgetComponent->SetDrawSize(FVector2D(200.0f, 50.0f));
+        
+        // Position above head - adjust offsets as needed for your character mesh
+        NameWidgetComponent->SetRelativeLocation(FVector(0.0f, 0.0f, 120.0f));
+        
+        // Set widget class
+        NameWidgetComponent->SetWidgetClass(NameIndicatorWidgetClass);
+        
+        UE_LOG(LogTemp, Log, TEXT("Created name widget component for %s"), *GetName());
+    }
+    
+    // Initialize the widget with the current name
+    if (NameWidgetComponent && !InGameName.IsEmpty())
+    {
+        UWNameIndicatorWidget* NameWidget = Cast<UWNameIndicatorWidget>(NameWidgetComponent->GetWidget());
+        if (NameWidget)
+        {
+            NameWidget->SetNameInfo(TeamId, InGameName);
+            UE_LOG(LogTemp, Log, TEXT("Name widget initialized for %s with name: %s"), *GetName(), *InGameName);
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Failed to create name widget for %s"), *GetName());
+        }
+    }
+}
+
+
 void AWormCharacter::UpdateNameWidget()
 {
     
@@ -1559,11 +1602,26 @@ void AWormCharacter::UpdateNameWidget()
     if (NameIndicatorWidget)
     {
         NameIndicatorWidget->SetNameInfo(TeamId, InGameName);
-        
     }
     
 }
 void AWormCharacter::OnRep_InGameName()
 {
-    UpdateNameWidget();
+    UE_LOG(LogTemp, Log, TEXT("OnRep_InGameName: %s for %s"), *InGameName, *GetName());
+    
+    // If the name is updated after the widget is created, update the widget
+    if (NameWidgetComponent)
+    {
+        UWNameIndicatorWidget* NameWidget = Cast<UWNameIndicatorWidget>(NameWidgetComponent->GetWidget());
+        if (NameWidget)
+        {
+            NameWidget->SetNameInfo(TeamId, InGameName);
+            UE_LOG(LogTemp, Log, TEXT("Name widget updated for %s with name: %s"), *GetName(), *InGameName);
+        }
+    }
+    else
+    {
+        // If widget hasn't been created yet, initialize it
+        InitializeNameWidget();
+    }
 }
