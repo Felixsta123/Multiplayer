@@ -867,13 +867,9 @@ void AWormCharacter::SetIsMyTurn(bool bNewTurn)
         }
         else
         {
-            // Arrêter le mouvement horizontal à la fin du tour, mais laisser la gravité active
-            FVector CurrentVelocity = GetCharacterMovement()->Velocity;
-            GetCharacterMovement()->Velocity = FVector(0, 0, CurrentVelocity.Z);
             GetCharacterMovement()->MaxWalkSpeed = 0;
-            
+
             // NE PAS désactiver complètement le mouvement
-            // GetCharacterMovement()->DisableMovement(); // SUPPRIMER OU COMMENTER CETTE LIGNE
         }
         
         // Appeler l'événement BlueprintNativeEvent seulement si l'état a changé

@@ -162,14 +162,17 @@ void UPlayerSpawnManager::TeleportPlayersToBuildings()
             {
                 FActorSpawnParameters SpawnParams;
                 SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-
+        
                 AWormCharacter* Character = GetWorld()->SpawnActor<AWormCharacter>(
                     WPC->PlayerSettings.MyPlayerCharacter,
                     SpawnLocation,
                     FRotator::ZeroRotator,
                     SpawnParams
                 );
-
+                Character->GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+                Character->GetCharacterMovement()->GravityScale = 1.5f;
+                Character->GetCharacterMovement()->AddForce(FVector(0, 0, -980.0f));
+                Character->GetCharacterMovement()->UpdateComponentVelocity();
                 UE_LOG(LogTemp, Warning, TEXT("  Spawning Character %d for Team %d:"), CharIndex, TeamIndex);
                 UE_LOG(LogTemp, Warning, TEXT("    - Location: %s"), *SpawnLocation.ToString());
                 UE_LOG(LogTemp, Warning, TEXT("    - Character Class: %s"), 
