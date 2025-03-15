@@ -77,6 +77,7 @@ public:
     // Fonction pour déclencher l'animation de dégâts
     UFUNCTION(BlueprintCallable, Category = "Animation")
     void PlayHitReaction();
+    void OnSwitchTeamMemberAction(const FInputActionValue& Value);
     // === FONCTIONS DE JEU PRINCIPALES ===
     
     // Armes
@@ -217,7 +218,8 @@ protected:
     // === ENHANCED INPUT SYSTEM ===
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input")
     class UInputMappingContext* InputMappingContext;
-
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input")
+    class UInputAction* SwitchTeamMemberAction;  // Nouvelle action
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input")
     class UInputAction* MoveAction;
     

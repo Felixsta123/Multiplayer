@@ -132,84 +132,72 @@ void AWormGameMode::StartNextTurn()
     AWormGameState* WormGS = GetGameState<AWormGameState>();
     if (!WormGS) return;
 
-    // Store original indices to prevent infinite loop
+    // IMPORTANT: Avancer d'abord au personnage suivant
+    CurrentCharacterIndex++;
+    if (CurrentCharacterIndex >= CharactersPerTeam)
+    {
+        CurrentCharacterIndex = 0;
+        CurrentTeamIndex = (CurrentTeamIndex + 1) % NumTeams;
+    }
+
+    // Stockage du point de départ pour éviter une boucle infinie
     int32 startTeamIndex = CurrentTeamIndex;
     int32 startCharIndex = CurrentCharacterIndex;
     bool foundValidCharacter = false;
-
-    UE_LOG(LogTemp, Log, TEXT("Starting next turn from team %d, character %d"), 
-        CurrentTeamIndex, CurrentCharacterIndex);
-
+    
     do {
-        // Get current team's characters
+        // Obtenir les personnages de l'équipe actuelle
         TArray<AWormCharacter*> TeamMembers = WormGS->GetTeamMembers(CurrentTeamIndex);
-        //For debugging purposes print all the team  and all the team members names
-        UE_LOG(LogTemp, Log, TEXT("Team %d has %d members"), CurrentTeamIndex, TeamMembers.Num());
-        for (int i = 0; i < NumTeams; i++)
-        {
-            TArray<AWormCharacter*> TeamMembersPrint = WormGS->GetTeamMembers(i);
-            UE_LOG(LogTemp, Log, TEXT("Team %d has %d members"), i, TeamMembersPrint.Num());
-            for (int j = 0; j < TeamMembersPrint.Num(); j++)
-            {
-                UE_LOG(LogTemp, Log, TEXT("Team %d member %d: %s"), i, j, *TeamMembersPrint[j]->GetName());
-            }
-        }
-      
-        // Check if current character in team is valid and alive
+        UE_LOG(LogTemp, Warning, TEXT("Cherchant personnage actif - Équipe %d, Char %d (%d membres)"), 
+            CurrentTeamIndex, CurrentCharacterIndex, TeamMembers.Num());
+                
+        // Vérifier si l'index actuel est valide
         if (TeamMembers.IsValidIndex(CurrentCharacterIndex))
         {
             AWormCharacter* Character = TeamMembers[CurrentCharacterIndex];
             if (Character && Character->GetHealth() > 0)
             {
+                // Désactiver tous les personnages d'abord
+                for (int32 i = 0; i < WormGS->Teams.Num(); i++) {
+                    for (AWormCharacter* Member : WormGS->Teams[i].TeamMembers) {
+                        if (Member) Member->SetIsMyTurn(false);
+                    }
+                }
+                
+                // Activer uniquement ce personnage
+                Character->SetIsMyTurn(true);
+                
+                // Faire posséder le personnage par le contrôleur de son équipe
+                AController* TeamController = AllPlayerControllers[CurrentTeamIndex];
+                if (TeamController) {
+                    if (TeamController->GetPawn()) {
+                        TeamController->UnPossess();
+                    }
+                    TeamController->Possess(Character);
+                }
+                
                 foundValidCharacter = true;
                 break;
             }
-        } else {
-            // Invalid index, move to next character
-            CurrentCharacterIndex++;
-            UE_LOG(LogTemp, Log, TEXT("Invalid character index, moving to next"));
         }
-        
-
-        // Move to next character/team
+        // Si ce personnage n'est pas valide, passer au suivant
         CurrentCharacterIndex++;
         if (CurrentCharacterIndex >= CharactersPerTeam)
         {
             CurrentCharacterIndex = 0;
             CurrentTeamIndex = (CurrentTeamIndex + 1) % NumTeams;
         }
-
-    } while (!foundValidCharacter && 
-             (CurrentTeamIndex != startTeamIndex || 
-              CurrentCharacterIndex != startCharIndex));
-
-    if (!foundValidCharacter)
-    {
-        CheckGameEndCondition();
-        return;
-    }
-
-    // Activate the character's turn
-    TArray<AWormCharacter*> TeamMembers = WormGS->GetTeamMembers(CurrentTeamIndex);
-    AWormCharacter* ActiveCharacter = TeamMembers[CurrentCharacterIndex];
-    if (ActiveCharacter)
-    {
-        // Deactivate all other characters
-        for (AController* Controller : AllPlayerControllers)
-        {
-            if (AWormCharacter* Character = GetWormCharacterFromController(Controller))
-            {
-                Character->SetIsMyTurn(Character == ActiveCharacter);
-            }
-        }
-
-        // Update GameState with correct individual character index
-        int32 globalCharacterIndex = (CurrentTeamIndex * CharactersPerTeam) + CurrentCharacterIndex;
-        WormGS->SetCurrentPlayerByIndex(globalCharacterIndex);
         
-        StartTurnTimer();
+    } while (!foundValidCharacter && 
+            (CurrentTeamIndex != startTeamIndex || 
+             CurrentCharacterIndex != startCharIndex));
+    // Si aucun personnage valide n'est trouvé, fin de partie
+    if (!foundValidCharacter) {
+        CheckGameEndCondition();
     }
 }
+
+
 void AWormGameMode::EndCurrentTurn()
 {
     // Cancel current timer

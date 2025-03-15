@@ -251,7 +251,11 @@ void AWormCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
             
         if (PrevWeaponAction)
             EnhancedInputComponent->BindAction(PrevWeaponAction, ETriggerEvent::Triggered, this, &AWormCharacter::OnPrevWeaponAction);
-            
+
+        // Binding pour le switch de joueur
+        if (SwitchTeamMemberAction)
+            EnhancedInputComponent->BindAction(SwitchTeamMemberAction, ETriggerEvent::Triggered, this, &AWormCharacter::OnSwitchTeamMemberAction);
+        
         // Binding pour la visée et l'orientation
         if (LookAction)
             EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &AWormCharacter::OnLookAction);
@@ -1479,4 +1483,60 @@ void AWormCharacter::PlayHitReaction()
     
     // Log pour déboguer
     UE_LOG(LogTemp, Warning, TEXT("%s: Animation de dégâts déclenchée"), *GetName());
+}
+
+
+void AWormCharacter::OnSwitchTeamMemberAction(const FInputActionValue& Value)
+{
+    if (!IsMyTurn()) return; // Ne fonctionne que pour le joueur actif
+    
+    // Récupérer le GameState pour accéder aux équipes
+    AWormGameState* WormGS = GetWorld()->GetGameState<AWormGameState>();
+    if (!WormGS) return;
+    
+    // S'assurer qu'on a un controleur
+    AController* MyController = GetController();
+    if (!MyController) return;
+    
+    // Récupérer l'équipe du personnage actuel
+    TArray<AWormCharacter*> TeamMembers = WormGS->GetTeamMembers(TeamId);
+    
+    // Trouver notre index actuel dans l'équipe et le prochain index valide
+    int32 CurrentIndex = -1;
+    for (int32 i = 0; i < TeamMembers.Num(); i++)
+    {
+        if (TeamMembers[i] == this)
+        {
+            CurrentIndex = i;
+            break;
+        }
+    }
+    
+    if (CurrentIndex == -1) return;
+    
+    // Chercher le prochain personnage vivant dans l'équipe
+    int32 NextIndex = (CurrentIndex + 1) % TeamMembers.Num();
+    while (NextIndex != CurrentIndex)
+    {
+        AWormCharacter* NextChar = TeamMembers[NextIndex];
+        if (NextChar && NextChar->GetHealth() > 0)
+        {
+            // Transférer le statut "c'est mon tour"
+            SetIsMyTurn(false);
+            NextChar->SetIsMyTurn(true);
+            
+            // Transférer le contrôle
+            MyController->UnPossess();
+            MyController->Possess(NextChar);
+            
+            UE_LOG(LogTemp, Warning, TEXT("DEBUG: Switched from %s to %s within team %d"), 
+                *GetName(), *NextChar->GetName(), TeamId);
+            
+            return;
+        }
+        
+        NextIndex = (NextIndex + 1) % TeamMembers.Num();
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("DEBUG: No other valid team members found in team %d"), TeamId);
 }
