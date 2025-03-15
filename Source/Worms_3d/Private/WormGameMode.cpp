@@ -132,42 +132,43 @@ void AWormGameMode::StartNextTurn()
     AWormGameState* WormGS = GetGameState<AWormGameState>();
     if (!WormGS) return;
 
-    // IMPORTANT: Avancer d'abord au personnage suivant
-    CurrentCharacterIndex++;
-    if (CurrentCharacterIndex >= CharactersPerTeam)
+    // IMPORTANT: First increment team index, then character index when we've gone through all teams
+    CurrentTeamIndex = (CurrentTeamIndex + 1) % NumTeams;
+    
+    // If we've gone through all teams for this character position, move to the next character
+    if (CurrentTeamIndex == 0)
     {
-        CurrentCharacterIndex = 0;
-        CurrentTeamIndex = (CurrentTeamIndex + 1) % NumTeams;
+        CurrentCharacterIndex = (CurrentCharacterIndex + 1) % CharactersPerTeam;
     }
 
-    // Stockage du point de départ pour éviter une boucle infinie
+    // Store starting point to avoid infinite loop
     int32 startTeamIndex = CurrentTeamIndex;
     int32 startCharIndex = CurrentCharacterIndex;
     bool foundValidCharacter = false;
     
     do {
-        // Obtenir les personnages de l'équipe actuelle
+        // Get the characters of the current team
         TArray<AWormCharacter*> TeamMembers = WormGS->GetTeamMembers(CurrentTeamIndex);
-        UE_LOG(LogTemp, Warning, TEXT("Cherchant personnage actif - Équipe %d, Char %d (%d membres)"), 
+        UE_LOG(LogTemp, Warning, TEXT("Looking for active character - Team %d, Char %d (%d members)"), 
             CurrentTeamIndex, CurrentCharacterIndex, TeamMembers.Num());
                 
-        // Vérifier si l'index actuel est valide
+        // Check if the current index is valid
         if (TeamMembers.IsValidIndex(CurrentCharacterIndex))
         {
             AWormCharacter* Character = TeamMembers[CurrentCharacterIndex];
             if (Character && Character->GetHealth() > 0)
             {
-                // Désactiver tous les personnages d'abord
+                // Deactivate all characters first
                 for (int32 i = 0; i < WormGS->Teams.Num(); i++) {
                     for (AWormCharacter* Member : WormGS->Teams[i].TeamMembers) {
                         if (Member) Member->SetIsMyTurn(false);
                     }
                 }
                 
-                // Activer uniquement ce personnage
+                // Activate only this character
                 Character->SetIsMyTurn(true);
                 
-                // Faire posséder le personnage par le contrôleur de son équipe
+                // Make the team controller possess this character
                 AController* TeamController = AllPlayerControllers[CurrentTeamIndex];
                 if (TeamController) {
                     if (TeamController->GetPawn()) {
@@ -180,18 +181,21 @@ void AWormGameMode::StartNextTurn()
                 break;
             }
         }
-        // Si ce personnage n'est pas valide, passer au suivant
-        CurrentCharacterIndex++;
-        if (CurrentCharacterIndex >= CharactersPerTeam)
+
+        // If this character isn't valid, try the next team
+        CurrentTeamIndex = (CurrentTeamIndex + 1) % NumTeams;
+        
+        // If we've gone through all teams for this character position, move to the next character
+        if (CurrentTeamIndex == 0)
         {
-            CurrentCharacterIndex = 0;
-            CurrentTeamIndex = (CurrentTeamIndex + 1) % NumTeams;
+            CurrentCharacterIndex = (CurrentCharacterIndex + 1) % CharactersPerTeam;
         }
         
     } while (!foundValidCharacter && 
             (CurrentTeamIndex != startTeamIndex || 
              CurrentCharacterIndex != startCharIndex));
-    // Si aucun personnage valide n'est trouvé, fin de partie
+
+    // If no valid character is found, end the game
     if (!foundValidCharacter) {
         CheckGameEndCondition();
     }
@@ -391,6 +395,7 @@ void AWormGameMode::GenerateVoxelBuildings()
     }
 }
 
+
 void AWormGameMode::InitializeWeaponsForAllPlayers()
 {
     // Check if we have defined weapons
@@ -400,57 +405,33 @@ void AWormGameMode::InitializeWeaponsForAllPlayers()
         return;
     }
 
-    UE_LOG(LogTemp, Warning, TEXT("✅ Initializing weapons for all players (%d weapon types available)"), 
+    UE_LOG(LogTemp, Warning, TEXT("✅ Initializing weapons for all characters (%d weapon types available)"), 
         AvailableWeaponTypes.Num());
 
-    // Recollect controllers for safety
-    GatherAllPlayerControllers();
+    // Option 1: Initialize weapons for ALL characters, not just one per team
     
-    // Log the controller list to verify
-    UE_LOG(LogTemp, Warning, TEXT("Found %d controllers to assign weapons to:"), AllPlayerControllers.Num());
-    for (int32 i = 0; i < AllPlayerControllers.Num(); i++)
+    // Find all worm characters in the world
+    TArray<AActor*> AllCharacters;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormCharacter::StaticClass(), AllCharacters);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Found %d worm characters to equip with weapons"), AllCharacters.Num());
+    
+    // Process each character with individual timers to ensure clean processing
+    for (int32 i = 0; i < AllCharacters.Num(); i++)
     {
-        AController* Controller = AllPlayerControllers[i];
-        APawn* ControlledPawn = Controller ? Controller->GetPawn() : nullptr;
+        AWormCharacter* Character = Cast<AWormCharacter>(AllCharacters[i]);
+        if (!Character) continue;
         
-        UE_LOG(LogTemp, Warning, TEXT("  Controller %d: %s, Has Pawn: %s"), 
-            i, 
-            Controller ? *Controller->GetName() : TEXT("NULL"),
-            ControlledPawn ? *ControlledPawn->GetName() : TEXT("NO PAWN"));
-    }
-
-    // Process each controller with individual timers to ensure clean processing
-    for (int32 i = 0; i < AllPlayerControllers.Num(); i++)
-    {
-        AController* Controller = AllPlayerControllers[i];
-        int32 PlayerIndex = i;
-        
-        FTimerHandle* PlayerWeaponTimer = new FTimerHandle();
+        int32 CharIndex = i;
+        FTimerHandle* CharWeaponTimer = new FTimerHandle();
         
         GetWorld()->GetTimerManager().SetTimer(
-            *PlayerWeaponTimer,
-            [this, Controller, PlayerIndex, PlayerWeaponTimer]() {
-                // Get the character for this controller, trying harder if needed
-                AWormCharacter* Character = GetWormCharacterFromController(Controller);
-                if (!Character && Controller)
+            *CharWeaponTimer,
+            [this, Character, CharIndex, CharWeaponTimer]() {
+                if (Character && IsValid(Character))
                 {
-                    // Try to find the character even if not properly possessed yet
-                    for (TActorIterator<AWormCharacter> It(GetWorld()); It; ++It)
-                    {
-                        AWormCharacter* FoundChar = *It;
-                        // Check if this character belongs to the controller
-                        if (FoundChar && FoundChar->GetController() == Controller)
-                        {
-                            Character = FoundChar;
-                            break;
-                        }
-                    }
-                }
-                
-                if (Character)
-                {
-                    UE_LOG(LogTemp, Warning, TEXT("Assigning weapons to %s (Player %d)"), 
-                        *Character->GetName(), PlayerIndex);
+                    UE_LOG(LogTemp, Warning, TEXT("Assigning weapons to character %s (Team %d, Index %d)"), 
+                        *Character->GetName(), Character->TeamId, Character->CharacterIndexInTeam);
                     
                     // Assign weapons and ensure visibility
                     Character->SetAvailableWeapons(AvailableWeaponTypes);
@@ -472,12 +453,11 @@ void AWormGameMode::InitializeWeaponsForAllPlayers()
                 }
                 else
                 {
-                    UE_LOG(LogTemp, Error, TEXT("Could not get character for controller %s"), 
-                        Controller ? *Controller->GetName() : TEXT("NULL"));
+                    UE_LOG(LogTemp, Error, TEXT("Character no longer valid at index %d"), CharIndex);
                 }
                 
                 // Clean up the timer handle
-                delete PlayerWeaponTimer;
+                delete CharWeaponTimer;
             },
             0.5f + (0.2f * i),  // Staggered timers for safety
             false
@@ -495,17 +475,19 @@ void AWormGameMode::InitializeWeaponsForAllPlayers()
         false
     );
 }
+
 void AWormGameMode::VerifyWeaponsForAllPlayers()
 {
     UE_LOG(LogTemp, Warning, TEXT("Verifying weapons for all players..."));
     
-    // First, gather a fresh list of controllers and characters
-    GatherAllPlayerControllers();
+    // Check all characters, not just those controlled by players
+    TArray<AActor*> AllCharacters;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormCharacter::StaticClass(), AllCharacters);
     
     // Check each character
-    for (AController* Controller : AllPlayerControllers)
+    for (AActor* Actor : AllCharacters)
     {
-        AWormCharacter* Character = GetWormCharacterFromController(Controller);
+        AWormCharacter* Character = Cast<AWormCharacter>(Actor);
         if (Character)
         {
             // Check if character has a weapon
@@ -530,12 +512,9 @@ void AWormGameMode::VerifyWeaponsForAllPlayers()
                 Character->GetCharacterMovement()->SetMovementMode(MOVE_Walking);
             }
         }
-        else if (Controller)
-        {
-            UE_LOG(LogTemp, Error, TEXT("Controller %s has no character!"), *Controller->GetName());
-        }
     }
 }
+
 void AWormGameMode::ApplyTerrainSettings()
 {
     // Obtenir les paramètres actuels
