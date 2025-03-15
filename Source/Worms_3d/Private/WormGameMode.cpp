@@ -729,9 +729,16 @@ void AWormGameMode::StartRestartSequence()
         WormGS->WinnerName = TEXT("");
         WormGS->PlayerDamageDealt.Empty();
         
+        // Reset teams
+        for (FTeamInfo& Team : WormGS->Teams)
+        {
+            Team.TeamMembers.Empty();
+        }
+        
         // Force replication
         WormGS->ForceNetUpdate();
     }
+    
     // Clear any existing game over widget from all screens
     for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
     {
@@ -750,20 +757,29 @@ void AWormGameMode::StartRestartSequence()
             }
         }
     }
-    // Reset all characters
+    
+    // IMPORTANT: Clean up ALL worm characters, not just possessed ones
+    TArray<AActor*> AllCharacters;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormCharacter::StaticClass(), AllCharacters);
+    UE_LOG(LogTemp, Warning, TEXT("Cleaning up %d worm characters from previous session"), AllCharacters.Num());
+    
+    // First unpossess all controllers to avoid crashes
     for (FConstControllerIterator It = GetWorld()->GetControllerIterator(); It; ++It)
     {
         AController* Controller = It->Get();
-        if (Controller)
+        if (Controller && Controller->GetPawn())
         {
-            // Respawn controlled characters
-            if (Controller->GetPawn())
-            {
-                Controller->GetPawn()->Destroy();
-            }
-            
-            // Force possession of a new character when restart completes
-            // This will be handled by GameInitManager for player positioning
+            Controller->UnPossess();
+        }
+    }
+    
+    // Now safely destroy all characters
+    for (AActor* Actor : AllCharacters)
+    {
+        if (Actor)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Destroying character: %s"), *Actor->GetName());
+            Actor->Destroy();
         }
     }
     
@@ -776,6 +792,7 @@ void AWormGameMode::StartRestartSequence()
             Building->Destroy();
         }
     }
+    
     // Clean up any leftover weapons
     TArray<AActor*> LeftoverWeapons;
     UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormWeapon::StaticClass(), LeftoverWeapons);
@@ -787,34 +804,54 @@ void AWormGameMode::StartRestartSequence()
             Weapon->Destroy();
         }
     }
-    // Use GameInitManager to handle the restart
-    if (GameInitManager)
-    {
-        // Show loading screen first
-        if (WormGS && WormGS->LoadingManager)
-        {
-            WormGS->ShowLoadingScreen(10.0f);
-        }
+    
+    // Wait a short moment to ensure all actors are properly destroyed
+    FTimerHandle CleanupTimerHandle;
+    GetWorld()->GetTimerManager().SetTimer(
+        CleanupTimerHandle,
+        [this]() {
+            // Double-check that everything is cleaned up
+            TArray<AActor*> RemainingCharacters;
+            UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormCharacter::StaticClass(), RemainingCharacters);
+            if (RemainingCharacters.Num() > 0)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("Found %d remaining characters after cleanup, forcing destruction"), 
+                    RemainingCharacters.Num());
+                for (AActor* Actor : RemainingCharacters)
+                {
+                    if (Actor)
+                    {
+                        Actor->Destroy();
+                    }
+                }
+            }
+            
+            // Use GameInitManager to handle the restart
+            AWormGameState* WormGS = GetGameState<AWormGameState>();
+            if (GameInitManager)
+            {
+                // Show loading screen first
+                if (WormGS && WormGS->LoadingManager)
+                {
+                    WormGS->ShowLoadingScreen(10.0f);
+                }
 
-        // Start initialization sequence after a short delay
-        FTimerHandle RestartTimerHandle;
-        GetWorld()->GetTimerManager().SetTimer(
-            RestartTimerHandle,
-            [this]() {
+                // Start initialization sequence
                 if (GameInitManager)
                 {
                     GameInitManager->StartInitializationSequence();
                 }
-            },
-            1.0f, // Small delay to ensure everything is ready
-            false
-        );
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("Cannot restart: GameInitManager is null"));
-    }
+            }
+            else
+            {
+                UE_LOG(LogTemp, Error, TEXT("Cannot restart: GameInitManager is null"));
+            }
+        },
+        0.5f, // Small delay to ensure destruction completes
+        false
+    );
 }
+
 
 
 void AWormGameMode::InitializeWaterSystem()

@@ -27,24 +27,6 @@ void AGameInitManager::BeginPlay()
     
     // Initialize the network loading system first
     InitializeNetworkLoading();
-    
-    // Only execute on server or standalone
-    if (GetLocalRole() == ROLE_Authority)
-    {
-        // Start initialization sequence if auto-handle is enabled
-        if (bAutoHandleInitialization)
-        {
-            // Add a small delay to ensure everything is ready
-            FTimerHandle StartupTimerHandle;
-            GetWorld()->GetTimerManager().SetTimer(
-                StartupTimerHandle,
-                this,
-                &AGameInitManager::StartInitializationSequence,
-                0.5f,
-                false
-            );
-        }
-    }
 }
 
 void AGameInitManager::InitializeNetworkLoading()
@@ -285,7 +267,7 @@ void AGameInitManager::ExecuteInitializationStep()
             break;
         }
         
-        case 5: // Final stabilization and game start
+         case 5: // Final stabilization and game start
         {
             UpdateLoadingProgress(0.95f, TEXT("Stabilisation des joueurs..."));
 

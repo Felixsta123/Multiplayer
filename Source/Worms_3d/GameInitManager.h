@@ -24,9 +24,9 @@ public:
     //LoadingWidget
     UPROPERTY()
     UW_GameLoadingScreen* LoadingWidget;
-    int CycleCount;
     int MaxCycles;
     FTimerHandle TurnCycleTimerHandle;
+    int CycleCount;
 
     // Called when the game starts or when spawned
     virtual void BeginPlay() override;
