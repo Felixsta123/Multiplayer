@@ -1,6 +1,6 @@
 ﻿#include "TestWormGameMode.h"
-#include "AVoxelBuilding.h"
-#include "AWormCharacter.h"
+#include "Worms_3d/Building/AVoxelBuilding.h"
+#include "Worms_3d/AWormCharacter.h"
 #include "Kismet/GameplayStatics.h"
 #include "TestWormPlayerController.h"
 

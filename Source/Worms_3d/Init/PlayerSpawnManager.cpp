@@ -189,7 +189,7 @@ void UPlayerSpawnManager::TeleportPlayersToBuildings()
                            TeamIndex,
                            CharIndex
                        );
-                
+                    UE_LOG(LogTemp, Warning, TEXT("    - InGameName: %s"), *Character->InGameName);
                 
                     // Add to team in GameState
                     AWormGameState* WormGS = GetWorld()->GetGameState<AWormGameState>();

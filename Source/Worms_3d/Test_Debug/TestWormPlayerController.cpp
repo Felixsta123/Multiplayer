@@ -1,6 +1,6 @@
 ﻿#include "TestWormPlayerController.h"
 #include "Blueprint/UserWidget.h"
-#include "AWormCharacter.h"
+#include "Worms_3d/AWormCharacter.h"
 #include "TestWormGameMode.h"
 
 ATestWormPlayerController::ATestWormPlayerController()

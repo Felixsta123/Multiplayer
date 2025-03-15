@@ -4,7 +4,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "WormGameMode.h"
 #include "WormPlayerController.h"
-#include "Worms_3d/AVoxelBuilding.h"
+#include "Worms_3d/Building/AVoxelBuilding.h"
 
 AWormGameState::AWormGameState()
 {

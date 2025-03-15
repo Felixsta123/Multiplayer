@@ -75,8 +75,10 @@ public:
     
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "UI")
     class UWNameIndicatorWidget* NameIndicatorWidget;
+    UFUNCTION( Category = "UI")
+    void OnRep_InGameName();
 
-    UPROPERTY(Replicated, BlueprintReadWrite, Category = "Identification")
+    UPROPERTY(ReplicatedUsing = OnRep_InGameName, BlueprintReadWrite, Category = "Identification")
     FString InGameName;
 
     // Animation parameter
@@ -90,7 +92,6 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Animation")
     void PlayHitReaction();
     void OnSwitchTeamMemberAction(const FInputActionValue& Value);
-    void OnRep_InGameName();
     void UpdateNameWidget();
     // === FONCTIONS DE JEU PRINCIPALES ===
     

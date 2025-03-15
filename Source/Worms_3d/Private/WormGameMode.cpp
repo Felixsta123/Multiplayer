@@ -13,6 +13,7 @@
 #include "Worms_3d/Env/EnvironmentalEventsManager.h"
 #include "Worms_3d/Init/GameInitFactorySubsystem.h"
 #include "Worms_3d/Building/VoxelTerrainSettings.h"
+#include "Worms_3d/Init/NetworkLoadingManager.h"
 #include "Worms_3d/Misc/WormGameInstance.h"
 #include "Worms_3d/UI/W_GameResultsScreen.h"
 
@@ -907,27 +908,53 @@ FString AWormGameMode::GetCharacterInGameName(UClass* CharacterClass, int32 Team
     // Get the character class name
     FString ClassName = CharacterClass->GetName();
     
+    // Log the input parameters
+    UE_LOG(LogTemp, Warning, TEXT("Getting in-game name for class: %s"), *ClassName);
+    
     // Find which character type this is
-    FString* FoundType = nullptr;
+    FString CharacterType;
     for (const FString& Type : {"Laura", "Guy", "David", "Emily"})
     {
         if (ClassName.Contains(Type))
         {
-            FoundType = &const_cast<FString&>(Type);
+            CharacterType = Type;
+            UE_LOG(LogTemp, Warning, TEXT("Found character type: %s"), *CharacterType);
             break;
         }
     }
     
-    if (!FoundType)
+    if (CharacterType.IsEmpty())
         return FString::Printf(TEXT("Agent %d-%d"), TeamId, CharIndexInTeam);
     
     // Get name array for this type
-    FCharacterNameList* NameList = CharacterNamesByType.Find(*FoundType);
+    FCharacterNameList* NameList = CharacterNamesByType.Find(CharacterType);
     if (!NameList || NameList->Names.Num() == 0)
-        return FString::Printf(TEXT("%s %d-%d"), *(*FoundType), TeamId, CharIndexInTeam);
-    
+    {
+        UE_LOG(LogTemp, Warning, TEXT("No names found for character type: %s"), *CharacterType);
+        return FString::Printf(TEXT("%s %d-%d"), *CharacterType, TeamId, CharIndexInTeam);
+    }
     // Use the character index to pick a name, wrapping around if needed
     int32 NameIndex = CharIndexInTeam % NameList->Names.Num();
-    return NameList->Names[NameIndex];
+    
+    // Make sure we have a valid name
+    if (!NameList->Names.IsValidIndex(NameIndex))
+        return FString::Printf(TEXT("%s %d-%d"), *CharacterType, TeamId, CharIndexInTeam);
+    
+    FString CharacterName = NameList->Names[NameIndex];
+    //print the list of names and the selected name
+    FString NamesList;
+    for (const FString& Name : NameList->Names)
+    {
+        NamesList += Name + ", ";
+    }
+    UE_LOG(LogTemp, Warning, TEXT("Available names for %s: %s"), *CharacterType, *NamesList);
+    UE_LOG(LogTemp, Warning, TEXT("Selected character name: %s"), *CharacterName);
+    // Double check the name is valid
+    if (CharacterName.IsEmpty())
+        return FString::Printf(TEXT("%s %d-%d"), *CharacterType, TeamId, CharIndexInTeam);
+    
+    // Log the selected name for debugging
+    UE_LOG(LogTemp, Warning, TEXT("Selected character name: %s"), *CharacterName);
+    
+    return CharacterName;
 }
-

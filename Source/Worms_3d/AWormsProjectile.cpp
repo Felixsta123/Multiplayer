@@ -1,6 +1,6 @@
 ﻿#include "AWormsProjectile.h"
 
-#include "AVoxelBuilding.h"
+#include "Worms_3d/Building/AVoxelBuilding.h"
 #include "Components/SphereComponent.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "Kismet/GameplayStatics.h"

@@ -4,7 +4,7 @@
 #include "TestWormPlayerController.h"
 #include "TestWormGameMode.h"
 #include "Kismet/GameplayStatics.h"
-#include "AWormCharacter.h"
+#include "Worms_3d/AWormCharacter.h"
 
 void UTestWormUI::NativeConstruct()
 {

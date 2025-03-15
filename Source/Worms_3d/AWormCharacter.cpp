@@ -119,7 +119,6 @@ void AWormCharacter::BeginPlay()
         CurrentCameraDistance = DefaultCameraDistance;
         CameraBoom->TargetArmLength = CurrentCameraDistance;
     }
-    UpdateNameWidget();
 
     // Configuration de l'input pour le joueur local
     if (IsLocallyControlled())
@@ -1542,11 +1541,29 @@ void AWormCharacter::OnSwitchTeamMemberAction(const FInputActionValue& Value)
     UE_LOG(LogTemp, Warning, TEXT("DEBUG: No other valid team members found in team %d"), TeamId);
 }
 
+void AWormCharacter::UpdateNameWidget()
+{
+    
+    // Check if the name is valid
+    if (InGameName.IsEmpty())
+    {
+        // Set a default name if empty
+        UE_LOG(LogTemp, Warning, TEXT("UpdateNameWidget: Empty name for %s"), *GetName());
+        InGameName = FString::Printf(TEXT("Worm_%d_%d"), TeamId, CharacterIndexInTeam);
+    }
+    
+    // Debug log
+    UE_LOG(LogTemp, Log, TEXT("UpdateNameWidget for %s with name: %s"), *GetName(), *InGameName);
+
+    // Update the name widget if available
+    if (NameIndicatorWidget)
+    {
+        NameIndicatorWidget->SetNameInfo(TeamId, InGameName);
+        
+    }
+    
+}
 void AWormCharacter::OnRep_InGameName()
 {
     UpdateNameWidget();
-}
-
-void AWormCharacter::UpdateNameWidget()
-{
 }

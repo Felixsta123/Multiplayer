@@ -2,8 +2,8 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameMode.h"
-#include "WormWeapon.h"
-#include "AVoxelBuilding.h"
+#include "Worms_3d/WormWeapon.h"
+#include "Worms_3d/Building/AVoxelBuilding.h"
 #include "TestWormGameMode.generated.h"
 
 UCLASS()

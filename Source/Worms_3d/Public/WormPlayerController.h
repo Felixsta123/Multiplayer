@@ -4,7 +4,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
 #include "Blueprint/UserWidget.h"
-#include "../PlayerDataStruct.h"
+#include "Worms_3d/Misc//PlayerDataStruct.h"
 #include "WormPlayerController.generated.h"
 
 UCLASS()

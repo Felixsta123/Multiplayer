@@ -2,9 +2,9 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameState.h"
+#include "Worms_3d/Init/NetworkLoadingManager.h"
 #include "../AWormCharacter.h"
-#include "Worms_3d/AVoxelBuilding.h"
-#include "../NetworkLoadingManager.h"
+
 #include "WormGameState.generated.h"
 //struct that holds player DamagePlayerNames;DamageValues
 USTRUCT(BlueprintType)

@@ -3,7 +3,7 @@
 #include "Components/AudioComponent.h"
 #include "Sound/SoundCue.h"
 #include "Particles/ParticleSystemComponent.h"
-#include "AWormCharacter.h"
+#include "Worms_3d/AWormCharacter.h"
 #include "EnvironmentalEventsManager.h"
 #include "WormGameState.h"
 #include "WormGameMode.h"

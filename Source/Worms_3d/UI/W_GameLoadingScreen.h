@@ -1,7 +1,7 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
-#include "GameLoadingWidget.h"
+#include "Worms_3d/Init/GameLoadingWidget.h"
 #include "W_GameLoadingScreen.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnLoadingScreenDismissed);
