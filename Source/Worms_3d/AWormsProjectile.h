@@ -24,7 +24,15 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     class USphereComponent* CollisionComp;
     FTimerHandle TrailTimerHandle;
-
+    
+    // Rayon d'explosion
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Projectile")
+    float ExplosionRadius;
+    
+    // Dégâts de l'explosion
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Projectile")
+    float ExplosionDamage;
+    
     // Initialiser le projectile avec une direction et une puissance
     UFUNCTION(BlueprintCallable, Category = "Projectile")
     void InitializeProjectile(FVector Direction, float Power);
@@ -54,6 +62,8 @@ protected:
     FLinearColor ClientTrailColor = FLinearColor(0.0f, 0.0f, 1.0f, 1.0f); // Bleu pour le client
 
     virtual void BeginPlay() override;
+
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
     
     // Composant de mouvement projectile
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -62,14 +72,8 @@ protected:
     // Mesh du projectile
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     UStaticMeshComponent* ProjectileMesh;
-    
-    // Rayon d'explosion
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Projectile")
-    float ExplosionRadius;
-    
-    // Dégâts de l'explosion
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Projectile")
-    float ExplosionDamage;
+
+    static TArray<AWormProjectile*> ActiveProjectiles;
     
     // Délai avant explosion auto
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Projectile")
