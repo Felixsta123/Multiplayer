@@ -19,6 +19,8 @@ class WORMS_3D_API AWormCharacter : public ACharacter
 public:
     AWormCharacter();
 
+    int32 DiagnosticCount = 0;
+
     // === COMPOSANTS DE CAMÉRA ===
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     class USpringArmComponent* CameraBoom;
@@ -160,7 +162,19 @@ public:
     UPROPERTY(EditDefaultsOnly, Category = "Worm")
     float MaxMovementPoints;
 
-    // Count of diagnostic attempts for this instance
+    // Toggle weapon wheel
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input")
+    class UInputAction* ToggleWeaponWheelAction;
+
+    // Weapon wheel widget class
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="UI")
+    TSubclassOf<class UUserWidget> WeaponWheelWidgetClass;
+
+    // Weapon data table
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="UI")
+    class UDataTable* WeaponDataTable;
+
+    // Current weapon wheel widget instance
     UPROPERTY()
     int32 DiagnosticCount;
 
@@ -169,6 +183,22 @@ public:
 
     UPROPERTY(Replicated, BlueprintReadWrite, Category = "Team")
     int32 CharacterIndexInTeam;
+    class UUserWidget* WeaponWheelWidget;
+
+    // Functions to handle weapon wheel
+    UFUNCTION(BlueprintCallable, Category="Weapon")
+    void ToggleWeaponWheel();
+
+    UFUNCTION(BlueprintCallable, Category="Weapon")
+    void SelectWeaponFromWheel(int32 WeaponIndex);
+
+    // Input action handler
+    void OnToggleWeaponWheelAction(const FInputActionValue& Value);
+
+    // Whether weapon wheel is active
+    UPROPERTY(BlueprintReadOnly, Category="Weapon")
+    bool bWeaponWheelActive;
+    
 protected:
     // === ÉTAT DU PERSONNAGE ===
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Worm")

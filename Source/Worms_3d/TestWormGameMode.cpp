@@ -119,7 +119,17 @@ void ATestWormGameMode::InitializeWeaponsForPlayer()
         UE_LOG(LogTemp, Error, TEXT("❌ No weapon types defined in TestGameMode!"));
         return;
     }
-
+    for (auto WeaponType : AvailableWeaponTypes)
+    {
+        if (WeaponType)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("WeaponType being added: %s"), *WeaponType->GetName());
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Null weapon type in AvailableWeaponTypes!"));
+        }
+    }
     UE_LOG(LogTemp, Warning, TEXT("✅ Initializing weapons for player (%d weapon types available)"), 
         AvailableWeaponTypes.Num());
 

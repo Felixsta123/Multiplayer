@@ -99,6 +99,20 @@ void AWormCharacter::InitializeCameraSystem()
 void AWormCharacter::BeginPlay()
 {
     Super::BeginPlay();
+
+    // Debug
+    UE_LOG(LogTemp, Warning, TEXT("Available weapons count: %d"), AvailableWeapons.Num());
+    for (auto Weapon : AvailableWeapons)
+    {
+        if (Weapon)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Weapon class: %s"), *Weapon->GetName());
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Null weapon class found in AvailableWeapons"));
+        }
+    }
     
     // Initialisation des valeurs par défaut
     LastPosition = GetActorLocation();
@@ -270,6 +284,9 @@ void AWormCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
             EnhancedInputComponent->BindAction(AimAction, ETriggerEvent::Started, this, &AWormCharacter::OnAimActionStarted);
             EnhancedInputComponent->BindAction(AimAction, ETriggerEvent::Completed, this, &AWormCharacter::OnAimActionEnded);
         }
+        // Binding for toggling weapon wheel
+        if (ToggleWeaponWheelAction)
+            EnhancedInputComponent->BindAction(ToggleWeaponWheelAction, ETriggerEvent::Started, this, &AWormCharacter::OnToggleWeaponWheelAction);
     }
     else
     {
@@ -1538,3 +1555,120 @@ void AWormCharacter::OnSwitchTeamMemberAction(const FInputActionValue& Value)
     
     UE_LOG(LogTemp, Warning, TEXT("DEBUG: No other valid team members found in team %d"), TeamId);
 }
+
+// Weapon Wheel
+
+void AWormCharacter::ToggleWeaponWheel()
+{
+    UE_LOG(LogTemp, Warning, TEXT("ToggleWeaponWheel called, IsMyTurn: %s, IsLocallyControlled: %s"), 
+        bIsMyTurn ? TEXT("true") : TEXT("false"),
+        IsLocallyControlled() ? TEXT("true") : TEXT("false"));
+    
+    // Check turn condition
+    if (!bIsMyTurn || !IsLocallyControlled())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("ToggleWeaponWheel early return - not my turn or not locally controlled"));
+        return;
+    }
+    // Toggle the flag
+    bWeaponWheelActive = !bWeaponWheelActive;
+    
+    // Create or remove the widget
+    if (bWeaponWheelActive)
+    {
+        if (WeaponWheelWidgetClass && !WeaponWheelWidget)
+        {
+            APlayerController* PC = Cast<APlayerController>(GetController());
+            if (PC)
+            {
+                // Create the widget
+                WeaponWheelWidget = CreateWidget<UUserWidget>(PC, WeaponWheelWidgetClass);
+                
+                // Cast to the specific type to access its methods
+                if (UWeaponWheelWidget* TypedWidget = Cast<UWeaponWheelWidget>(WeaponWheelWidget))
+                {
+                    // Add debug log for data table
+                    UE_LOG(LogTemp, Warning, TEXT("Setting weapon data table: %s"), 
+                        WeaponDataTable ? *WeaponDataTable->GetName() : TEXT("NULL"));
+                    
+                    // Set the data table
+                    TypedWidget->SetWeaponDataTable(WeaponDataTable);
+                    
+                    // Add to viewport
+                    WeaponWheelWidget->AddToViewport(100); // High Z-order to be on top
+                    
+                    // Set input mode to UI with game
+                    FInputModeGameAndUI InputMode;
+                    InputMode.SetWidgetToFocus(WeaponWheelWidget->TakeWidget());
+                    InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+                    PC->SetInputMode(InputMode);
+                    PC->SetShowMouseCursor(true);
+                }
+            }
+        }
+    }
+    else
+    {
+        // Remove the widget and restore game input
+        if (WeaponWheelWidget)
+        {
+            WeaponWheelWidget->RemoveFromParent();
+            WeaponWheelWidget = nullptr;
+            
+            // Restore game input
+            APlayerController* PC = Cast<APlayerController>(GetController());
+            if (PC)
+            {
+                FInputModeGameOnly InputMode;
+                PC->SetInputMode(InputMode);
+                PC->SetShowMouseCursor(false);
+            }
+        }
+    }
+}
+
+// void AWormCharacter::OnToggleWeaponWheelAction(const FInputActionValue& Value)
+// {
+//     // Visual on-screen message - visible during gameplay
+//     GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, TEXT("G KEY PRESSED - Toggle Weapon Wheel Action Called"));
+//     
+//     // Console log message
+//     UE_LOG(LogTemp, Warning, TEXT("G KEY PRESSED - Toggle Weapon Wheel Action Called"));
+//     
+//     // Call the original function
+//     ToggleWeaponWheel();
+// }
+
+void AWormCharacter::SelectWeaponFromWheel(int32 WeaponIndex)
+{
+    // Close the weapon wheel
+    bWeaponWheelActive = false;
+    
+    if (WeaponWheelWidget)
+    {
+        WeaponWheelWidget->RemoveFromParent();
+        WeaponWheelWidget = nullptr;
+        
+        // Restore game input
+        APlayerController* PC = Cast<APlayerController>(GetController());
+        if (PC)
+        {
+            FInputModeGameOnly InputMode;
+            PC->SetInputMode(InputMode);
+            PC->SetShowMouseCursor(false);
+        }
+    }
+    
+    // Switch to the selected weapon if valid
+    if (WeaponIndex >= 0 && WeaponIndex < AvailableWeapons.Num())
+    {
+        SwitchWeapon(WeaponIndex);
+    }
+}
+
+void AWormCharacter::OnToggleWeaponWheelAction(const FInputActionValue& Value)
+{
+    UE_LOG(LogTemp, Warning, TEXT("G key pressed - OnToggleWeaponWheelAction called"));
+    ToggleWeaponWheel();
+}
+
