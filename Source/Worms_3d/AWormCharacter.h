@@ -20,7 +20,7 @@ public:
     AWormCharacter();
 
     int32 DiagnosticCount = 0;
-
+    
     // === COMPOSANTS DE CAMÉRA ===
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     class USpringArmComponent* CameraBoom;
@@ -175,8 +175,7 @@ public:
     class UDataTable* WeaponDataTable;
 
     // Current weapon wheel widget instance
-    UPROPERTY()
-    int32 DiagnosticCount;
+    // UPROPERTY()
 
     UPROPERTY(Replicated, BlueprintReadWrite, Category = "Team")
     int32 TeamId = -1;

@@ -14,6 +14,7 @@
 //include for   AWormCharacter.cpp(1045): [C2039] 'IsNormalized': is not a member of 'UE::Math::TRotator<double>'
 #include "Math/UnrealMathUtility.h"
 // Ajouter les includes manquants pour les collisions Cannot resolve symbol 'SetCollisionEnabled'
+#include "WeaponWheelWidget.h"
 #include "EnvironmentalEventsManager.h"
 #include "WormGameState.h"
 #include "Components/PrimitiveComponent.h"
