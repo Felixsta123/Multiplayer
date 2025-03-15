@@ -294,9 +294,15 @@ void AGameInitManager::ExecuteInitializationStep()
                 // Final check to ensure all characters are stable
                 GameMode->GatherAllPlayerControllers();
     
-                // For each character, ensure movement properties are set correctly
-                for (AController* Controller : GameMode->AllPlayerControllers) {
-                    AWormCharacter* Character = GameMode->GetWormCharacterFromController(Controller);
+                TArray<AActor*> AllCharacters;
+                UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormCharacter::StaticClass(), AllCharacters);
+        
+                UE_LOG(LogTemp, Warning, TEXT("Stabilizing physics for %d characters"), AllCharacters.Num());
+        
+                // Pour chaque personnage, assurer que la physique est correctement configurée
+                for (AActor* Actor : AllCharacters)
+                {
+                    AWormCharacter* Character = Cast<AWormCharacter>(Actor);
                     if (Character && Character->GetCharacterMovement()) {
                         // Reset velocity
                         Character->GetCharacterMovement()->Velocity = FVector::ZeroVector;
@@ -312,7 +318,9 @@ void AGameInitManager::ExecuteInitializationStep()
             
                         // Force update of physics state
                         Character->GetCharacterMovement()->UpdateComponentVelocity();
-            
+                        Character->GetCharacterMovement()->GetOwner()->GetRootComponent()->UpdateComponentToWorld();
+                        Character->GetCharacterMovement()->GravityScale = 1.5f;
+
                         // Final weapon visibility check
                         if (Character->CurrentWeapon) {
                             Character->CurrentWeapon->EnsureWeaponVisibility();
