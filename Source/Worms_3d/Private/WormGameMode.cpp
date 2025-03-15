@@ -508,8 +508,7 @@ void AWormGameMode::VerifyWeaponsForAllPlayers()
             if (Character->GetCharacterMovement())
             {
                 // Reset velocity and set to walking
-                Character->GetCharacterMovement()->Velocity = FVector::ZeroVector;
-                Character->GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+                //TO DO: Set the character movement mode to walking
             }
         }
     }

@@ -165,7 +165,7 @@ public:
     int32 DiagnosticCount;
 
     UPROPERTY(Replicated, BlueprintReadWrite, Category = "Team")
-    int32 TeamId;
+    int32 TeamId = -1;
 
     UPROPERTY(Replicated, BlueprintReadWrite, Category = "Team")
     int32 CharacterIndexInTeam;

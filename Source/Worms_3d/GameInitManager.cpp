@@ -320,6 +320,7 @@ void AGameInitManager::ExecuteInitializationStep()
                         Character->GetCharacterMovement()->UpdateComponentVelocity();
                         Character->GetCharacterMovement()->GetOwner()->GetRootComponent()->UpdateComponentToWorld();
                         Character->GetCharacterMovement()->GravityScale = 1.5f;
+                        Character->ForceNetUpdate();
 
                         // Final weapon visibility check
                         if (Character->CurrentWeapon) {

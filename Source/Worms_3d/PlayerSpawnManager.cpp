@@ -169,10 +169,11 @@ void UPlayerSpawnManager::TeleportPlayersToBuildings()
                     FRotator::ZeroRotator,
                     SpawnParams
                 );
-                Character->GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+                Character->GetCharacterMovement()->SetMovementMode(MOVE_Falling);
                 Character->GetCharacterMovement()->GravityScale = 1.5f;
                 Character->GetCharacterMovement()->AddForce(FVector(0, 0, -980.0f));
                 Character->GetCharacterMovement()->UpdateComponentVelocity();
+                Character->ForceNetUpdate();
                 UE_LOG(LogTemp, Warning, TEXT("  Spawning Character %d for Team %d:"), CharIndex, TeamIndex);
                 UE_LOG(LogTemp, Warning, TEXT("    - Location: %s"), *SpawnLocation.ToString());
                 UE_LOG(LogTemp, Warning, TEXT("    - Character Class: %s"), 
@@ -195,6 +196,20 @@ void UPlayerSpawnManager::TeleportPlayersToBuildings()
             }
         }
     }
+
+    //check every WormsCharacter and destroy the one that are not in the team
+    TArray<AActor*> AllCharacters;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormCharacter::StaticClass(), AllCharacters);
+    for (AActor* Actor : AllCharacters)
+    {
+        AWormCharacter* Character = Cast<AWormCharacter>(Actor);
+        if (Character && Character->TeamId == -1)
+        {
+            // Destroy the character
+            UE_LOG(LogTemp, Warning, TEXT("Destroying character %s"), *Character->GetName());
+            Character->Destroy();
+        }
+    }
     FTimerHandle PhysicsTimerHandle;
     GetWorld()->GetTimerManager().SetTimer(
         PhysicsTimerHandle,
@@ -208,7 +223,7 @@ void UPlayerSpawnManager::TeleportPlayersToBuildings()
                 if (Character && Character->GetCharacterMovement()) 
                 {
                     // Activer la simulation physique
-                    Character->GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+                    Character->GetCharacterMovement()->SetMovementMode(MOVE_Falling);
                     Character->GetCharacterMovement()->GravityScale = 1.5f;
                     Character->GetCharacterMovement()->AddForce(FVector(0, 0, -980.0f));
                     Character->GetCharacterMovement()->UpdateComponentVelocity();
@@ -217,7 +232,7 @@ void UPlayerSpawnManager::TeleportPlayersToBuildings()
                 }
             }
         },
-        1.0f, // Délai de 1 seconde après la téléportation
+        0.25f, // Small delay to ensure all characters are spawned
         false
     );
     UE_LOG(LogTemp, Warning, TEXT("===================================="));
