@@ -287,7 +287,7 @@ void AGameInitManager::ExecuteInitializationStep()
         
         case 5: // Final stabilization and game start
         {
-            UpdateLoadingProgress(1.0f, TEXT("Prêt !"));
+            UpdateLoadingProgress(0.95f, TEXT("Stabilisation des joueurs..."));
 
             AWormGameMode* GameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(this));
             if (GameMode) {
@@ -332,18 +332,105 @@ void AGameInitManager::ExecuteInitializationStep()
                     }
                 }
     
-                // Start the first turn
-                GameMode->StartNextTurn();
+                // Do NOT start the first turn here, that will happen in the next step
+                // GameMode->StartNextTurn();
             }
 
-            // Complete initialization AFTER all steps are done
-            UE_LOG(LogTemp, Warning, TEXT("Game initialization sequence complete"));
-            CompleteInitialization();
+            // Go to the final initialization step after a delay
+            GetWorld()->GetTimerManager().SetTimer(
+                InitStepTimerHandle,
+                this,
+                &AGameInitManager::ExecuteInitializationStep,
+                3.0f,
+                false
+            );
+
+            CurrentInitStep++;
+            break;
+        }
+
+        case 6: // Multiple turn cycling to ensure proper physics
+        {
+            UpdateLoadingProgress(1.0f, TEXT("Prêt !"));
+
+            AWormGameMode* GameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(this));
+            if (GameMode) {
+                UE_LOG(LogTemp, Warning, TEXT("Final character physics stabilization - cycling through turns"));
+                
+                // Get the game state to access team information
+                AWormGameState* WormGS = Cast<AWormGameState>(UGameplayStatics::GetGameState(GetWorld()));
+                if (!WormGS) {
+                    UE_LOG(LogTemp, Error, TEXT("GameState not found!"));
+                    CompleteInitialization();
+                    break;
+                }
+                
+                // Calculate total character count from all teams
+                int32 TotalCharacterCount = 0;
+                for (const FTeamInfo& Team : WormGS->Teams) {
+                    TotalCharacterCount += Team.TeamMembers.Num();
+                }
+                
+                // Early safety check - if no characters found, move on
+                if (TotalCharacterCount == 0) {
+                    UE_LOG(LogTemp, Error, TEXT("No characters found for turn cycling!"));
+                    GameMode->StartNextTurn(); // Call once to start the first actual turn
+                    CompleteInitialization();
+                    break;
+                }
+                
+                UE_LOG(LogTemp, Warning, TEXT("Starting turn cycle initialization for %d characters"), TotalCharacterCount);
+                
+                // Set up recurring timer to cycle through each character's turn
+                CycleCount = 0;
+                MaxCycles = TotalCharacterCount * 2; // Cycle through each character twice
+                
+                GetWorld()->GetTimerManager().SetTimer(
+                    TurnCycleTimerHandle,
+                    this,
+                    &AGameInitManager::CycleThroughTurns,
+                    0.5f, // Initial delay before first cycle
+                    false
+                );
+                
+                // No need to increment CurrentInitStep as this is the final step
+            }
             break;
         }
     }
 }
 
+// New function to cycle through turns to stabilize physics
+void AGameInitManager::CycleThroughTurns()
+{
+    AWormGameMode* GameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(this));
+    if (!GameMode) {
+        CompleteInitialization();
+        return;
+    }
+
+    // Call StartNextTurn to cycle to the next character
+    GameMode->StartNextTurn();
+    
+    CycleCount++;
+    UE_LOG(LogTemp, Warning, TEXT("Turn cycle %d/%d complete"), CycleCount, MaxCycles);
+    
+    // Continue cycling if we haven't reached the max cycles
+    if (CycleCount < MaxCycles) {
+        // Schedule the next cycle with a delay
+        GetWorld()->GetTimerManager().SetTimer(
+            TurnCycleTimerHandle,
+            this,
+            &AGameInitManager::CycleThroughTurns,
+            0.5f, // Delay between cycles
+            false
+        );
+    } else {
+        // We've completed all cycles, finish initialization
+        UE_LOG(LogTemp, Warning, TEXT("All turn cycles complete. Game initialization sequence complete"));
+        CompleteInitialization();
+    }
+}
 
 void AGameInitManager::UpdateLoadingProgress(float Progress, const FString& StatusText)
 {
