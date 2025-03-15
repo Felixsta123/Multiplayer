@@ -56,7 +56,7 @@ AWormCharacter::AWormCharacter()
     // Configuration du système de caméra
     // S'assurer que la physique est activée dès le début
     GetCharacterMovement()->UpdateComponentVelocity();
-    
+  
     InitializeCameraSystem();
 }
 
@@ -493,6 +493,7 @@ void AWormCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
     DOREPLIFETIME(AWormCharacter, CharacterIndexInTeam);
     DOREPLIFETIME(AWormCharacter, TeamId);
     DOREPLIFETIME(AWormCharacter, InGameName);
+    DOREPLIFETIME(AWormCharacter, NameWidgetComponent);
 }
 
 // Fonctions de mouvement legacy
@@ -1543,6 +1544,8 @@ void AWormCharacter::OnSwitchTeamMemberAction(const FInputActionValue& Value)
 
 void AWormCharacter::InitializeNameWidget()
 {
+    if (!HasAuthority()) return;  // Exécute uniquement sur le serveur
+
     // Skip if already initialized
     if (NameWidgetComponent && NameWidgetComponent->GetWidget())
         return;

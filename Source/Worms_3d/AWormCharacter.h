@@ -76,7 +76,7 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "UI")
     class UWNameIndicatorWidget* NameIndicatorWidget;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "UI")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "UI", Replicated)
     class UWidgetComponent* NameWidgetComponent;
 
     UFUNCTION( Category = "UI")

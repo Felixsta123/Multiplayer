@@ -189,6 +189,7 @@ void UPlayerSpawnManager::TeleportPlayersToBuildings()
                            TeamIndex,
                            CharIndex
                        );
+
                     Character->ForceNetUpdate();
                     UE_LOG(LogTemp, Warning, TEXT("    - InGameName: %s"), *Character->InGameName);
                     //init the name widget
