@@ -142,8 +142,7 @@ public:
     // Événement de changement de tour
     UFUNCTION(BlueprintNativeEvent, Category = "Game")
     void OnTurnChanged(bool bIsTurn);
-    UPROPERTY(Replicated)
-    FGuid CurrentWeaponInstanceID;
+
     // === FONCTIONS DE CYCLE DE VIE ===
     virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
