@@ -346,16 +346,29 @@ void AWormGameState::InitializeTeams(int32 NumTeams)
     UE_LOG(LogTemp, Warning, TEXT("========================"));
 
     Teams.Empty();
-    
+
+    /*	switch (TeamId)
+    {
+        case 0: return FLinearColor(0.0f, 0.5f, 1.0f); // Blue
+        case 1: return FLinearColor(1.0f, 0.2f, 0.2f); // Red
+        case 2: return FLinearColor(0.2f, 0.8f, 0.2f); // Green
+        case 3: return FLinearColor(1.0f, 0.8f, 0.0f); // Yellow
+        default: return FLinearColor(0.7f, 0.7f, 0.7f); // Gray
+        */
     for (int32 i = 0; i < NumTeams; i++)
     {
         FTeamInfo NewTeam;
         NewTeam.TeamId = i;
         NewTeam.TeamName = FString::Printf(TEXT("Team %d"), i + 1);
-        float Hue = (float)i / NumTeams;
-        NewTeam.TeamColor = FLinearColor::MakeFromHSV8(Hue * 255, 200, 200);
+        switch (i)
+        {
+        case 0: NewTeam.TeamColor = FLinearColor(0.0f, 0.5f, 1.0f); break; // Blue
+        case 1: NewTeam.TeamColor = FLinearColor(1.0f, 0.2f, 0.2f); break; // Red
+        case 2: NewTeam.TeamColor = FLinearColor(0.2f, 0.8f, 0.2f); break; // Green
+        case 3: NewTeam.TeamColor = FLinearColor(1.0f, 0.8f, 0.0f); break; // Yellow
+        default: NewTeam.TeamColor = FLinearColor(0.7f, 0.7f, 0.7f); break; // Gray
+        }
         Teams.Add(NewTeam);
-        
         UE_LOG(LogTemp, Warning, TEXT("Created Team %d - Name: %s"), i, *NewTeam.TeamName);
     }
     
