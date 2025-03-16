@@ -342,7 +342,7 @@ void AWormGameMode::GenerateVoxelBuildings()
     // Appliquer les paramètres de terrain avant de générer
     ApplyTerrainSettings();
 
-    UE_LOG(LogTemp, Warning, TEXT("Generating %d voxel buildings..."), NumberOfBuildings);
+    UE_LOG(LogTemp, Warning, TEXT("Generating %d regular voxel buildings..."), NumberOfBuildings);
 
     FActorSpawnParameters SpawnParams;
     SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
@@ -350,7 +350,7 @@ void AWormGameMode::GenerateVoxelBuildings()
     // Obtenir les paramètres de terrain
     UVoxelTerrainSettingsManager* Manager = UVoxelTerrainSettingsManager::GetInstance();
     FVoxelTerrainSettings Settings;
-    
+
     if (Manager)
     {
         Settings = Manager->GetSettings();
@@ -361,7 +361,7 @@ void AWormGameMode::GenerateVoxelBuildings()
         Settings = FVoxelTerrainSettings();
     }
 
-    // Utiliser des valeurs fixes pour la cohérence
+    // Generate regular box buildings
     for (int32 i = 0; i < NumberOfBuildings; i++)
     {
         // Calculer une position aléatoire dans la zone
@@ -379,10 +379,13 @@ void AWormGameMode::GenerateVoxelBuildings()
             Rotation,
             SpawnParams
         );
-        
+
         if (Building)
         {
-            UE_LOG(LogTemp, Warning, TEXT("Voxel building %d generated at %s"), i, *Location.ToString());
+            UE_LOG(LogTemp, Warning, TEXT("Regular voxel building %d generated at %s"), i, *Location.ToString());
+
+            // Set building type to standard
+            Building->BuildingType = EVoxelBuildingType::Standard;
 
             // Appliquer les paramètres de terrain
             Building->GridSizeX = Settings.GridSizeX;
@@ -401,7 +404,64 @@ void AWormGameMode::GenerateVoxelBuildings()
             Building->GenerateBuilding();
         }
     }
-    
+
+    // Check if staircase buildings are enabled
+    if (Settings.bEnableStaircaseBuildings && Settings.NumberOfStaircaseBuildings > 0)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Generating %d staircase buildings..."), Settings.NumberOfStaircaseBuildings);
+
+        // Generate staircase buildings
+        for (int32 i = 0; i < Settings.NumberOfStaircaseBuildings; i++)
+        {
+            // Position staircase buildings in a different area to avoid overlapping
+            float X = FMath::RandRange(-SpawnAreaSize * 0.8f, SpawnAreaSize * 0.8f);
+            float Y = FMath::RandRange(-SpawnAreaSize * 0.8f, SpawnAreaSize * 0.8f);
+            float Z = 0.0f;
+
+            // Add some distance from regular buildings
+            if (X > 0) X += 400.0f;
+            else X -= 400.0f;
+
+            if (Y > 0) Y += 400.0f;
+            else Y -= 400.0f;
+
+            FVector Location = FVector(X, Y, Z);
+            // Rotate staircases to vary their orientation
+            FRotator Rotation = FRotator(0.0f, FMath::RandRange(1, 3) * 90.0f, 0.0f);
+
+            // Spawn staircase building
+            AImprovedVoxelBuilding* StairBuilding = GetWorld()->SpawnActor<AImprovedVoxelBuilding>(
+                VoxelBuildingClass,
+                Location,
+                Rotation,
+                SpawnParams
+            );
+
+            if (StairBuilding)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("Staircase building %d generated at %s with rotation %s"),
+                    i, *Location.ToString(), *Rotation.ToString());
+
+                // Configure as staircase building with same parameters as regular buildings
+                StairBuilding->BuildingType = EVoxelBuildingType::Staircase;
+                StairBuilding->GridSizeX = Settings.GridSizeX;
+                StairBuilding->GridSizeY = Settings.GridSizeY;
+                StairBuilding->GridSizeZ = Settings.GridSizeZ;
+                StairBuilding->VoxelSize = Settings.VoxelSize;
+                StairBuilding->SmoothingFactor = Settings.SmoothingFactor;
+                StairBuilding->bUseRandomColors = Settings.bUseRandomColors;
+                StairBuilding->CubeMargin = Settings.CubeMargin;
+                StairBuilding->bSpawnDebrisOnDestruction = Settings.bSpawnDebrisOnDestruction;
+                StairBuilding->DebrisAmountMultiplier = Settings.DebrisAmountMultiplier;
+                StairBuilding->bSpawnImpactCloud = Settings.bSpawnImpactCloud;
+                StairBuilding->ForceNetUpdate();
+
+                // Generate building
+                StairBuilding->GenerateBuilding();
+            }
+        }
+    }
+
     // Update GameState with reference to buildings
     AWormGameState* WormGS = GetGameState<AWormGameState>();
     if (WormGS)
@@ -410,6 +470,26 @@ void AWormGameMode::GenerateVoxelBuildings()
         // For now, just log success
         UE_LOG(LogTemp, Warning, TEXT("Voxel buildings generated and available through Game Mode"));
     }
+}
+
+// Update to ApplyTerrainSettings function in WormGameMode.cpp
+void AWormGameMode::ApplyTerrainSettings()
+{
+    // Obtenir les paramètres actuels
+    UVoxelTerrainSettingsManager* Manager = UVoxelTerrainSettingsManager::GetInstance();
+    if (!Manager)
+    {
+        return;
+    }
+
+    FVoxelTerrainSettings Settings = Manager->GetSettings();
+
+    // Mettre à jour les propriétés du GameMode
+    NumberOfBuildings = Settings.NumberOfBuildings;
+    SpawnAreaSize = Settings.SpawnAreaSize;
+
+    UE_LOG(LogTemp, Warning, TEXT("Applied terrain settings: Buildings=%d, Area=%.1f, Staircases=%d"),
+        NumberOfBuildings, SpawnAreaSize, Settings.bEnableStaircaseBuildings ? Settings.NumberOfStaircaseBuildings : 0);
 }
 
 
@@ -529,25 +609,6 @@ void AWormGameMode::VerifyWeaponsForAllPlayers()
             }
         }
     }
-}
-
-void AWormGameMode::ApplyTerrainSettings()
-{
-    // Obtenir les paramètres actuels
-    UVoxelTerrainSettingsManager* Manager = UVoxelTerrainSettingsManager::GetInstance();
-    if (!Manager)
-    {
-        return;
-    }
-    
-    FVoxelTerrainSettings Settings = Manager->GetSettings();
-    
-    // Mettre à jour les propriétés du GameMode
-    NumberOfBuildings = Settings.NumberOfBuildings;
-    SpawnAreaSize = Settings.SpawnAreaSize;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Applied terrain settings: Buildings=%d, Area=%.1f"), 
-        NumberOfBuildings, SpawnAreaSize);
 }
 
 AGameInitManager* AWormGameMode::SetupGameInitialization()

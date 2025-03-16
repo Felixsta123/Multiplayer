@@ -52,6 +52,31 @@ void UVoxelSettingsWidget::NativeConstruct()
             NumberOfBuildingsLabel->SetText(FText::FromString(TEXT("Nombre de bâtiments:")));
         }
     }
+
+    // Connect staircase building controls
+    if (EnableStaircaseBuildingsCheckBox)
+    {
+        EnableStaircaseBuildingsCheckBox->OnCheckStateChanged.AddDynamic(
+            this, &UVoxelSettingsWidget::OnEnableStaircaseBuildingsChanged);
+
+        if (EnableStaircaseBuildingsLabel)
+        {
+            EnableStaircaseBuildingsLabel->SetText(FText::FromString(TEXT("Activer les bâtiments en escalier")));
+        }
+    }
+
+    if (NumberOfStaircaseBuildingsSpinBox)
+    {
+        NumberOfStaircaseBuildingsSpinBox->SetMinValue(0);
+        NumberOfStaircaseBuildingsSpinBox->SetMaxValue(5);
+        NumberOfStaircaseBuildingsSpinBox->OnValueChanged.AddDynamic(
+            this, &UVoxelSettingsWidget::OnNumberOfStaircaseBuildingsChanged);
+
+        if (NumberOfStaircaseBuildingsLabel)
+        {
+            NumberOfStaircaseBuildingsLabel->SetText(FText::FromString(TEXT("Nombre d'escaliers:")));
+        }
+    }
     
     // Connecter les callbacks des contrôles de taille de zone
     if (SpawnAreaSizeSlider)
@@ -206,6 +231,25 @@ void UVoxelSettingsWidget::NativeConstruct()
     
     // Charger les paramètres actuels
     LoadSettings();
+}
+
+void UVoxelSettingsWidget::OnEnableStaircaseBuildingsChanged(bool bIsChecked)
+{
+    if (!bUpdatingUI)
+    {
+        CurrentSettings.bEnableStaircaseBuildings = bIsChecked;
+        UpdateControlDependencies();
+        OnSettingsChanged();
+    }
+}
+
+void UVoxelSettingsWidget::OnNumberOfStaircaseBuildingsChanged(float Value)
+{
+    if (!bUpdatingUI)
+    {
+        CurrentSettings.NumberOfStaircaseBuildings = FMath::RoundToInt(Value);
+        OnSettingsChanged();
+    }
 }
 
 void UVoxelSettingsWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
@@ -410,7 +454,12 @@ void UVoxelSettingsWidget::UpdateWidgetsFromSettings(const FVoxelTerrainSettings
 {
     // Marquer comme en cours de mise à jour pour éviter les callbacks en boucle
     bUpdatingUI = true;
-    
+
+    if (NumberOfStaircaseBuildingsSpinBox)
+    {
+        NumberOfStaircaseBuildingsSpinBox->SetValue(Settings.NumberOfStaircaseBuildings);
+    }
+
     // Mettre à jour chaque widget avec la valeur correspondante
     if (NumberOfBuildingsSpinBox)
     {
@@ -483,7 +532,18 @@ void UVoxelSettingsWidget::UpdateWidgetsFromSettings(const FVoxelTerrainSettings
 FVoxelTerrainSettings UVoxelSettingsWidget::GetSettingsFromWidgets()
 {
     FVoxelTerrainSettings Settings;
-    
+
+    if (EnableStaircaseBuildingsCheckBox)
+    {
+        Settings.bEnableStaircaseBuildings =
+            (EnableStaircaseBuildingsCheckBox->GetCheckedState() == ECheckBoxState::Checked);
+    }
+
+    if (NumberOfStaircaseBuildingsSpinBox)
+    {
+        Settings.NumberOfStaircaseBuildings = FMath::RoundToInt(NumberOfStaircaseBuildingsSpinBox->GetValue());
+    }
+
     // Lire les valeurs de chaque widget
     if (NumberOfBuildingsSpinBox)
     {
@@ -557,6 +617,11 @@ void UVoxelSettingsWidget::UpdateSliderLabels()
     {
         SpawnAreaSizeValue->SetText(FText::FromString(FString::Printf(TEXT("%.0f"), CurrentSettings.SpawnAreaSize)));
     }
+
+    if (SpawnAreaSizeValue)
+    {
+        SpawnAreaSizeValue->SetText(FText::FromString(FString::Printf(TEXT("%.0f"), CurrentSettings.SpawnAreaSize)));
+    }
     
     if (VoxelSizeValue)
     {
@@ -583,7 +648,20 @@ void UVoxelSettingsWidget::UpdateControlDependencies()
 {
     // Désactiver les contrôles de débris si la génération de débris est désactivée
     bool bDebrisEnabled = CurrentSettings.bSpawnDebrisOnDestruction;
-    
+    bool bStaircasesEnabled = CurrentSettings.bEnableStaircaseBuildings;
+
+    if (NumberOfStaircaseBuildingsSpinBox)
+    {
+        NumberOfStaircaseBuildingsSpinBox->SetIsEnabled(bStaircasesEnabled);
+    }
+
+    if (NumberOfStaircaseBuildingsLabel)
+    {
+        NumberOfStaircaseBuildingsLabel->SetColorAndOpacity(
+            bStaircasesEnabled ? FSlateColor(FLinearColor::White) :
+                               FSlateColor(FLinearColor(0.5f, 0.5f, 0.5f, 1.0f)));
+    }
+
     if (DebrisAmountSlider)
     {
         DebrisAmountSlider->SetIsEnabled(bDebrisEnabled);

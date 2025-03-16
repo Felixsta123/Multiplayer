@@ -19,6 +19,7 @@ AImprovedVoxelBuilding::AImprovedVoxelBuilding()
     bSpawnDebrisOnDestruction = true;
     DebrisAmountMultiplier = 1.0f;
     bSpawnImpactCloud = true;
+
     // Default values
     GridSizeX = 10;
     GridSizeY = 10;
@@ -33,6 +34,8 @@ AImprovedVoxelBuilding::AImprovedVoxelBuilding()
     CubeMargin = 0.01f; // Reduced margin for tighter fitting
     LastProcessedDestructionCount = 0;
 
+    // Initialize staircase properties
+    BuildingType = EVoxelBuildingType::Standard;
     // Make actor replicable
     bReplicates = true;
     BuildingMesh->SetIsReplicated(true);
@@ -51,6 +54,7 @@ void AImprovedVoxelBuilding::BeginPlay()
 void AImprovedVoxelBuilding::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
     // Add to GetLifetimeReplicatedProps in AVoxelBuilding.cpp
     DOREPLIFETIME(AImprovedVoxelBuilding, GridSizeX);
     DOREPLIFETIME(AImprovedVoxelBuilding, GridSizeY);
@@ -58,8 +62,10 @@ void AImprovedVoxelBuilding::GetLifetimeReplicatedProps(TArray<FLifetimeProperty
     DOREPLIFETIME(AImprovedVoxelBuilding, VoxelSize);
     DOREPLIFETIME(AImprovedVoxelBuilding, SmoothingFactor);
     DOREPLIFETIME(AImprovedVoxelBuilding, bUseRandomColors);
-    
-    // Add all other visual properties that need to be replicated
+
+    // Add new replicated property
+    DOREPLIFETIME(AImprovedVoxelBuilding, BuildingType);
+
     // Replicate the destruction history
     DOREPLIFETIME(AImprovedVoxelBuilding, DestructionHistory);
 }
@@ -101,8 +107,9 @@ void AImprovedVoxelBuilding::InitializeVoxelGrid()
                 FVoxelData& Voxel = VoxelGrid[X][Y][Z];
                 
                 // All voxels are active by default to create a full cube
+                // For staircase type, we'll modify this in GenerateStaircasePattern
                 Voxel.bIsActive = true;
-                
+
                 // Set voxel color
                 if (bUseRandomColors)
                 {
@@ -112,9 +119,129 @@ void AImprovedVoxelBuilding::InitializeVoxelGrid()
                 {
                     Voxel.Color = BuildingColor.ToFColor(true);
                 }
-                
+
                 // Add slight variation for materials
                 Voxel.MaterialIndex = FMath::RandRange(0, FMath::Max(0, Materials.Num() - 1));
+            }
+        }
+    }
+
+    // If this is a staircase building, apply the staircase pattern
+    if (BuildingType == EVoxelBuildingType::Staircase)
+    {
+        GenerateStaircasePattern();
+    }
+}
+
+void AImprovedVoxelBuilding::GenerateStaircasePattern()
+{
+    // Clear all voxels first
+    for (int32 X = 0; X < GridSizeX; X++)
+    {
+        for (int32 Y = 0; Y < GridSizeY; Y++)
+        {
+            for (int32 Z = 0; Z < GridSizeZ; Z++)
+            {
+                VoxelGrid[X][Y][Z].bIsActive = false;
+            }
+        }
+    }
+
+    // Calculate step parameters more precisely
+    int32 NumSteps = FMath::Max(3, FMath::Min(GridSizeZ - 1, GridSizeY / 2)); // Ensure we have reasonable number of steps
+    float StepHeight = (float)GridSizeZ / NumSteps; // Height of each step in voxels
+
+    // Calculate staircase width (percentage of full width)
+    int32 StaircaseWidth = FMath::Max(2, FMath::FloorToInt(GridSizeX * 0.75f));
+
+    // Calculate step depth (how many Y units each step takes)
+    int32 StepDepth = FMath::Max(2, FMath::FloorToInt((float)GridSizeY / NumSteps));
+
+    UE_LOG(LogTemp, Warning, TEXT("Generating staircase: %d steps, width=%d, height=%.2f, depth=%d"),
+        NumSteps, StaircaseWidth, StepHeight, StepDepth);
+
+    // Create each step - going up along the Y axis
+    for (int32 Step = 0; Step < NumSteps; Step++)
+    {
+        // Calculate Y range for this step
+        int32 StepStartY = Step * StepDepth;
+        int32 StepEndY = FMath::Min((Step + 1) * StepDepth, GridSizeY - 1);
+
+        // Calculate Z height for this step
+        int32 StepTopZ = FMath::FloorToInt((Step + 1) * StepHeight);
+
+        // Ensure we don't exceed the grid bounds
+        StepTopZ = FMath::Min(StepTopZ, GridSizeZ - 1);
+
+        // Fill voxels for this step
+        for (int32 X = 0; X < StaircaseWidth; X++)
+        {
+            for (int32 Y = StepStartY; Y <= StepEndY; Y++)
+            {
+                for (int32 Z = 0; Z <= StepTopZ; Z++)
+                {
+                    // Check if we should create a solid voxel here
+                    // We want to make each step solid, but hollow out beneath each step
+                    // Keep the bottom layer (Z=0) solid as a foundation
+                    if (Z == 0 || Z == StepTopZ || Y == StepEndY)
+                    {
+                        VoxelGrid[X][Y][Z].bIsActive = true;
+                    }
+                }
+            }
+        }
+    }
+
+    // Add solid foundation underneath the entire staircase for stability
+    for (int32 X = 0; X < StaircaseWidth; X++)
+    {
+        for (int32 Y = 0; Y < GridSizeY; Y++)
+        {
+            VoxelGrid[X][Y][0].bIsActive = true;
+        }
+    }
+
+    // Add a small landing platform at the top of the stairs
+    int32 LandingDepth = FMath::Min(3, GridSizeY / 6);
+    int32 LandingY = GridSizeY - LandingDepth;
+    int32 TopZ = FMath::FloorToInt(NumSteps * StepHeight);
+    TopZ = FMath::Min(TopZ, GridSizeZ - 1);
+
+    for (int32 X = 0; X < StaircaseWidth; X++)
+    {
+        for (int32 Y = LandingY; Y < GridSizeY; Y++)
+        {
+            for (int32 Z = TopZ - 1; Z <= TopZ; Z++)
+            {
+                if (Z >= 0 && Z < GridSizeZ)
+                {
+                    VoxelGrid[X][Y][Z].bIsActive = true;
+                }
+            }
+        }
+    }
+
+    // Add side rails to the staircase for visual improvement (optional)
+    bool bAddSideRails = true;
+
+    if (bAddSideRails && StaircaseWidth > 2)
+    {
+        int32 RailX = StaircaseWidth - 1;
+
+        for (int32 Step = 0; Step < NumSteps; Step++)
+        {
+            int32 StepStartY = Step * StepDepth;
+            int32 StepEndY = FMath::Min((Step + 1) * StepDepth, GridSizeY - 1);
+            int32 StepTopZ = FMath::FloorToInt((Step + 1) * StepHeight);
+            StepTopZ = FMath::Min(StepTopZ, GridSizeZ - 1);
+
+            // Add rail post at the end of each step
+            for (int32 Z = 0; Z <= StepTopZ + 1; Z++)
+            {
+                if (Z < GridSizeZ)
+                {
+                    VoxelGrid[RailX][StepEndY][Z].bIsActive = true;
+                }
             }
         }
     }
