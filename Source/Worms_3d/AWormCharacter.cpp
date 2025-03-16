@@ -1218,11 +1218,10 @@ void AWormCharacter::UpdateWeaponRotation()
     
     if (CurrentTime - LastSendTime >= MinTimeBetweenUpdates) 
     {
-        if (GetLocalRole() < ROLE_Authority)
-        {
-            Server_UpdateWeaponRotation(TargetRotation);
-            LastSendTime = CurrentTime;
-        }
+        // Send rotation updates regardless of role
+        // This ensures the server always sends to clients and clients always send to server
+        Server_UpdateWeaponRotation(TargetRotation);
+        LastSendTime = CurrentTime;
     }
 }
 void AWormCharacter::Multicast_UpdateWeaponRotation_Implementation(FRotator NewRotation)
