@@ -5,6 +5,7 @@
 #include "Worms_3d/Misc/PlayerSaveGame.h"
 #include "Net/UnrealNetwork.h"
 #include "Net/Core/PushModel/PushModel.h"
+#include "Worms_3d/UI/WMainHUDWidget.h"
 
 AWormPlayerController::AWormPlayerController()
 {
@@ -83,76 +84,30 @@ void AWormPlayerController::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
     // Add PlayerSettings to the list of replicated properties
     DOREPLIFETIME(AWormPlayerController, PlayerSettings);
     DOREPLIFETIME(AWormPlayerController, bIsReady);
-    
 }
 
 void AWormPlayerController::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    
-
-}
-
-void AWormPlayerController::CheckAndCreateUI()
-{
-    // Only create UI for local controllers with valid UI class
-    if (IsLocalController() && !GameUIWidget && GameUIClass)
-    {
-        UE_LOG(LogTemp, Log, TEXT("Checking if ready to create UI for local controller: %s"), *GetName());
-        
-        // Verify GameState is available
-        AWormGameState* GameState = Cast<AWormGameState>(UGameplayStatics::GetGameState(GetWorld()));
-        if (GameState)
-        {
-            UE_LOG(LogTemp, Log, TEXT("GameState is available. Creating UI widget..."));
-            
-            // Create UI
-            GameUIWidget = CreateWidget<UUserWidget>(this, GameUIClass);
-            if (GameUIWidget)
-            {
-                GameUIWidget->AddToViewport();
-                UE_LOG(LogTemp, Log, TEXT("UI widget added to viewport successfully"));
-                
-                // Stop the timer, we're done
-                GetWorldTimerManager().ClearTimer(UICheckTimerHandle);
-            }
-            else
-            {
-                UE_LOG(LogTemp, Error, TEXT("Failed to create UI widget!"));
-            }
-        }
-        else
-        {
-            UE_LOG(LogTemp, Warning, TEXT("GameState not yet available, will try again..."));
-        }
-    }
-    else if (!IsLocalController())
-    {
-        // Not a local controller, stop the timer
-        UE_LOG(LogTemp, Log, TEXT("Not a local controller, stopping UI creation timer"));
-        GetWorldTimerManager().ClearTimer(UICheckTimerHandle);
-    }
 }
 
 void AWormPlayerController::CreatePlayerUI()
 {
-    // Verify UI class is defined
-    if (!PlayerUIWidgetClass)
+    // Ne créer le HUD que pour le contrôleur local
+    if (!IsLocalController())
     {
-        UE_LOG(LogTemp, Warning, TEXT("PlayerUIWidgetClass not defined in WormPlayerController"));
+        UE_LOG(LogTemp, Verbose, TEXT("CreatePlayerUI: Échec - Contrôleur non local"));
         return;
     }
     
-    // Create widget if not already done
-    if (!PlayerUIWidget)
+    // Créer le HUD principal si défini
+    if (MainHUDWidgetClass && !MainHUDWidget)
     {
-        PlayerUIWidget = CreateWidget<UUserWidget>(this, PlayerUIWidgetClass);
-        
-        if (PlayerUIWidget)
-        {
-            PlayerUIWidget->AddToViewport(1); // Z-Order 1 to be above base game UI
-            UE_LOG(LogTemp, Log, TEXT("Interface utilisateur du joueur créée avec succès"));
-        }
+        CreateMainHUD();
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("CreatePlayerUI: MainHUDWidgetClass non défini"));
     }
 }
 
@@ -229,5 +184,64 @@ void AWormPlayerController::ServerSignalReady_Implementation()
         {
             GameMode->NotifyPlayerReady(this);
         }
+    }
+}
+
+void AWormPlayerController::CreateMainHUD()
+{
+    // Ne créer le HUD que pour le contrôleur local
+    if (!IsLocalController() || !MainHUDWidgetClass)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("CreateMainHUD: Échec de création du HUD - Contrôleur non local ou classe de widget non définie"));
+        return;
+    }
+    
+    // Si le widget existe déjà, ne rien faire
+    if (MainHUDWidget)
+    {
+        UE_LOG(LogTemp, Verbose, TEXT("CreateMainHUD: Le HUD existe déjà"));
+        return;
+    }
+    
+    // Créer l'instance du widget
+    MainHUDWidget = CreateWidget<UWMainHUDWidget>(this, MainHUDWidgetClass);
+    if (MainHUDWidget)
+    {
+        // Ajouter le widget au viewport avec une priorité élevée (10) pour s'assurer qu'il est au-dessus des autres widgets
+        MainHUDWidget->AddToViewport(10);
+        UE_LOG(LogTemp, Log, TEXT("CreateMainHUD: HUD principal créé et ajouté au viewport avec succès"));
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("CreateMainHUD: Échec de création du widget UWMainHUDWidget"));
+    }
+}
+
+void AWormPlayerController::CheckAndCreateUI()
+{
+    // Only create UI for local controllers
+    if (IsLocalController())
+    {
+        AWormGameState* GameState = Cast<AWormGameState>(UGameplayStatics::GetGameState(GetWorld()));
+        
+        // Créer le HUD principal si la classe est définie
+        if (!MainHUDWidget && MainHUDWidgetClass)
+        {
+            UE_LOG(LogTemp, Log, TEXT("Création du HUD principal..."));
+            CreateMainHUD();
+        }
+        
+        // Si nous avons créé tous les widgets nécessaires, arrêter le timer
+        if (MainHUDWidget || !MainHUDWidgetClass)
+        {
+            UE_LOG(LogTemp, Log, TEXT("Tous les widgets UI ont été créés, arrêt du timer"));
+            GetWorldTimerManager().ClearTimer(UICheckTimerHandle);
+        }
+    }
+    else
+    {
+        // Not a local controller, stop the timer
+        UE_LOG(LogTemp, Log, TEXT("Pas un contrôleur local, arrêt du timer de création UI"));
+        GetWorldTimerManager().ClearTimer(UICheckTimerHandle);
     }
 }

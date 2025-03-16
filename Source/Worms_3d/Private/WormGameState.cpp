@@ -22,8 +22,6 @@ void AWormGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     
     // Replicate these properties to all clients
-    DOREPLIFETIME(AWormGameState, CurrentPlayerIndex);
-    DOREPLIFETIME(AWormGameState, RemainingTurnTime);
     DOREPLIFETIME(AWormGameState, TurnDuration);
     DOREPLIFETIME(AWormGameState, PlayerNames);
     DOREPLIFETIME(AWormGameState, PlayerIsAlive);
@@ -31,6 +29,11 @@ void AWormGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
     DOREPLIFETIME(AWormGameState, bGameOver);
     DOREPLIFETIME(AWormGameState, WinnerName);
     DOREPLIFETIME(AWormGameState, PlayerDamageDealt);
+
+    DOREPLIFETIME_CONDITION_NOTIFY(AWormGameState, RemainingTurnTime, COND_None, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(AWormGameState, CurrentPlayerIndex, COND_None, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(AWormGameState, Teams, COND_None, REPNOTIFY_Always);
+    
 }
 
 void AWormGameState::UpdatePlayerList(const TArray<AController*>& Controllers)
@@ -401,4 +404,68 @@ void AWormGameState::AddCharacterToTeam(AWormCharacter* Character, int32 TeamId)
     }
 
     ForceNetUpdate();
+}
+
+void AWormGameState::OnRep_CurrentPlayerIndex()
+{
+    // Notifier les widgets que le joueur actif a changé
+    OnActivePlayerChanged.Broadcast();
+    
+    // Log pour debug
+    UE_LOG(LogTemp, Warning, TEXT("OnRep_CurrentPlayerIndex called: Current player now %d"), CurrentPlayerIndex);
+}
+
+void AWormGameState::OnRep_RemainingTurnTime()
+{
+    // Notifier les widgets que le timer a été mis à jour
+    OnTurnTimerUpdated.Broadcast();
+    
+    // Log pour debug
+    UE_LOG(LogTemp, Verbose, TEXT("OnRep_RemainingTurnTime called: %.2f seconds"), RemainingTurnTime);
+}
+
+void AWormGameState::OnRep_Teams()
+{
+    // Notifier les widgets que les équipes ont été mises à jour
+    OnTeamStatusUpdated.Broadcast();
+    
+    // Log pour debug
+    UE_LOG(LogTemp, Verbose, TEXT("OnRep_Teams called: %d Teams updated"), Teams.Num());
+}
+
+bool AWormGameState::IsLocalPlayerTurn() const
+{
+    // Récupérer le controller local
+    APlayerController* LocalPC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+    if (!LocalPC)
+    {
+        return false;
+    }
+    
+    // Vérifier si l'index du joueur local correspond au joueur actif
+    for (int32 i = 0; i < GetWorld()->GetNumPlayerControllers(); i++)
+    {
+        APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), i);
+        if (PC == LocalPC && i == CurrentPlayerIndex)
+        {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+AWormCharacter* AWormGameState::GetActiveCharacter() const
+{
+    // Récupérer le personnage actif
+    if (CurrentPlayerIndex >= 0 && CurrentPlayerIndex < GetWorld()->GetNumPlayerControllers())
+    {
+        APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), CurrentPlayerIndex);
+        if (PC)
+        {
+            return Cast<AWormCharacter>(PC->GetPawn());
+        }
+    }
+    
+    return nullptr;
 }
