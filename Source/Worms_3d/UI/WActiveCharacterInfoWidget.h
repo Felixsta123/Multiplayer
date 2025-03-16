@@ -18,6 +18,10 @@ public:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
+        
+	// Mettre à jour les informations
+	UFUNCTION()
+	void OnActivePlayerChanged();
     
 protected:
 	// Éléments UI
@@ -39,11 +43,7 @@ protected:
     
 	UPROPERTY()
 	class AWormCharacter* ActiveCharacter;
-    
-	// Mettre à jour les informations
-	UFUNCTION()
-	void OnActivePlayerChanged();
-    
+
 	// Mettre à jour les points de mouvement
 	void UpdateMovementPoints();
     

@@ -22,7 +22,6 @@ public:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
     
-protected:
 	// Les widgets enfants qui composent l'UI
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
 	UWTeamStatusWidget* TeamStatusWidget;
@@ -35,7 +34,8 @@ protected:
     
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
 	UWActiveCharacterInfoWidget* ActiveCharacterInfoWidget;
-    
+protected:
+
 	// Référence au GameState pour les mises à jour
 	UPROPERTY()
 	class AWormGameState* WormGameState;

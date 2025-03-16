@@ -303,12 +303,7 @@ void AGameInitManager::ExecuteInitializationStep()
                         Character->GetCharacterMovement()->GetOwner()->GetRootComponent()->UpdateComponentToWorld();
                         Character->GetCharacterMovement()->GravityScale = 1.5f;
                         Character->ForceNetUpdate();
-
-                        // Final weapon visibility check
-                        if (Character->CurrentWeapon) {
-                            Character->CurrentWeapon->EnsureWeaponVisibility();
-                            Character->AttachWeaponToSocket(Character->CurrentWeapon);
-                        }
+                        
             
                         UE_LOG(LogTemp, Warning, TEXT("Final stability check for %s complete"), *Character->GetName());
                     }

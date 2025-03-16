@@ -69,6 +69,8 @@ public:
     UPROPERTY(BlueprintReadOnly, Category = "UI")
     UUserWidget* AimingWidget;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Worm")
+    float MaxHealth = 100.0f;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI")
     TSubclassOf<UWNameIndicatorWidget> NameIndicatorWidgetClass;

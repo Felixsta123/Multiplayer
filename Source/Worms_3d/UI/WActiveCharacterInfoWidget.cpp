@@ -9,41 +9,11 @@
 UWActiveCharacterInfoWidget::UWActiveCharacterInfoWidget(const FObjectInitializer& ObjectInitializer)
     : Super(ObjectInitializer)
 {
-    // Activer le tick pour les mises à jour en temps réel
-
-}
-
-void UWActiveCharacterInfoWidget::NativeConstruct()
-{
-    Super::NativeConstruct();
-    
-    // Récupérer le GameState
-    WormGameState = Cast<AWormGameState>(UGameplayStatics::GetGameState(GetWorld()));
-    
-    if (WormGameState)
-    {
-        // S'abonner à l'événement de changement de joueur actif
-        WormGameState->OnActivePlayerChanged.AddDynamic(this, &UWActiveCharacterInfoWidget::OnActivePlayerChanged);
-        
-        // Mise à jour initiale
-        OnActivePlayerChanged();
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("WActiveCharacterInfoWidget: GameState non trouvé"));
-    }
+    // Enable ticking for real-time updates
 }
 
 void UWActiveCharacterInfoWidget::NativeDestruct()
 {
-    // Se désabonner des événements
-    if (WormGameState)
-    {
-        WormGameState->OnActivePlayerChanged.RemoveDynamic(this, &UWActiveCharacterInfoWidget::OnActivePlayerChanged);
-    }
-    
-    ActiveCharacter = nullptr;
-    
     Super::NativeDestruct();
 }
 
@@ -51,45 +21,86 @@ void UWActiveCharacterInfoWidget::NativeTick(const FGeometry& MyGeometry, float 
 {
     Super::NativeTick(MyGeometry, InDeltaTime);
     
-    // Mettre à jour les informations en temps réel si nécessaire
-    if (ActiveCharacter && ActiveCharacter->IsMyTurn())
+    // Update movement points every tick
+    UpdateMovementPoints();
+}
+
+void UWActiveCharacterInfoWidget::NativeConstruct()
+{
+    Super::NativeConstruct();
+    
+    // Get GameState
+    WormGameState = Cast<AWormGameState>(UGameplayStatics::GetGameState(GetWorld()));
+    
+    if (WormGameState)
     {
-        UpdateMovementPoints();
-        UpdateWeapon();
+        // Subscribe to active player changed event
+        WormGameState->OnActivePlayerChanged.AddDynamic(this, &UWActiveCharacterInfoWidget::OnActivePlayerChanged);
+        
+        // Initial update
+        OnActivePlayerChanged();
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("WActiveCharacterInfoWidget: GameState not found"));
     }
 }
 
 void UWActiveCharacterInfoWidget::OnActivePlayerChanged()
 {
-    // Ne mettre à jour que si c'est le tour du joueur local
-    if (WormGameState && WormGameState->IsLocalPlayerTurn())
+    // Only update if it's the local player's turn
+    bool bLocalPlayerTurn = false;
+    
+    if (WormGameState)
     {
-        // Récupérer le personnage actif
-        ActiveCharacter = WormGameState->GetActiveCharacter();
+        bLocalPlayerTurn = WormGameState->IsLocalPlayerTurn();
+        
+        // Log current state for debugging
+        UE_LOG(LogTemp, Warning, TEXT("ActiveCharacterInfo: Player Turn=%s, CurrentIndex=%d"), 
+            bLocalPlayerTurn ? TEXT("true") : TEXT("false"),
+            WormGameState->CurrentPlayerIndex);
+    }
+    
+    if (bLocalPlayerTurn)
+    {
+        // Get active character
+        ActiveCharacter = nullptr;
+        if (WormGameState)
+        {
+            ActiveCharacter = WormGameState->GetActiveCharacter();
+        }
         
         if (ActiveCharacter)
         {
-            // Mettre à jour le nom du personnage
+            UE_LOG(LogTemp, Warning, TEXT("ActiveCharacterInfo: Found active character %s"), *ActiveCharacter->GetName());
+            
+            // Update character name
             if (CharacterNameText)
             {
-                CharacterNameText->SetText(FText::FromString(ActiveCharacter->InGameName));
+                FString DisplayName = !ActiveCharacter->InGameName.IsEmpty() ? 
+                    ActiveCharacter->InGameName : ActiveCharacter->GetName();
+                    
+                CharacterNameText->SetText(FText::FromString(DisplayName));
+                UE_LOG(LogTemp, Warning, TEXT("ActiveCharacterInfo: Set character name to %s"), *DisplayName);
             }
             
-            // Mettre à jour les autres informations
+            // Update other information
             UpdateMovementPoints();
             UpdateWeapon();
         }
         else
         {
-            // Aucun personnage actif, vider les informations
+            UE_LOG(LogTemp, Warning, TEXT("ActiveCharacterInfo: No active character found"));
+            
+            // No active character, clear information
             if (CharacterNameText)
             {
-                CharacterNameText->SetText(FText::FromString(TEXT("")));
+                CharacterNameText->SetText(FText::FromString(TEXT("No Active Character")));
             }
             
             if (WeaponNameText)
             {
-                WeaponNameText->SetText(FText::FromString(TEXT("")));
+                WeaponNameText->SetText(FText::FromString(TEXT("No Weapon")));
             }
             
             if (MovementPointsBar)
@@ -105,7 +116,14 @@ void UWActiveCharacterInfoWidget::OnActivePlayerChanged()
     }
     else
     {
+        UE_LOG(LogTemp, Warning, TEXT("ActiveCharacterInfo: Not local player's turn"));
         ActiveCharacter = nullptr;
+        
+        // Not the local player's turn, show appropriate message
+        if (CharacterNameText)
+        {
+            CharacterNameText->SetText(FText::FromString(TEXT("Waiting...")));
+        }
     }
 }
 
@@ -116,13 +134,13 @@ void UWActiveCharacterInfoWidget::UpdateMovementPoints()
         return;
     }
     
-    // Mettre à jour la barre de progression
+    // Update progress bar
     if (MovementPointsBar)
     {
         float Percent = ActiveCharacter->MovementPoints / ActiveCharacter->MaxMovementPoints;
         MovementPointsBar->SetPercent(Percent);
         
-        // Changer la couleur en fonction des points restants
+        // Change color based on remaining points
         FLinearColor MovementColor;
         if (Percent > 0.6f)
         {
@@ -138,15 +156,19 @@ void UWActiveCharacterInfoWidget::UpdateMovementPoints()
         }
         
         MovementPointsBar->SetFillColorAndOpacity(MovementColor);
+        
+        UE_LOG(LogTemp, Verbose, TEXT("ActiveCharacterInfo: Updated movement points bar to %.2f%%"), Percent * 100.0f);
     }
     
-    // Mettre à jour le texte
+    // Update text
     if (MovementPointsText)
     {
         int32 Current = FMath::FloorToInt(ActiveCharacter->MovementPoints);
         int32 Max = FMath::FloorToInt(ActiveCharacter->MaxMovementPoints);
         FString MovementString = FString::Printf(TEXT("%d / %d"), Current, Max);
         MovementPointsText->SetText(FText::FromString(MovementString));
+        
+        UE_LOG(LogTemp, Verbose, TEXT("ActiveCharacterInfo: Updated movement points text to %s"), *MovementString);
     }
 }
 
@@ -157,20 +179,24 @@ void UWActiveCharacterInfoWidget::UpdateWeapon()
         return;
     }
     
-    // Mettre à jour le nom de l'arme
-    if (WeaponNameText && ActiveCharacter->CurrentWeapon)
+    // Update weapon name
+    if (WeaponNameText)
     {
-        FString WeaponName = ActiveCharacter->CurrentWeapon->GetClass()->GetName();
-        
-        // Nettoyage du nom de classe pour un affichage plus propre
-        WeaponName.ReplaceInline(TEXT("WormWeapon_"), TEXT(""));
-        WeaponName.ReplaceInline(TEXT("BP_"), TEXT(""));
-        WeaponName.ReplaceInline(TEXT("_C"), TEXT(""));
-        
-        WeaponNameText->SetText(FText::FromString(WeaponName));
-    }
-    else if (WeaponNameText)
-    {
-        WeaponNameText->SetText(FText::FromString(TEXT("Aucune arme")));
+        if (ActiveCharacter->CurrentWeapon)
+        {
+            FString WeaponName = ActiveCharacter->CurrentWeapon->GetClass()->GetName();
+            
+            // Clean up class name for better display
+            WeaponName.ReplaceInline(TEXT("WormWeapon_"), TEXT(""));
+            WeaponName.ReplaceInline(TEXT("BP_"), TEXT(""));
+            WeaponName.ReplaceInline(TEXT("_C"), TEXT(""));
+            
+            WeaponNameText->SetText(FText::FromString(WeaponName));
+            UE_LOG(LogTemp, Verbose, TEXT("ActiveCharacterInfo: Updated weapon name to %s"), *WeaponName);
+        }
+        else
+        {
+            WeaponNameText->SetText(FText::FromString(TEXT("No Weapon")));
+        }
     }
 }

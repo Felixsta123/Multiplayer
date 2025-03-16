@@ -405,59 +405,86 @@ void AWormGameState::AddCharacterToTeam(AWormCharacter* Character, int32 TeamId)
 
     ForceNetUpdate();
 }
-
 void AWormGameState::OnRep_CurrentPlayerIndex()
 {
-    // Notifier les widgets que le joueur actif a changé
-    OnActivePlayerChanged.Broadcast();
-    
-    // Log pour debug
+    // Notify widgets that the active player has changed
     UE_LOG(LogTemp, Warning, TEXT("OnRep_CurrentPlayerIndex called: Current player now %d"), CurrentPlayerIndex);
+    
+    // Update CurrentPlayerName to match CurrentPlayerIndex
+    if (PlayerNames.IsValidIndex(CurrentPlayerIndex))
+    {
+        CurrentPlayerName = PlayerNames[CurrentPlayerIndex];
+    }
+    
+    // Broadcast to all registered listeners
+    OnCurrentPlayerChanged.Broadcast(CurrentPlayerIndex);
+    OnActivePlayerChanged.Broadcast();
 }
 
 void AWormGameState::OnRep_RemainingTurnTime()
 {
-    // Notifier les widgets que le timer a été mis à jour
-    OnTurnTimerUpdated.Broadcast();
+    // Notify widgets that the timer has been updated
+    UE_LOG(LogTemp, Warning, TEXT("OnRep_RemainingTurnTime called: %.2f seconds"), RemainingTurnTime);
     
-    // Log pour debug
-    UE_LOG(LogTemp, Verbose, TEXT("OnRep_RemainingTurnTime called: %.2f seconds"), RemainingTurnTime);
+    // Broadcast to all registered listeners
+    OnTurnTimerUpdated.Broadcast();
 }
 
 void AWormGameState::OnRep_Teams()
 {
-    // Notifier les widgets que les équipes ont été mises à jour
-    OnTeamStatusUpdated.Broadcast();
+    // Notify widgets that the teams have been updated
+    UE_LOG(LogTemp, Warning, TEXT("OnRep_Teams called: %d Teams updated"), Teams.Num());
     
-    // Log pour debug
-    UE_LOG(LogTemp, Verbose, TEXT("OnRep_Teams called: %d Teams updated"), Teams.Num());
+    // Broadcast to all registered listeners
+    OnTeamStatusUpdated.Broadcast();
 }
 
 bool AWormGameState::IsLocalPlayerTurn() const
 {
-    // Récupérer le controller local
+    // Get the local player controller
     APlayerController* LocalPC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
     if (!LocalPC)
     {
         return false;
     }
     
-    // Vérifier si l'index du joueur local correspond au joueur actif
-    for (int32 i = 0; i < GetWorld()->GetNumPlayerControllers(); i++)
+    // Get active character
+    AWormCharacter* ActiveChar = nullptr;
+    for (int32 i = 0; i < Teams.Num(); i++)
     {
-        APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), i);
-        if (PC == LocalPC && i == CurrentPlayerIndex)
+        for (AWormCharacter* Character : Teams[i].TeamMembers)
         {
-            return true;
+            if (Character && Character->IsMyTurn())
+            {
+                ActiveChar = Character;
+                break;
+            }
+        }
+        if (ActiveChar) break;
+    }
+    
+    if (!ActiveChar) return false;
+    
+    // Check if the local player is controlling the active character
+    return (LocalPC == ActiveChar->GetController());
+}
+
+// Improved GetActiveCharacter function for team-based play
+AWormCharacter* AWormGameState::GetActiveCharacter() const
+{
+    // Look through all teams to find the active character
+    for (int32 i = 0; i < Teams.Num(); i++)
+    {
+        for (AWormCharacter* Character : Teams[i].TeamMembers)
+        {
+            if (Character && Character->IsMyTurn())
+            {
+                return Character;
+            }
         }
     }
     
-    return false;
-}
-
-AWormCharacter* AWormGameState::GetActiveCharacter() const
-{
-    // Récupérer le personnage actif
+    // Fallback to previous method if no active character found in teams
     if (CurrentPlayerIndex >= 0 && CurrentPlayerIndex < GetWorld()->GetNumPlayerControllers())
     {
         APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), CurrentPlayerIndex);

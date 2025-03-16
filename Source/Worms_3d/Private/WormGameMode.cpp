@@ -194,6 +194,12 @@ void AWormGameMode::StartNextTurn()
                     TeamController->Possess(Character);
                 }
                 
+                // Update GameState's current player index
+                WormGS->SetCurrentPlayerByIndex(CurrentTeamIndex);
+                
+                // Start the turn timer
+                StartTurnTimer();
+                
                 foundValidCharacter = true;
                 break;
             }
@@ -216,9 +222,34 @@ void AWormGameMode::StartNextTurn()
     if (!foundValidCharacter) {
         CheckGameEndCondition();
     }
+    for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+    {
+        AWormPlayerController* PC = Cast<AWormPlayerController>(It->Get());
+        if (PC && PC->IsLocalController())
+        {
+            PC->RefreshMainHUD();
+        }
+    }
+    // IMPORTANT: Force GameState to replicate updated values
+    if (WormGS) {
+        WormGS->ForceNetUpdate();
+    }
 }
 
+// Enhanced StartTurnTimer function to update GameState
+void AWormGameMode::StartTurnTimer()
+{
+    GetWorldTimerManager().SetTimer(TurnTimerHandle, this, &AWormGameMode::OnTurnTimeExpired, TurnDuration, false);
+    
+    AWormGameState* WormGS = GetGameState<AWormGameState>();
+    if (WormGS)
+    {
+        WormGS->RemainingTurnTime = TurnDuration;
+        WormGS->ForceNetUpdate();
+    }
+}
 
+// Enhanced EndCurrentTurn with GameState updates
 void AWormGameMode::EndCurrentTurn()
 {
     // Cancel current timer
@@ -258,6 +289,20 @@ void AWormGameMode::EndCurrentTurn()
     
     // Call turn end event
     OnTurnEnded(ActiveController);
+    for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+    {
+        AWormPlayerController* PC = Cast<AWormPlayerController>(It->Get());
+        if (PC && PC->IsLocalController())
+        {
+            PC->RefreshMainHUD();
+        }
+    }
+    // Force GameState update before next turn
+    AWormGameState* WormGS = GetGameState<AWormGameState>();
+    if (WormGS)
+    {
+        WormGS->ForceNetUpdate();
+    }
     
     // Start next turn after a delay
     GetWorldTimerManager().SetTimer(TurnTimerHandle, this, &AWormGameMode::StartNextTurn, 2.0f, false);
@@ -890,16 +935,7 @@ void AWormGameMode::CheckAllPlayersReady()
     }
 }
 
-void AWormGameMode::StartTurnTimer()
-{
-    GetWorldTimerManager().SetTimer(TurnTimerHandle, this, &AWormGameMode::OnTurnTimeExpired, TurnDuration, false);
-    
-    AWormGameState* WormGS = GetGameState<AWormGameState>();
-    if (WormGS)
-    {
-        WormGS->RemainingTurnTime = TurnDuration;
-    }
-}
+
 FString AWormGameMode::GetCharacterInGameName(UClass* CharacterClass, int32 TeamId, int32 CharIndexInTeam)
 {
     if (!CharacterClass)

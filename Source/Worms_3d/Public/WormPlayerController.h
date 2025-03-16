@@ -32,6 +32,8 @@ public:
     // Fonction pour créer le HUD principal
     UFUNCTION(BlueprintCallable, Category = "UI")
     void CreateMainHUD();
+    void RefreshMainHUD();
+
 protected:
     
     // ADD THIS to the public or protected section
@@ -56,6 +58,7 @@ protected:
 
     void CheckAndCreateUI();
 private:
+    FTimerHandle UIRefreshTimerHandle; // New timer for periodic refreshes
     FTimerHandle UICheckTimerHandle;
     FTimerHandle PlayerUITimerHandle;
     bool bIsFullyInitialized;

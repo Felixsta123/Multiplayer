@@ -5,94 +5,109 @@
 #include "Worms_3d/AWormCharacter.h"
 #include "WormGameState.h"
 
+
 UWCharacterStatusWidget::UWCharacterStatusWidget(const FObjectInitializer& ObjectInitializer)
     : Super(ObjectInitializer)
 {
-    // Activer le tick pour les mises à jour en temps réel
 }
-
 
 void UWCharacterStatusWidget::NativeConstruct()
 {
     Super::NativeConstruct();
     
-    // Mise à jour initiale
+    // Initial update
     UpdateHealth();
-}
-
-void UWCharacterStatusWidget::NativeDestruct()
-{
-    // Nettoyer les références
-    Character = nullptr;
-    
-    Super::NativeDestruct();
 }
 
 void UWCharacterStatusWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
     Super::NativeTick(MyGeometry, InDeltaTime);
     
-    // Mettre à jour la barre de vie si nécessaire
-    // Note: cela peut être optimisé pour ne pas mettre à jour à chaque tick
+    // Update health bar if needed
     if (Character)
     {
         UpdateHealth();
     }
+}
+
+void UWCharacterStatusWidget::NativeDestruct()
+{
+    Super::NativeDestruct();
 }
 
 void UWCharacterStatusWidget::SetCharacter(AWormCharacter* InCharacter)
 {
     Character = InCharacter;
     
-    // Mettre à jour les informations
+    // Update information
     if (Character)
     {
-        // Définir le nom du personnage
+        UE_LOG(LogTemp, Verbose, TEXT("CharacterStatusWidget: Setting character to %s"), *Character->GetName());
+        
+        // Set character name
         if (CharacterNameText)
         {
-            CharacterNameText->SetText(FText::FromString(Character->InGameName));
+            FString DisplayName = !Character->InGameName.IsEmpty() ? 
+                Character->InGameName : Character->GetName();
+                
+            CharacterNameText->SetText(FText::FromString(DisplayName));
+            UE_LOG(LogTemp, Verbose, TEXT("CharacterStatusWidget: Set name to %s"), *DisplayName);
         }
         
-        // Définir la couleur de l'équipe
+        // Set team color
         if (TeamColorImage)
         {
-            // Récupérer la couleur de l'équipe depuis le GameState
+            // Get team color from GameState
             AWormGameState* GameState = Cast<AWormGameState>(GetWorld()->GetGameState());
             if (GameState && GameState->Teams.IsValidIndex(Character->TeamId))
             {
                 FLinearColor TeamColor = GameState->Teams[Character->TeamId].TeamColor;
                 TeamColorImage->SetColorAndOpacity(TeamColor);
+                UE_LOG(LogTemp, Verbose, TEXT("CharacterStatusWidget: Set team color for team %d"), Character->TeamId);
+            }
+            else
+            {
+                UE_LOG(LogTemp, Warning, TEXT("CharacterStatusWidget: Could not find team %d"), Character->TeamId);
+                // Fallback color based on team ID
+                FLinearColor FallbackColor;
+                switch (Character->TeamId % 4)
+                {
+                    case 0: FallbackColor = FLinearColor::Blue; break;
+                    case 1: FallbackColor = FLinearColor::Red; break;
+                    case 2: FallbackColor = FLinearColor::Green; break;
+                    case 3: FallbackColor = FLinearColor::Yellow; break;
+                    default: FallbackColor = FLinearColor::White; break;
+                }
+                TeamColorImage->SetColorAndOpacity(FallbackColor);
             }
         }
-        
-        // Mettre à jour la barre de vie
-        UpdateHealth();
     }
 }
 
 void UWCharacterStatusWidget::UpdateHealth()
 {
-    if (Character && HealthBar)
+    if (!Character || !HealthBar)
     {
-        // Calculer le pourcentage de vie
-        float HealthPercent = Character->GetHealth() / 100.0f; // Supposant 100 comme vie max
-        HealthBar->SetPercent(HealthPercent);
-        
-        // Changer la couleur en fonction de la santé
-        FLinearColor HealthColor;
-        if (HealthPercent > 0.6f)
-        {
-            HealthColor = FLinearColor::Green;
-        }
-        else if (HealthPercent > 0.3f)
-        {
-            HealthColor = FLinearColor::Yellow;
-        }
-        else
-        {
-            HealthColor = FLinearColor::Red;
-        }
-        
-        HealthBar->SetFillColorAndOpacity(HealthColor);
+        return;
     }
+    
+    // Update health bar
+    float HealthPercent = Character->GetHealth() / Character->MaxHealth;
+    HealthBar->SetPercent(HealthPercent);
+    
+    // Change color based on health
+    FLinearColor HealthColor;
+    if (HealthPercent > 0.6f)
+    {
+        HealthColor = FLinearColor::Green;
+    }
+    else if (HealthPercent > 0.3f)
+    {
+        HealthColor = FLinearColor::Yellow;
+    }
+    else
+    {
+        HealthColor = FLinearColor::Red;
+    }
+    HealthBar->SetFillColorAndOpacity(HealthColor);
 }
