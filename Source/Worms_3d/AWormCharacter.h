@@ -76,10 +76,10 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "UI")
     class UWidgetComponent* NameWidgetComponent;
 
-    UPROPERTY( BlueprintReadWrite, Category = "Identification")
+    UPROPERTY( BlueprintReadWrite, Category = "Identification", Replicated)
     FString InGameName;
 
-    UPROPERTY(BlueprintReadWrite, Category = "Team")
+    UPROPERTY(BlueprintReadWrite, Category = "Team", Replicated)
     int32 TeamId = -1;
 
     UFUNCTION(BlueprintCallable, Category = "UI")

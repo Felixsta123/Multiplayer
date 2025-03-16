@@ -509,6 +509,8 @@ void AWormCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
     DOREPLIFETIME(AWormCharacter, MovementPoints);
     DOREPLIFETIME(AWormCharacter, AvailableWeapons);
     DOREPLIFETIME(AWormCharacter, CharacterIndexInTeam);
+    DOREPLIFETIME(AWormCharacter, InGameName);
+    DOREPLIFETIME(AWormCharacter, TeamId);
 }
 
 // Fonctions de mouvement legacy
