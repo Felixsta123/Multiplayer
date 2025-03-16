@@ -5,6 +5,7 @@
 #include "WormGameMode.h"
 #include "WormPlayerController.h"
 #include "Worms_3d/Building/AVoxelBuilding.h"
+#include "Worms_3d/Env/EnvironmentalEventsManager.h"
 
 AWormGameState::AWormGameState()
 {
@@ -210,6 +211,8 @@ void AWormGameState::AddDamageDealt(const FString& PlayerName, float Damage)
     }
 }
 
+// In WormGameState.cpp, modify the CheckGameOverCondition function
+
 void AWormGameState::CheckGameOverCondition()
 {
     if (HasAuthority() && !bGameOver)
@@ -252,21 +255,33 @@ void AWormGameState::CheckGameOverCondition()
         if (ActiveTeams.Num() == 1)
         {
             int32 WinningTeamId = *ActiveTeams.CreateIterator();
-            WinnerName = Teams[WinningTeamId].TeamName;
+            // Use the proper team name from Teams array
+            FString WinnerTeamName = Teams[WinningTeamId].TeamName;
             
             UE_LOG(LogTemp, Warning, TEXT("Fin de partie! Équipe gagnante: %s (ID: %d)"), 
-                *WinnerName, WinningTeamId);
+                *WinnerTeamName, WinningTeamId);
             
-            TriggerGameOver(WinnerName);
+            // First clear all timers to avoid conflicts
+            ClearAllGameTimers();
+            
+            // Then trigger game over
+            TriggerGameOver(WinnerTeamName);
         }
         else if (ActiveTeams.Num() == 0)
         {
             // Aucune équipe active - match nul ou erreur
             UE_LOG(LogTemp, Warning, TEXT("Aucune équipe active - Match nul"));
+            
+            // First clear all timers to avoid conflicts
+            ClearAllGameTimers();
+            
+            // Then trigger game over
             TriggerGameOver(TEXT("Match nul"));
         }
     }
 }
+
+// In WormGameState.cpp, modify the TriggerGameOver function
 
 void AWormGameState::TriggerGameOver(const FString& Winner)
 {
@@ -275,9 +290,47 @@ void AWormGameState::TriggerGameOver(const FString& Winner)
         bGameOver = true;
         WinnerName = Winner;
         
+        // Format player damage records to use InGameName
+        // Create a copy of the damage stats with properly formatted names
+        TArray<FPlayerDamageInfo> FormattedDamageStats;
+        
+        // Find all characters to match their names
+        TArray<AActor*> AllCharacters;
+        UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormCharacter::StaticClass(), AllCharacters);
+        
+        // Create a mapping of actor names to InGameNames
+        TMap<FString, FString> NameMapping;
+        for (AActor* Actor : AllCharacters)
+        {
+            AWormCharacter* Character = Cast<AWormCharacter>(Actor);
+            if (Character && !Character->InGameName.IsEmpty())
+            {
+                NameMapping.Add(Character->GetName(), Character->InGameName);
+            }
+        }
+        
+        // Apply name mapping to damage stats
+        for (const FPlayerDamageInfo& DamageInfo : PlayerDamageDealt)
+        {
+            FPlayerDamageInfo FormattedInfo = DamageInfo;
+            
+            // If we have an InGameName mapping for this character, use it
+            FString* MappedName = NameMapping.Find(DamageInfo.PlayerName);
+            if (MappedName && !MappedName->IsEmpty())
+            {
+                FormattedInfo.PlayerName = *MappedName;
+            }
+            
+            FormattedDamageStats.Add(FormattedInfo);
+        }
+        
+        // Replace the original stats with the formatted ones
+        PlayerDamageDealt = FormattedDamageStats;
+        
         // Force replication
         MARK_PROPERTY_DIRTY_FROM_NAME(AWormGameState, bGameOver, this);
         MARK_PROPERTY_DIRTY_FROM_NAME(AWormGameState, WinnerName, this);
+        MARK_PROPERTY_DIRTY_FROM_NAME(AWormGameState, PlayerDamageDealt, this);
         
         // Broadcast event to all clients
         OnGameOver.Broadcast(Winner);
@@ -295,7 +348,6 @@ void AWormGameState::TriggerGameOver(const FString& Winner)
         );
     }
 }
-
 void AWormGameState::ShowGameOverWidget()
 {
     // Use RPC to show the widget on all clients
@@ -507,4 +559,71 @@ AWormCharacter* AWormGameState::GetActiveCharacter() const
     }
     
     return nullptr;
+}
+
+
+void AWormGameState::ClearAllGameTimers()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Clearing all game timers for safety"));
+    
+    // Clear any timers that might be active
+    FTimerManager& TimerManager = GetWorldTimerManager();
+    
+    // Find and clear turn timer in GameMode
+    AWormGameMode* GameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(GetWorld()));
+    if (GameMode)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Clearing GameMode timers"));
+        
+        // Clear turn timer if active
+        if (TimerManager.IsTimerActive(GameMode->TurnTimerHandle))
+        {
+            TimerManager.ClearTimer(GameMode->TurnTimerHandle);
+        }
+        
+        // Clear any other GameMode timers if needed
+    }
+    
+    // Clear timers in all characters
+    TArray<AActor*> AllCharacters;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormCharacter::StaticClass(), AllCharacters);
+    
+    for (AActor* Actor : AllCharacters)
+    {
+        AWormCharacter* Character = Cast<AWormCharacter>(Actor);
+        if (Character)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Clearing timers for character: %s"), *Character->GetName());
+            
+            // Clear auto end turn timer if active
+            if (TimerManager.IsTimerActive(Character->AutoEndTurnTimerHandle))
+            {
+                TimerManager.ClearTimer(Character->AutoEndTurnTimerHandle);
+            }
+            
+            // Clear any other character timers if needed
+        }
+    }
+    
+    // Clear any environmental timers
+    // Check for water system
+    TArray<AActor*> EnvManagers;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AEnvironmentalEventsManager::StaticClass(), EnvManagers);
+    
+    for (AActor* Actor : EnvManagers)
+    {
+        AEnvironmentalEventsManager* EnvManager = Cast<AEnvironmentalEventsManager>(Actor);
+        if (EnvManager && EnvManager->WaterSystem)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Clearing timers for water system"));
+            
+            // Clear water ripple timer if active
+            if (TimerManager.IsTimerActive(EnvManager->WaterSystem->RippleTimerHandle))
+            {
+                TimerManager.ClearTimer(EnvManager->WaterSystem->RippleTimerHandle);
+            }
+            
+            // Clear any other water system timers if needed
+        }
+    }
 }

@@ -431,6 +431,7 @@ void UWaterSystem::HandleCycleUpdate(float DeltaTime)
     }
 }
 
+
 void UWaterSystem::KillCharacterInWater(AActor* Character)
 {
     // Vérifier si c'est bien un personnage Worm
@@ -448,24 +449,30 @@ void UWaterSystem::KillCharacterInWater(AActor* Character)
     FVector ImpulseDirection = FVector(0, 0, 1.0f);
     WormChar->ApplyDamageToWorm(LethalDamage, ImpulseDirection * 500.0f);
     
-    // Notifier le GameState qu'un personnage est mort
+    // First check if the game is over, to avoid conflicts with turn management
     AWormGameState* GameState = Cast<AWormGameState>(UGameplayStatics::GetGameState(GetWorld()));
-    if (GameState)
+    bool bIsGameOver = GameState && GameState->bGameOver;
+    
+    // Check if it was the character's turn and end it (only if game is not over)
+    if (!bIsGameOver && WormChar->IsMyTurn())
+    {
+        // End the turn via the GameMode
+        AWormGameMode* GameMode = Cast<AWormGameMode>(GetWorld()->GetAuthGameMode());
+        if (GameMode)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Character %s died in water during their turn, ending turn"), 
+                *WormChar->GetName());
+            
+            // End turn immediately instead of using a timer
+            GameMode->EndCurrentTurn();
+        }
+    }
+    
+    // Notify the GameState that a character died (if game not already over)
+    if (GameState && !bIsGameOver)
     {
         GameState->CheckGameOverCondition();
     }
-}
-
-TArray<AActor*> UWaterSystem::GetActorsInWater() const
-{
-    TArray<AActor*> Result;
-    
-    if (WaterVolumeComponent)
-    {
-        WaterVolumeComponent->GetOverlappingActors(Result);
-    }
-    
-    return Result;
 }
 
 void UWaterSystem::NotifyTurnEnded_Implementation()

@@ -183,7 +183,5 @@ protected:
     void SpawnWaterSplashEffect(const FVector& Location);
     void CheckForDangerousWaterLevel();
     void HandleCycleUpdate(float DeltaTime);
-    
-    // Récupérer tous les acteurs actuellement dans l'eau
-    TArray<AActor*> GetActorsInWater() const;
+
 };

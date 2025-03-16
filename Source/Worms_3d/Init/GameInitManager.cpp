@@ -7,6 +7,7 @@
 #include "WormGameState.h"
 #include "WormPlayerController.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Worms_3d/Env/EnvironmentalEventsManager.h"
 
 AGameInitManager::AGameInitManager()
 {
@@ -111,8 +112,56 @@ void AGameInitManager::ExecuteInitializationStep()
             CurrentInitStep++;
             break;
         }
-        
-        case 1: // Player controller gathering
+        case 1: // Reset Water Level
+            {
+                UE_LOG(LogTemp, Warning, TEXT("Starting initialization step %d: Resetting Water Level"), CurrentInitStep);
+            
+                UpdateLoadingProgress(0.3f, TEXT("Réinitialisation du niveau d'eau..."));
+            
+                // Get the Game Mode
+                AWormGameMode* GameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(this));
+                if (GameMode && GameMode->WaterSystemManager)
+                {
+                    // Get the water system from the manager
+                    UWaterSystem* WaterSystem = nullptr;
+                    AEnvironmentalEventsManager* EnvManager = Cast<AEnvironmentalEventsManager>(GameMode->WaterSystemManager);
+                    if (EnvManager)
+                    {
+                        WaterSystem = EnvManager->WaterSystem;
+                    }
+                
+                    // Reset water to initial level
+                    if (WaterSystem)
+                    {
+                        UE_LOG(LogTemp, Warning, TEXT("Resetting water to initial level %.1f"), WaterSystem->InitialWaterLevel);
+                        WaterSystem->SetWaterLevel(WaterSystem->InitialWaterLevel, true);
+                    
+                        // Also stop automatic cycle if it's active
+                        if (WaterSystem->IsWaterRising())
+                        {
+                            WaterSystem->StopAutomaticCycle();
+                        }
+                    }
+                    else
+                    {
+                        UE_LOG(LogTemp, Error, TEXT("WaterSystem not found in manager!"));
+                    }
+                }
+            
+                // Proceed to next step after a short delay
+                GetWorld()->GetTimerManager().SetTimer(
+                    InitStepTimerHandle,
+                    this,
+                    &AGameInitManager::ExecuteInitializationStep,
+                    1.0f,
+                    false
+                );
+            
+                CurrentInitStep++;
+                break;
+            }
+      
+        case 2: // Player controller gathering
         {
             UE_LOG(LogTemp, Warning, TEXT("Starting initialization step %d: Controller Gathering"), CurrentInitStep);
               
@@ -141,7 +190,7 @@ void AGameInitManager::ExecuteInitializationStep()
                 InitStepTimerHandle,
                 this,
                 &AGameInitManager::ExecuteInitializationStep,
-                2.0f, // Increased from 1.0f
+                1.35f, // Increased from 1.0f
                 false
             );
             
@@ -149,7 +198,7 @@ void AGameInitManager::ExecuteInitializationStep()
             break;
         }
         
-        case 2: // Spawn and position players
+        case 3: // Spawn and position players
         {
             UE_LOG(LogTemp, Warning, TEXT("Starting initialization step %d: Player Spawning"), CurrentInitStep);
 
@@ -185,7 +234,7 @@ void AGameInitManager::ExecuteInitializationStep()
             break;
         }
          
-        case 3: // Initial weapon preparation (with safety)
+        case 4: // Initial weapon preparation (with safety)
         {
             UE_LOG(LogTemp, Warning, TEXT("Starting initialization step %d: Initial Weapon Setup"), CurrentInitStep);
 
@@ -238,7 +287,7 @@ void AGameInitManager::ExecuteInitializationStep()
             break;
         }
     
-        case 4: // Final weapon verification
+        case 5: // Final weapon verification
         {
             UE_LOG(LogTemp, Warning, TEXT("Starting initialization step %d: Final Weapon Verification"), CurrentInitStep);
 
@@ -267,7 +316,7 @@ void AGameInitManager::ExecuteInitializationStep()
             break;
         }
         
-         case 5: // Final stabilization and game start
+         case 6: // Final stabilization and game start
         {
             UpdateLoadingProgress(0.95f, TEXT("Stabilisation des joueurs..."));
 
@@ -326,7 +375,7 @@ void AGameInitManager::ExecuteInitializationStep()
             break;
         }
 
-        case 6: // Multiple turn cycling to ensure proper physics
+        case 7: // Multiple turn cycling to ensure proper physics
         {
             UpdateLoadingProgress(1.0f, TEXT("Prêt !"));
 

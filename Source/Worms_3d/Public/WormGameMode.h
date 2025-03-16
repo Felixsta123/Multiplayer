@@ -154,6 +154,8 @@ public:
     // Offset pour les positions de spawn d'une même équipe
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Setup")
     float TeamSpawnOffset = 100.0f;
+    FTimerHandle TurnTimerHandle;
+
 protected:
     // Miscellaneous variables 
     UPROPERTY(BlueprintReadWrite, Category = "Game")
@@ -166,7 +168,6 @@ protected:
     TArray<APlayerController*> ReadyPlayers;
     virtual void CheckAllPlayersReady();
     // Turn timer handle
-    FTimerHandle TurnTimerHandle;
 
     // Function called when time expires
     UFUNCTION()

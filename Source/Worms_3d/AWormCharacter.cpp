@@ -747,8 +747,25 @@ void AWormCharacter::ApplyDamageToWorm(float DamageAmount, FVector ImpactDirecti
         AWormGameState* GameState = Cast<AWormGameState>(UGameplayStatics::GetGameState(this));
         if (GameState)
         {
-            FString InstigatorName = DamageInstigator->GetName();
+            // Get the proper name to record the damage
+            AWormCharacter* InstigatorChar = Cast<AWormCharacter>(DamageInstigator);
+            FString InstigatorName;
+            
+            if (InstigatorChar && !InstigatorChar->InGameName.IsEmpty())
+            {
+                // Use InGameName if available
+                InstigatorName = InstigatorChar->InGameName;
+            }
+            else
+            {
+                // Fallback to actor name
+                InstigatorName = DamageInstigator->GetName();
+            }
+            
+            // Record the damage
             GameState->AddDamageDealt(InstigatorName, DamageAmount);
+            UE_LOG(LogTemp, Warning, TEXT("Recorded %.1f damage dealt by %s"), 
+                DamageAmount, *InstigatorName);
         }
     }
     // Vérifier si le personnage est mort

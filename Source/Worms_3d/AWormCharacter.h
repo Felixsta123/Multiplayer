@@ -187,6 +187,9 @@ public:
     UPROPERTY(Replicated, BlueprintReadWrite, Category = "Team")
     int32 CharacterIndexInTeam;
     
+    // === SYSTÈME DE TOUR DE JEU === 
+    FTimerHandle AutoEndTurnTimerHandle;
+    bool bAutoEndTurnTimerActive;
     
 
 protected:
@@ -215,10 +218,7 @@ protected:
     
     float LastWeaponUseTime;
 
-    // === SYSTÈME DE TOUR DE JEU === 
-    FTimerHandle AutoEndTurnTimerHandle;
-    bool bAutoEndTurnTimerActive;
-    
+
     UFUNCTION()
     void OnAutoEndTurnTimerExpired();
 

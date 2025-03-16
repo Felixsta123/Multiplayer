@@ -625,6 +625,10 @@ void AWormProjectile::ApplyDamageToCharacters(const FVector& ExplosionLocation, 
 
             UE_LOG(LogTemp, Warning, TEXT("Applying %.1f damage to %s with impulse dir: %s, strength: %.1f"), 
                 DamageToApply, *WormChar->GetName(), *ImpactDirection.ToString(), ImpulseStrength);
+            if (GetInstigator())
+            {
+                WormChar->SetInstigator(GetInstigator());
+            }
 
             // Apply damage and impulse
             WormChar->ApplyDamageToWorm(DamageToApply, ImpactDirection * ImpulseStrength);

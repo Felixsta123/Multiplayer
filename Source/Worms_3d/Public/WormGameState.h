@@ -66,6 +66,8 @@ public:
     // Joueur actif pour le tour
     UPROPERTY(ReplicatedUsing=OnRep_CurrentPlayerIndex, BlueprintReadOnly, Category = "UI")
     int32 CurrentPlayerIndex;
+    
+    void ClearAllGameTimers();
 
     // Les deux fonctions ci-dessous existent déjà, mais on va ajouter les callbacks OnRep
     UFUNCTION()
