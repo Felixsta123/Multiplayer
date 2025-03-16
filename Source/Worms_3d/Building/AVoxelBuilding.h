@@ -52,6 +52,14 @@ struct FVoxelData
     }
 };
 
+// Enum to define the building type
+UENUM(BlueprintType)
+enum class EVoxelBuildingType : uint8
+{
+    Standard UMETA(DisplayName = "Standard"),
+    Staircase UMETA(DisplayName = "Staircase")
+};
+
 /**
  * Class that generates a procedural voxel-based building
  */
@@ -59,47 +67,51 @@ UCLASS()
 class WORMS_3D_API AImprovedVoxelBuilding : public AActor
 {
     GENERATED_BODY()
-    
-public:    
+
+public:
     AImprovedVoxelBuilding();
 
     virtual void OnConstruction(const FTransform& Transform) override;
-    
+
     // Properties to configure the building
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", Replicated)
     int32 GridSizeX;
-    
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", Replicated)
     int32 GridSizeY;
-    
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", Replicated)
     int32 GridSizeZ;
-    
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", Replicated)
     float VoxelSize;
-    
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", Replicated)
     float SmoothingFactor;
-    
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", Replicated)
     bool bUseRandomColors;
-    
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", meta = (EditCondition = "!bUseRandomColors"))
     FLinearColor BuildingColor;
-    
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
     bool bGenerateOnBeginPlay;
-    
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
     TArray<UMaterialInterface*> Materials;
-    
+
+    // Building type selection
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", Replicated)
+    EVoxelBuildingType BuildingType;
+
     // Procedural mesh configuration
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building|Rendering")
     bool bUseDoubleSidedGeometry;
-    
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building|Rendering")
     bool bEnableCollision;
-    
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building|Rendering")
     float CubeMargin;
 
@@ -127,7 +139,7 @@ public:
     // Function to generate the building
     UFUNCTION(BlueprintCallable, Category = "Building")
     void GenerateBuilding();
-    
+
     // Function to destroy part of the building
     UFUNCTION(BlueprintCallable, Category = "Building")
     void DestroyVoxelsAt(FVector Location, FVector ImpactNormal, float Radius);
@@ -140,23 +152,26 @@ public:
     void Multicast_DestroyVoxelsAt(FVector Location, FVector ImpactNormal, float Radius);
     UPROPERTY(BlueprintReadOnly, Category = "Building")
     FVector TopSpawnPoint;
-    
+
     // Fonction pour obtenir le point de spawn
     UFUNCTION(BlueprintCallable, Category = "Building")
     FVector GetTopSpawnPoint() const { return TopSpawnPoint; }
 protected:
     virtual void BeginPlay() override;
-    
+
     // Procedural mesh component
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     UProceduralMeshComponent* BuildingMesh;
-    
+
     // Voxel data
     TArray<TArray<TArray<FVoxelData>>> VoxelGrid;
     UPROPERTY()
     int32 LastProcessedDestructionCount;
     // Initialize voxel grid
     void InitializeVoxelGrid();
+
+    // Generate a staircase pattern
+    void GenerateStaircasePattern();
     
     // Create mesh from voxel grid
     void CreateMesh();
