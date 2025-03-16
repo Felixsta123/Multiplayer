@@ -215,69 +215,72 @@ void AWormGameState::AddDamageDealt(const FString& PlayerName, float Damage)
 
 void AWormGameState::CheckGameOverCondition()
 {
-    if (HasAuthority() && !bGameOver)
+    if (!HasAuthority() || bGameOver)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Vérification de la condition de fin de partie"));
+        // Skip if not on server or game already over
+        return;
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("Vérification de la condition de fin de partie"));
+    
+    // Compter les équipes actives
+    TSet<int32> ActiveTeams;
+    
+    // Parcourir toutes les équipes
+    for (int32 i = 0; i < Teams.Num(); i++)
+    {
+        bool TeamHasAliveMembers = false;
         
-        // Compter les équipes actives
-        TSet<int32> ActiveTeams;
-        
-        // Parcourir toutes les équipes
-        for (int32 i = 0; i < Teams.Num(); i++)
+        // Vérifier si cette équipe a des membres vivants
+        for (AWormCharacter* Character : Teams[i].TeamMembers)
         {
-            bool TeamHasAliveMembers = false;
-            
-            // Vérifier si cette équipe a des membres vivants
-            for (AWormCharacter* Character : Teams[i].TeamMembers)
+            if (Character && IsValid(Character) && !Character->IsDead())
             {
-                if (Character && Character->GetHealth() > 0)
-                {
-                    TeamHasAliveMembers = true;
-                    UE_LOG(LogTemp, Warning, TEXT("Équipe %d: Personnage %s est vivant avec %.1f PV"), 
-                        i, *Character->GetName(), Character->GetHealth());
-                    break;
-                }
-            }
-            
-            if (TeamHasAliveMembers)
-            {
-                ActiveTeams.Add(i);
-            }
-            else
-            {
-                UE_LOG(LogTemp, Warning, TEXT("Équipe %d: Tous les personnages sont éliminés"), i);
+                TeamHasAliveMembers = true;
+                UE_LOG(LogTemp, Warning, TEXT("Équipe %d: Personnage %s est vivant avec %.1f PV"), 
+                    i, *Character->GetName(), Character->GetHealth());
+                break;
             }
         }
         
-        UE_LOG(LogTemp, Warning, TEXT("Nombre d'équipes actives: %d"), ActiveTeams.Num());
+        if (TeamHasAliveMembers)
+        {
+            ActiveTeams.Add(i);
+        }
+        else if (Teams[i].TeamMembers.Num() > 0)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Équipe %d: Tous les personnages sont éliminés"), i);
+        }
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Nombre d'équipes actives: %d"), ActiveTeams.Num());
+    
+    // Fin de partie s'il ne reste qu'une seule équipe et qu'on a au moins 2 équipes configurées
+    if (ActiveTeams.Num() == 1 && Teams.Num() > 1)
+    {
+        int32 WinningTeamId = *ActiveTeams.CreateIterator();
+        // Use the proper team name from Teams array
+        FString WinnerTeamName = Teams[WinningTeamId].TeamName;
         
-        // Fin de partie s'il ne reste qu'une seule équipe
-        if (ActiveTeams.Num() == 1)
-        {
-            int32 WinningTeamId = *ActiveTeams.CreateIterator();
-            // Use the proper team name from Teams array
-            FString WinnerTeamName = Teams[WinningTeamId].TeamName;
-            
-            UE_LOG(LogTemp, Warning, TEXT("Fin de partie! Équipe gagnante: %s (ID: %d)"), 
-                *WinnerTeamName, WinningTeamId);
-            
-            // First clear all timers to avoid conflicts
-            ClearAllGameTimers();
-            
-            // Then trigger game over
-            TriggerGameOver(WinnerTeamName);
-        }
-        else if (ActiveTeams.Num() == 0)
-        {
-            // Aucune équipe active - match nul ou erreur
-            UE_LOG(LogTemp, Warning, TEXT("Aucune équipe active - Match nul"));
-            
-            // First clear all timers to avoid conflicts
-            ClearAllGameTimers();
-            
-            // Then trigger game over
-            TriggerGameOver(TEXT("Match nul"));
-        }
+        UE_LOG(LogTemp, Warning, TEXT("Fin de partie! Équipe gagnante: %s (ID: %d)"), 
+            *WinnerTeamName, WinningTeamId);
+        
+        // First clear all timers to avoid conflicts
+        ClearAllGameTimers();
+        
+        // Then trigger game over
+        TriggerGameOver(WinnerTeamName);
+    }
+    else if (ActiveTeams.Num() == 0 && Teams.Num() > 0 && Teams[0].TeamMembers.Num() > 0)
+    {
+        // Aucune équipe active - match nul ou erreur
+        UE_LOG(LogTemp, Warning, TEXT("Aucune équipe active - Match nul"));
+        
+        // First clear all timers to avoid conflicts
+        ClearAllGameTimers();
+        
+        // Then trigger game over
+        TriggerGameOver(TEXT("Match nul"));
     }
 }
 
@@ -285,68 +288,71 @@ void AWormGameState::CheckGameOverCondition()
 
 void AWormGameState::TriggerGameOver(const FString& Winner)
 {
-    if (HasAuthority() && !bGameOver)
+    if (!HasAuthority() || bGameOver)
     {
-        bGameOver = true;
-        WinnerName = Winner;
-        
-        // Format player damage records to use InGameName
-        // Create a copy of the damage stats with properly formatted names
-        TArray<FPlayerDamageInfo> FormattedDamageStats;
-        
-        // Find all characters to match their names
-        TArray<AActor*> AllCharacters;
-        UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormCharacter::StaticClass(), AllCharacters);
-        
-        // Create a mapping of actor names to InGameNames
-        TMap<FString, FString> NameMapping;
-        for (AActor* Actor : AllCharacters)
-        {
-            AWormCharacter* Character = Cast<AWormCharacter>(Actor);
-            if (Character && !Character->InGameName.IsEmpty())
-            {
-                NameMapping.Add(Character->GetName(), Character->InGameName);
-            }
-        }
-        
-        // Apply name mapping to damage stats
-        for (const FPlayerDamageInfo& DamageInfo : PlayerDamageDealt)
-        {
-            FPlayerDamageInfo FormattedInfo = DamageInfo;
-            
-            // If we have an InGameName mapping for this character, use it
-            FString* MappedName = NameMapping.Find(DamageInfo.PlayerName);
-            if (MappedName && !MappedName->IsEmpty())
-            {
-                FormattedInfo.PlayerName = *MappedName;
-            }
-            
-            FormattedDamageStats.Add(FormattedInfo);
-        }
-        
-        // Replace the original stats with the formatted ones
-        PlayerDamageDealt = FormattedDamageStats;
-        
-        // Force replication
-        MARK_PROPERTY_DIRTY_FROM_NAME(AWormGameState, bGameOver, this);
-        MARK_PROPERTY_DIRTY_FROM_NAME(AWormGameState, WinnerName, this);
-        MARK_PROPERTY_DIRTY_FROM_NAME(AWormGameState, PlayerDamageDealt, this);
-        
-        // Broadcast event to all clients
-        OnGameOver.Broadcast(Winner);
-        
-        UE_LOG(LogTemp, Warning, TEXT("Game over triggered! Winner: %s"), *Winner);
-        
-        // Show results widget after a short delay
-        FTimerHandle ShowWidgetTimerHandle;
-        GetWorld()->GetTimerManager().SetTimer(
-            ShowWidgetTimerHandle,
-            this,
-            &AWormGameState::ShowGameOverWidget,
-            2.0f, // 2 second delay before showing widget
-            false
-        );
+        // Skip if already in game over state
+        return;
     }
+
+    bGameOver = true;
+    WinnerName = Winner;
+    
+    // Format player damage records to use InGameName
+    // Create a copy of the damage stats with properly formatted names
+    TArray<FPlayerDamageInfo> FormattedDamageStats;
+    
+    // Find all characters to match their names
+    TArray<AActor*> AllCharacters;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormCharacter::StaticClass(), AllCharacters);
+    
+    // Create a mapping of actor names to InGameNames
+    TMap<FString, FString> NameMapping;
+    for (AActor* Actor : AllCharacters)
+    {
+        AWormCharacter* Character = Cast<AWormCharacter>(Actor);
+        if (Character && !Character->InGameName.IsEmpty())
+        {
+            NameMapping.Add(Character->GetName(), Character->InGameName);
+        }
+    }
+    
+    // Apply name mapping to damage stats
+    for (const FPlayerDamageInfo& DamageInfo : PlayerDamageDealt)
+    {
+        FPlayerDamageInfo FormattedInfo = DamageInfo;
+        
+        // If we have an InGameName mapping for this character, use it
+        FString* MappedName = NameMapping.Find(DamageInfo.PlayerName);
+        if (MappedName && !MappedName->IsEmpty())
+        {
+            FormattedInfo.PlayerName = *MappedName;
+        }
+        
+        FormattedDamageStats.Add(FormattedInfo);
+    }
+    
+    // Replace the original stats with the formatted ones
+    PlayerDamageDealt = FormattedDamageStats;
+    
+    // Force replication
+    MARK_PROPERTY_DIRTY_FROM_NAME(AWormGameState, bGameOver, this);
+    MARK_PROPERTY_DIRTY_FROM_NAME(AWormGameState, WinnerName, this);
+    MARK_PROPERTY_DIRTY_FROM_NAME(AWormGameState, PlayerDamageDealt, this);
+    
+    // Broadcast event to all clients
+    OnGameOver.Broadcast(Winner);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Game over triggered! Winner: %s"), *Winner);
+    
+    // Show results widget after a short delay
+    FTimerHandle ShowWidgetTimerHandle;
+    GetWorld()->GetTimerManager().SetTimer(
+        ShowWidgetTimerHandle,
+        this,
+        &AWormGameState::ShowGameOverWidget,
+        2.0f, // 2 second delay before showing widget
+        false
+    );
 }
 void AWormGameState::ShowGameOverWidget()
 {

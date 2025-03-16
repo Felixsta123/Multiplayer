@@ -155,7 +155,8 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Setup")
     float TeamSpawnOffset = 100.0f;
     FTimerHandle TurnTimerHandle;
-
+    UPROPERTY(BlueprintReadWrite, Category = "Turns")
+    bool bDeferTurnEnding = false;
 protected:
     // Miscellaneous variables 
     UPROPERTY(BlueprintReadWrite, Category = "Game")

@@ -77,7 +77,17 @@ void AGameInitManager::StartInitializationSequence()
             }
         }
     }
-    
+    //get all the characters in the game and set their hp to 100
+    TArray<AActor*> FoundActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormCharacter::StaticClass(), FoundActors);
+    for (AActor* Actor : FoundActors)
+    {
+        AWormCharacter* Character = Cast<AWormCharacter>(Actor);
+        if (Character)
+        {
+            Character->Health = 100;
+        }
+    }
     // Reset and start initialization steps
     CurrentInitStep = 0;
     ExecuteInitializationStep();
@@ -182,6 +192,7 @@ void AGameInitManager::ExecuteInitializationStep()
                             i, *PC->GetName(), 
                             WPC->PlayerSettings.MyPlayerCharacter ? TEXT("Yes") : TEXT("No"));
                     }
+                    
                 }
             }
             
@@ -476,7 +487,7 @@ void AGameInitManager::UpdateLoadingProgress(float Progress, const FString& Stat
 void AGameInitManager::CompleteInitialization()
 {
     // Add this check to ensure we've completed all steps
-    if (CurrentInitStep < 5) {
+    if (CurrentInitStep < 7){
         UE_LOG(LogTemp, Error, TEXT("Attempting to complete initialization at step %d before all steps finished!"), CurrentInitStep);
         return; // Don't complete if we haven't finished all steps
     }
@@ -484,7 +495,19 @@ void AGameInitManager::CompleteInitialization()
     UE_LOG(LogTemp, Warning, TEXT("Game initialization sequence complete"));
     
     // Increase the delay before dismissal
-    float DismissDelay = 3.0f; // Increase from 1.0f to 3.0f
+    float DismissDelay = 2.0f; // Increase from 1.0f to 3.0f
+    //call this on all PC // When dismissing game over UI
+    //PC->SetInputMode(FInputModeGameOnly());
+    //PC->bShowMouseCursor = false;
+    for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+    {
+        APlayerController* PC = It->Get();
+        if (PC)
+        {
+            PC->SetInputMode(FInputModeGameOnly());
+            PC->bShowMouseCursor = false;
+        }
+    }
     
     // ALWAYS dismiss through NetworkLoadingManager if available
     if (WormGameState && WormGameState->LoadingManager)

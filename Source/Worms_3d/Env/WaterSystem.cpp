@@ -454,19 +454,7 @@ void UWaterSystem::KillCharacterInWater(AActor* Character)
     bool bIsGameOver = GameState && GameState->bGameOver;
     
     // Check if it was the character's turn and end it (only if game is not over)
-    if (!bIsGameOver && WormChar->IsMyTurn())
-    {
-        // End the turn via the GameMode
-        AWormGameMode* GameMode = Cast<AWormGameMode>(GetWorld()->GetAuthGameMode());
-        if (GameMode)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Character %s died in water during their turn, ending turn"), 
-                *WormChar->GetName());
-            
-            // End turn immediately instead of using a timer
-            GameMode->EndCurrentTurn();
-        }
-    }
+    
     
     // Notify the GameState that a character died (if game not already over)
     if (GameState && !bIsGameOver)

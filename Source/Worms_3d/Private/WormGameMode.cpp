@@ -794,13 +794,24 @@ void AWormGameMode::ShowGameOverWidget()
     GameOverWidget->AddToViewport(1000); // High Z-order to be on top
     
     // Set input mode to UI
-    PC->SetInputMode(FInputModeUIOnly());
-    PC->bShowMouseCursor = true;
+    //for all player controllers
+    for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+    {
+        APlayerController* PCBis = It->Get();
+        if (PCBis)
+        {
+            PCBis->bShowMouseCursor = true;
+            PCBis->bEnableClickEvents = true;
+            PCBis->bEnableMouseOverEvents = true;
+            PCBis->SetInputMode(FInputModeUIOnly());
+        }
+    }
     
     // Freeze the game
-    UGameplayStatics::SetGamePaused(GetWorld(), true);
+ //   UGameplayStatics::SetGamePaused(GetWorld(), true);
 }
 
+// Modify StartRestartSequence in WormGameMode.cpp:
 
 void AWormGameMode::StartRestartSequence()
 {
@@ -811,25 +822,7 @@ void AWormGameMode::StartRestartSequence()
 
     UE_LOG(LogTemp, Warning, TEXT("Starting game restart sequence"));
     
-    // Reset game state
-    AWormGameState* WormGS = GetGameState<AWormGameState>();
-    if (WormGS)
-    {
-        WormGS->bGameOver = false;
-        WormGS->WinnerName = TEXT("");
-        WormGS->PlayerDamageDealt.Empty();
-        
-        // Reset teams
-        for (FTeamInfo& Team : WormGS->Teams)
-        {
-            Team.TeamMembers.Empty();
-        }
-        
-        // Force replication
-        WormGS->ForceNetUpdate();
-    }
-    
-    // Clear any existing game over widget from all screens
+    // First, clear all game over widgets from all screens
     for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
     {
         APlayerController* PC = It->Get();
@@ -848,12 +841,25 @@ void AWormGameMode::StartRestartSequence()
         }
     }
     
-    // IMPORTANT: Clean up ALL worm characters, not just possessed ones
-    TArray<AActor*> AllCharacters;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormCharacter::StaticClass(), AllCharacters);
-    UE_LOG(LogTemp, Warning, TEXT("Cleaning up %d worm characters from previous session"), AllCharacters.Num());
+    // Reset game state FIRST before touching any actors
+    AWormGameState* WormGS = GetGameState<AWormGameState>();
+    if (WormGS)
+    {
+        WormGS->bGameOver = false;
+        WormGS->WinnerName = TEXT("");
+        WormGS->PlayerDamageDealt.Empty();
+        
+        // Reset teams - important: Empty team arrays BEFORE destroying characters
+        for (FTeamInfo& Team : WormGS->Teams)
+        {
+            Team.TeamMembers.Empty();
+        }
+        
+        // Force replication
+        WormGS->ForceNetUpdate();
+    }
     
-    // First unpossess all controllers to avoid crashes
+    // Unpossess all controllers first to avoid crashes
     for (FConstControllerIterator It = GetWorld()->GetControllerIterator(); It; ++It)
     {
         AController* Controller = It->Get();
@@ -863,11 +869,16 @@ void AWormGameMode::StartRestartSequence()
         }
     }
     
-    // Now safely destroy all characters
+    // Now reset all existing characters instead of destroying them
+    TArray<AActor*> AllCharacters;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormCharacter::StaticClass(), AllCharacters);
+    UE_LOG(LogTemp, Warning, TEXT("Cleaning up %d worm characters from previous session"), AllCharacters.Num());
+    
     for (AActor* Actor : AllCharacters)
     {
         if (Actor)
         {
+            // Fully destroy the actor instead of just resetting it
             UE_LOG(LogTemp, Warning, TEXT("Destroying character: %s"), *Actor->GetName());
             Actor->Destroy();
         }
@@ -900,41 +911,29 @@ void AWormGameMode::StartRestartSequence()
     GetWorld()->GetTimerManager().SetTimer(
         CleanupTimerHandle,
         [this]() {
-            // Double-check that everything is cleaned up
-            TArray<AActor*> RemainingCharacters;
-            UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormCharacter::StaticClass(), RemainingCharacters);
-            if (RemainingCharacters.Num() > 0)
-            {
-                UE_LOG(LogTemp, Warning, TEXT("Found %d remaining characters after cleanup, forcing destruction"), 
-                    RemainingCharacters.Num());
-                for (AActor* Actor : RemainingCharacters)
-                {
-                    if (Actor)
-                    {
-                        Actor->Destroy();
-                    }
-                }
-            }
+            // Reset game parameters
+            CurrentTeamIndex = 0;
+            CurrentCharacterIndex = 0;
             
             // Use GameInitManager to handle the restart
             AWormGameState* WormGS = GetGameState<AWormGameState>();
-            if (GameInitManager)
+            if (WormGS)
             {
                 // Show loading screen first
-                if (WormGS && WormGS->LoadingManager)
+                if (WormGS->LoadingManager)
                 {
                     WormGS->ShowLoadingScreen(10.0f);
                 }
 
-                // Start initialization sequence
+                // Start initialization sequence using the GameInitManager
                 if (GameInitManager)
                 {
                     GameInitManager->StartInitializationSequence();
                 }
-            }
-            else
-            {
-                UE_LOG(LogTemp, Error, TEXT("Cannot restart: GameInitManager is null"));
+                else
+                {
+                    UE_LOG(LogTemp, Error, TEXT("Cannot restart: GameInitManager is null"));
+                }
             }
         },
         0.5f, // Small delay to ensure destruction completes

@@ -149,6 +149,7 @@ public:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
     virtual void PossessedBy(AController* NewController) override;
+    virtual void UnPossessed() override;
 
     // === SYSTÈME D'ARMES ===
     UFUNCTION(NetMulticast, Reliable)
@@ -191,14 +192,23 @@ public:
     FTimerHandle AutoEndTurnTimerHandle;
     bool bAutoEndTurnTimerActive;
     
+    UFUNCTION(BlueprintCallable, Category = "Worm")
+    void HandleCharacterDeath();
 
+    // Check if character is dead
+    UFUNCTION(BlueprintPure, Category = "Worm")
+    bool IsDead() const { return Health <= 0.0f; }
+
+    UFUNCTION(NetMulticast, Reliable)
+    void Multicast_ProcessDeath();
+        
+    UPROPERTY(ReplicatedUsing = OnRep_Health, BlueprintReadOnly, Category = "Worm")
+    float Health;
 protected:
     // === ÉTAT DU PERSONNAGE ===
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Worm")
     bool bIsMyTurn;
-    
-    UPROPERTY(ReplicatedUsing = OnRep_Health, BlueprintReadOnly, Category = "Worm")
-    float Health;
+
     
     UPROPERTY(ReplicatedUsing = OnRep_CurrentWeaponIndex, BlueprintReadOnly, Category = "Worm")
     int32 CurrentWeaponIndex;

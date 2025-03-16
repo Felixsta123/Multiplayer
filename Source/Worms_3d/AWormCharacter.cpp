@@ -217,8 +217,34 @@ void AWormCharacter::PossessedBy(AController* NewController)
             SetupEnhancedInput(PC);
         }
     }
+    
+    // If this character is dead, make it visible again but still non-collidable
+    if (IsDead())
+    {
+        // Make sure it's visible - possessed characters should be visible even if dead
+        GetMesh()->SetVisibility(true);
+        GetMesh()->SetRenderCustomDepth(false);
+        
+        // But keep collision disabled
+        GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        
+        UE_LOG(LogTemp, Warning, TEXT("Possessed dead character %s - adjusted visibility"), *GetName());
+    }
 }
-
+void AWormCharacter::UnPossessed()
+{
+    Super::UnPossessed();
+    
+    // If this character is dead and now unpossessed, apply full death visual state
+    if (IsDead())
+    {
+        // Apply death visual state
+        GetMesh()->SetRenderCustomDepth(true);
+        GetMesh()->SetCustomDepthStencilValue(2);
+        
+        UE_LOG(LogTemp, Warning, TEXT("Unpossessed dead character %s - applied death visual state"), *GetName());
+    }
+}
 void AWormCharacter::SetupEnhancedInput(APlayerController* PlayerController)
 {
     if (!PlayerController || !InputMappingContext)
@@ -724,73 +750,104 @@ void AWormCharacter::SpawnCurrentWeapon()
         }, 0.1f, false);
     }
 }
-
 void AWormCharacter::ApplyDamageToWorm(float DamageAmount, FVector ImpactDirection)
 {
-    // Valeur de santé avant d'appliquer les dégâts
+    // Skip if already dead
+    if (IsDead())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Skipping damage on already dead character %s"), *GetName());
+        return;
+    }
+
+    // Store previous health
     float PreviousHealth = Health;
     
-    // Appliquer les dégâts
+    // Apply damage
     Health = FMath::Max(0.0f, Health - DamageAmount);
     
-    // Log pour voir les changements de santé
     UE_LOG(LogTemp, Warning, TEXT("Character %s: Health changed from %.1f to %.1f (damage: %.1f)"), 
            *GetName(), PreviousHealth, Health, DamageAmount);
     
-    // L'impulsion est déjà incluse dans ImpactDirection, ne pas multiplier à nouveau
-    // Juste normaliser pour être sûr
+    // Apply impulse
     ApplyMovementImpulse(ImpactDirection.GetSafeNormal(), ImpactDirection.Size());
+    
+    // Record damage in game state
     AActor* DamageInstigator = GetInstigator();
     if (DamageInstigator)
     {
-        // Get the game state to record damage
         AWormGameState* GameState = Cast<AWormGameState>(UGameplayStatics::GetGameState(this));
         if (GameState)
         {
-            // Get the proper name to record the damage
             AWormCharacter* InstigatorChar = Cast<AWormCharacter>(DamageInstigator);
             FString InstigatorName;
             
             if (InstigatorChar && !InstigatorChar->InGameName.IsEmpty())
             {
-                // Use InGameName if available
                 InstigatorName = InstigatorChar->InGameName;
             }
             else
             {
-                // Fallback to actor name
                 InstigatorName = DamageInstigator->GetName();
             }
             
-            // Record the damage
             GameState->AddDamageDealt(InstigatorName, DamageAmount);
             UE_LOG(LogTemp, Warning, TEXT("Recorded %.1f damage dealt by %s"), 
                 DamageAmount, *InstigatorName);
+                
+            // NEW: Check if instigator's turn should end
+            if (InstigatorChar && InstigatorChar->IsMyTurn())
+            {
+                // End instigator's turn after damage (water or projectile)
+                AWormGameMode* GameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(GetWorld()));
+                if (GameMode && !GameMode->bDeferTurnEnding)
+                {
+                    // Set flag to prevent multiple ending calls
+                    GameMode->bDeferTurnEnding = true;
+                    
+                    UE_LOG(LogTemp, Warning, TEXT("Ending turn for %s after causing damage to %s"), 
+                        *InstigatorChar->GetName(), *GetName());
+                    
+                    // Use timer to prevent immediate call during damage application
+                    FTimerHandle EndTurnTimerHandle;
+                    GetWorld()->GetTimerManager().SetTimer(
+                        EndTurnTimerHandle,
+                        [GameMode]()
+                        {
+                            if (GameMode && IsValid(GameMode))
+                            {
+                                GameMode->bDeferTurnEnding = false;
+                                GameMode->EndCurrentTurn();
+                            }
+                        },
+                        0.5f,  // Delay to allow damage effects to complete
+                        false
+                    );
+                }
+            }
         }
     }
-    // Vérifier si le personnage est mort
+    
+    // Handle death
     if (Health <= 0)
     {
         UE_LOG(LogTemp, Warning, TEXT("Character %s died!"), *GetName());
-    
-        // Update player alive status in game state
-        if (Health <= 0)
+        
+        // Handle death state
+        HandleCharacterDeath();
+        
+        UE_LOG(LogTemp, Warning, TEXT("Character %s died! (Team %d, Index %d)"), 
+            *GetName(), TeamId, CharacterIndexInTeam);
+            
+        // Check for game over
+        AWormGameState* GameState = Cast<AWormGameState>(UGameplayStatics::GetGameState(this));
+        if (GameState)
         {
-            UE_LOG(LogTemp, Warning, TEXT("Character %s died! (Team %d, Index %d)"), 
-                *GetName(), TeamId, CharacterIndexInTeam);
-
-            // Récupérer le GameState pour vérifier la condition de fin de partie
-            AWormGameState* GameState = Cast<AWormGameState>(UGameplayStatics::GetGameState(this));
-            if (GameState)
-            {
-                // Vérifier directement la condition de fin de partie
-                GameState->CheckGameOverCondition();
-            }
+            GameState->CheckGameOverCondition();
         }
     }
     else
     {
-        // Jouer l'animation de réaction aux dégâts si pas mort
+        // Play hit animation if not dead
         PlayHitReaction();
     }
 }
@@ -1489,57 +1546,7 @@ void AWormCharacter::PlayHitReaction()
 
 void AWormCharacter::OnSwitchTeamMemberAction(const FInputActionValue& Value)
 {
-    if (!IsMyTurn()) return; // Ne fonctionne que pour le joueur actif
-    
-    // Récupérer le GameState pour accéder aux équipes
-    AWormGameState* WormGS = GetWorld()->GetGameState<AWormGameState>();
-    if (!WormGS) return;
-    
-    // S'assurer qu'on a un controleur
-    AController* MyController = GetController();
-    if (!MyController) return;
-    
-    // Récupérer l'équipe du personnage actuel
-    TArray<AWormCharacter*> TeamMembers = WormGS->GetTeamMembers(TeamId);
-    
-    // Trouver notre index actuel dans l'équipe et le prochain index valide
-    int32 CurrentIndex = -1;
-    for (int32 i = 0; i < TeamMembers.Num(); i++)
-    {
-        if (TeamMembers[i] == this)
-        {
-            CurrentIndex = i;
-            break;
-        }
-    }
-    
-    if (CurrentIndex == -1) return;
-    
-    // Chercher le prochain personnage vivant dans l'équipe
-    int32 NextIndex = (CurrentIndex + 1) % TeamMembers.Num();
-    while (NextIndex != CurrentIndex)
-    {
-        AWormCharacter* NextChar = TeamMembers[NextIndex];
-        if (NextChar && NextChar->GetHealth() > 0)
-        {
-            // Transférer le statut "c'est mon tour"
-            SetIsMyTurn(false);
-            NextChar->SetIsMyTurn(true);
-            
-            // Transférer le contrôle
-            MyController->UnPossess();
-            MyController->Possess(NextChar);
-            
-            UE_LOG(LogTemp, Warning, TEXT("DEBUG: Switched from %s to %s within team %d"), 
-                *GetName(), *NextChar->GetName(), TeamId);
-            
-            return;
-        }
-        
-        NextIndex = (NextIndex + 1) % TeamMembers.Num();
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("DEBUG: No other valid team members found in team %d"), TeamId);
+  
 }
 
 void AWormCharacter::InitializeNameWidget()
@@ -1595,6 +1602,66 @@ void AWormCharacter::InitializeNameWidget()
             
             if (!NameIndicatorWidgetClass)
                 UE_LOG(LogTemp, Error, TEXT("NameIndicatorWidgetClass is not set for %s"), *GetName());
+        }
+    }
+}
+
+
+void AWormCharacter::HandleCharacterDeath()
+{
+    if (!HasAuthority())
+    {
+        return; // Only run on server
+    }
+
+    // Don't process if already handled
+    if (IsDead() && GetCapsuleComponent()->GetCollisionEnabled() == ECollisionEnabled::NoCollision)
+    {
+        return;
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("Character %s died - handling death state"), *GetName());
+
+    // Multicast to ensure visual state is consistent on all clients
+    Multicast_ProcessDeath();
+}
+void AWormCharacter::Multicast_ProcessDeath_Implementation()
+{
+    // Stop all movement and animations
+    GetCharacterMovement()->DisableMovement();
+    GetCharacterMovement()->StopMovementImmediately();
+    
+    // Disable collision to prevent further damage
+    GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    
+    // If not possessed, we can adjust visibility (keep visible for possessed characters)
+    if (!IsPlayerControlled())
+    {
+        // Make semi-transparent to show it's dead
+        GetMesh()->SetRenderCustomDepth(true);
+        GetMesh()->SetCustomDepthStencilValue(2); // Use a value for "dead" state
+        
+        // You could also add a death animation/pose here
+        if (DeathMontage)
+        {
+            PlayAnimMontage(DeathMontage);
+        }
+    }
+    
+    // Disable weapon if present
+    if (CurrentWeapon)
+    {
+        CurrentWeapon->SetActorEnableCollision(false);
+    }
+    
+    // End turn if this was the active character
+    if (bIsMyTurn)
+    {
+        AWormGameMode* GameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(GetWorld()));
+        if (GameMode)
+        {
+            FTimerHandle EndTurnHandle;
+            GetWorldTimerManager().SetTimer(EndTurnHandle, GameMode, &AWormGameMode::EndCurrentTurn, 1.0f, false);
         }
     }
 }
