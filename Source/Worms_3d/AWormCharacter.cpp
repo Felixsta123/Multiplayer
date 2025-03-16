@@ -17,6 +17,7 @@
 #include "WeaponWheelWidget.h"
 #include "EnvironmentalEventsManager.h"
 #include "WormGameState.h"
+#include "GuidedMissileWeapon.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
 
@@ -101,6 +102,8 @@ void AWormCharacter::BeginPlay()
 {
     Super::BeginPlay();
 
+    bIsGuidingMissile = false;
+    
     // Debug
     UE_LOG(LogTemp, Warning, TEXT("Available weapons count: %d"), AvailableWeapons.Num());
     for (auto Weapon : AvailableWeapons)
@@ -285,6 +288,8 @@ void AWormCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
             EnhancedInputComponent->BindAction(AimAction, ETriggerEvent::Started, this, &AWormCharacter::OnAimActionStarted);
             EnhancedInputComponent->BindAction(AimAction, ETriggerEvent::Completed, this, &AWormCharacter::OnAimActionEnded);
         }
+        if (AbortMissileAction)
+            EnhancedInputComponent->BindAction(AbortMissileAction, ETriggerEvent::Triggered, this, &AWormCharacter::OnAbortMissileAction);
         // Binding for toggling weapon wheel
         if (ToggleWeaponWheelAction)
             EnhancedInputComponent->BindAction(ToggleWeaponWheelAction, ETriggerEvent::Started, this, &AWormCharacter::OnToggleWeaponWheelAction);
@@ -364,13 +369,64 @@ void AWormCharacter::ZoomCamera(float Amount)
     }
 }
 
+// void AWormCharacter::OnLookAction(const FInputActionValue& Value)
+// {
+//     FVector2D LookAxisVector = Value.Get<FVector2D>();
+//
+//     if (bIsGuidingMissile && CurrentWeapon)
+//     {
+//         // Check if current weapon is a guided missile weapon
+//         AGuidedMissileWeapon* MissileWeapon = Cast<AGuidedMissileWeapon>(CurrentWeapon);
+//         if (MissileWeapon)
+//         {
+//             // Pass input to missile
+//             MissileWeapon->ProcessMissileMovementInput(LookAxisVector.X, -LookAxisVector.Y);
+//             return;
+//         }
+//     }
+//
+//     // Handle normal character looking if not controlling a missile
+//     if (Controller != nullptr)
+//     {
+//         // Add yaw and pitch input to controller
+//         AddControllerYawInput(LookAxisVector.X);
+//         AddControllerPitchInput(LookAxisVector.Y);
+//     }
+// }
+
 void AWormCharacter::OnLookAction(const FInputActionValue& Value)
 {
     FVector2D LookAxisVector = Value.Get<FVector2D>();
 
+    // Log input for debugging
+    UE_LOG(LogTemp, Verbose, TEXT("Look input: X=%.2f, Y=%.2f, bIsGuidingMissile=%s"), 
+        LookAxisVector.X, LookAxisVector.Y, 
+        bIsGuidingMissile ? TEXT("true") : TEXT("false"));
+
+    if (bIsGuidingMissile && CurrentWeapon)
+    {
+        // Try to cast to missile weapon
+        AGuidedMissileWeapon* MissileWeapon = Cast<AGuidedMissileWeapon>(CurrentWeapon);
+        if (MissileWeapon)
+        {
+            // Use raw input values for missile control - no need to negate Y
+            UE_LOG(LogTemp, Verbose, TEXT("Sending missile input: Yaw=%.2f, Pitch=%.2f"), 
+                LookAxisVector.X, LookAxisVector.Y);
+                
+            MissileWeapon->ProcessMissileMovementInput(LookAxisVector.X, LookAxisVector.Y);
+            return;
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Expected GuidedMissileWeapon but got %s"), 
+                CurrentWeapon ? *CurrentWeapon->GetClass()->GetName() : TEXT("NULL"));
+        }
+    }
+
+    // Handle normal character looking if not controlling a missile
     if (Controller != nullptr)
     {
-        // Add yaw and pitch input to the controller
+        // Add yaw and pitch input to controller
         AddControllerYawInput(LookAxisVector.X);
         AddControllerPitchInput(LookAxisVector.Y);
     }
@@ -408,6 +464,38 @@ void AWormCharacter::OnPrevWeaponAction(const FInputActionValue& Value)
 void AWormCharacter::OnEndTurnAction(const FInputActionValue& Value)
 {
     EndTurn();
+}
+
+
+void AWormCharacter::HandleMissileControl()
+{
+    // Previous missile control state
+    bool bWasGuidingMissile = bIsGuidingMissile;
+    
+    // Check if weapon is a missile weapon
+    AGuidedMissileWeapon* MissileWeapon = Cast<AGuidedMissileWeapon>(CurrentWeapon);
+    if (MissileWeapon)
+    {
+        // Update guided missile state
+        bIsGuidingMissile = MissileWeapon->IsGuidingMissile();
+        
+        // Log state change for debugging
+        if (bIsGuidingMissile != bWasGuidingMissile)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Missile control state changed: %s -> %s"), 
+                bWasGuidingMissile ? TEXT("Guiding") : TEXT("Not Guiding"),
+                bIsGuidingMissile ? TEXT("Guiding") : TEXT("Not Guiding"));
+        }
+    }
+    else
+    {
+        // Not a missile weapon
+        if (bIsGuidingMissile)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("No longer using a missile weapon"));
+            bIsGuidingMissile = false;
+        }
+    }
 }
 
 void AWormCharacter::Tick(float DeltaTime)
@@ -449,6 +537,7 @@ void AWormCharacter::Tick(float DeltaTime)
     
     // Limiter le mouvement quand ce n'est pas le tour du personnage
     LimitMovementWhenNotMyTurn();
+    HandleMissileControl();
 }
 
 // Optionnel: Ajouter une fonction helper pour vérifier si une rotation est dans les limites
@@ -1673,3 +1762,16 @@ void AWormCharacter::OnToggleWeaponWheelAction(const FInputActionValue& Value)
     ToggleWeaponWheel();
 }
 
+void AWormCharacter::OnAbortMissileAction(const FInputActionValue& Value)
+{
+    if (bIsGuidingMissile && CurrentWeapon)
+    {
+        // Check if current weapon is a guided missile weapon
+        AGuidedMissileWeapon* MissileWeapon = Cast<AGuidedMissileWeapon>(CurrentWeapon);
+        if (MissileWeapon)
+        {
+            MissileWeapon->AbortGuidance();
+            bIsGuidingMissile = false;
+        }
+    }
+}

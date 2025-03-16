@@ -20,6 +20,11 @@ public:
     AWormCharacter();
 
     int32 DiagnosticCount = 0;
+
+    
+    // Flag to track if we're currently guiding a missile
+    UPROPERTY(BlueprintReadOnly, Category="Weapons")
+    bool bIsGuidingMissile;
     
     // === COMPOSANTS DE CAMÉRA ===
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -350,4 +355,16 @@ protected:
     void UpdateWeaponRotation();
     bool IsRotationWithinLimits(const FRotator& TestRotation) const;
     void UpdateMovementPoints();
+
+    // Input action for aborting missile guidance
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input")
+    class UInputAction* AbortMissileAction;
+
+    // Handler for the abort missile action
+    void OnAbortMissileAction(const FInputActionValue& Value);
+
+    // Override the existing look actions to also control missiles
+    // We'll reuse the existing look actions for missile control
+    void HandleMissileControl();
+
 };

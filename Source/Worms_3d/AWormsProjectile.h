@@ -24,6 +24,10 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     class USphereComponent* CollisionComp;
     FTimerHandle TrailTimerHandle;
+
+    // Fonction pour l'explosion
+    UFUNCTION(BlueprintCallable)
+    void Explode();
     
     // Rayon d'explosion
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Projectile")
@@ -43,6 +47,9 @@ public:
     UFUNCTION()
     void DrawDebugTrail();
 protected:
+
+    static TArray<AWormProjectile*> ActiveProjectiles;
+    
     UPROPERTY()
     TArray<FVector> TrailPositions;
 
@@ -72,8 +79,6 @@ protected:
     // Mesh du projectile
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     UStaticMeshComponent* ProjectileMesh;
-
-    static TArray<AWormProjectile*> ActiveProjectiles;
     
     // Délai avant explosion auto
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Projectile")
@@ -89,13 +94,9 @@ protected:
     
     // Callback quand le projectile touche quelque chose
     UFUNCTION()
-    void OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, 
+    virtual void OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, 
                FVector NormalImpulse, const FHitResult& Hit);
     void Multicast_SpawnDestructionField_Implementation(FVector Location);
-
-    // Fonction pour l'explosion
-    UFUNCTION(BlueprintCallable)
-    void Explode();
     
     // Timer pour l'explosion auto
     FTimerHandle DetonationTimerHandle;
@@ -118,7 +119,7 @@ protected:
     
     // Fonction pour activer les collisions après un délai
     UFUNCTION()
-    void EnableCollisions();
+    virtual void EnableCollisions();
     
     // Fonction pour configurer les acteurs à ignorer
     void SetupIgnoredActors();
