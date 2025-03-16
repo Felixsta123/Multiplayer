@@ -1,6 +1,5 @@
 #include "WormPlayerController.h"
 #include "Kismet/GameplayStatics.h"
-#include "UWormGameUI.h"
 #include "WormGameMode.h"
 #include "WormGameState.h"
 #include "Worms_3d/Misc/PlayerSaveGame.h"
@@ -91,16 +90,7 @@ void AWormPlayerController::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
     
-    // Periodic check to ensure UI delegate bindings are valid
-    if (IsLocalController() && GameUIWidget)
-    {
-        // This requires adding a method to check delegate bindings
-        UWormGameUI* WormUI = Cast<UWormGameUI>(GameUIWidget);
-        if (WormUI)
-        {
-            WormUI->EnsureDelegateBinding();
-        }
-    }
+
 }
 
 void AWormPlayerController::CheckAndCreateUI()
