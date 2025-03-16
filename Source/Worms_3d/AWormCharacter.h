@@ -72,19 +72,18 @@ public:
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI")
     TSubclassOf<UWNameIndicatorWidget> NameIndicatorWidgetClass;
-    
+        
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "UI")
-    class UWNameIndicatorWidget* NameIndicatorWidget;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "UI", Replicated)
     class UWidgetComponent* NameWidgetComponent;
 
-    UFUNCTION( Category = "UI")
-    void OnRep_InGameName();
-
-    UPROPERTY(ReplicatedUsing = OnRep_InGameName, BlueprintReadWrite, Category = "Identification")
+    UPROPERTY( BlueprintReadWrite, Category = "Identification")
     FString InGameName;
 
+    UPROPERTY(BlueprintReadWrite, Category = "Team")
+    int32 TeamId = -1;
+
+    UFUNCTION(BlueprintCallable, Category = "UI")
+    void InitializeNameWidget();
     // Animation parameter
     UPROPERTY(BlueprintReadOnly, Category = "Animation")
     float AnimationSpeed;
@@ -95,9 +94,8 @@ public:
     // Fonction pour déclencher l'animation de dégâts
     UFUNCTION(BlueprintCallable, Category = "Animation")
     void PlayHitReaction();
+    
     void OnSwitchTeamMemberAction(const FInputActionValue& Value);
-    void InitializeNameWidget();
-    void UpdateNameWidget();
     // === FONCTIONS DE JEU PRINCIPALES ===
     
     // Armes
@@ -184,9 +182,7 @@ public:
     UPROPERTY()
     int32 DiagnosticCount;
 
-    UPROPERTY(Replicated, BlueprintReadWrite, Category = "Team")
-    int32 TeamId = -1;
-
+    
     UPROPERTY(Replicated, BlueprintReadWrite, Category = "Team")
     int32 CharacterIndexInTeam;
     

@@ -56,7 +56,15 @@ AWormCharacter::AWormCharacter()
     // Configuration du système de caméra
     // S'assurer que la physique est activée dès le début
     GetCharacterMovement()->UpdateComponentVelocity();
-  
+    NameWidgetComponent = CreateDefaultSubobject<UWidgetComponent>(TEXT("NameWidgetComponent"));
+    if (NameWidgetComponent)
+    {
+        NameWidgetComponent->SetupAttachment(RootComponent);
+        NameWidgetComponent->SetRelativeLocation(FVector(0, 0, 120.0f)); // Ajuster la hauteur selon les besoins
+        NameWidgetComponent->SetWidgetSpace(EWidgetSpace::Screen);
+        NameWidgetComponent->SetDrawSize(FVector2D(150.0f, 50.0f));
+        // Le NameIndicatorWidgetClass sera défini via une propriété UPROPERTY dans l'éditeur
+    }
     InitializeCameraSystem();
 }
 
@@ -120,6 +128,17 @@ void AWormCharacter::BeginPlay()
         CameraBoom->TargetArmLength = CurrentCameraDistance;
     }
 
+    // Diagnostic d'armes pour client
+    SetupWeaponDiagnostic();
+    FTimerHandle NameWidgetTimerHandle;
+    GetWorld()->GetTimerManager().SetTimer(
+        NameWidgetTimerHandle,
+        [this]() {
+            InitializeNameWidget();
+        },
+        0.5f,
+        false
+    );
     // Configuration de l'input pour le joueur local
     if (IsLocallyControlled())
     {
@@ -129,8 +148,7 @@ void AWormCharacter::BeginPlay()
             SetupEnhancedInput(PC);
         }
         
-        // Diagnostic d'armes pour client
-        SetupWeaponDiagnostic();
+
     }
     if (!HasAuthority() && IsLocallyControlled())
     {
@@ -491,9 +509,6 @@ void AWormCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
     DOREPLIFETIME(AWormCharacter, MovementPoints);
     DOREPLIFETIME(AWormCharacter, AvailableWeapons);
     DOREPLIFETIME(AWormCharacter, CharacterIndexInTeam);
-    DOREPLIFETIME(AWormCharacter, TeamId);
-    DOREPLIFETIME(AWormCharacter, InGameName);
-    DOREPLIFETIME(AWormCharacter, NameWidgetComponent);
 }
 
 // Fonctions de mouvement legacy
@@ -1544,87 +1559,57 @@ void AWormCharacter::OnSwitchTeamMemberAction(const FInputActionValue& Value)
 
 void AWormCharacter::InitializeNameWidget()
 {
-    if (!HasAuthority()) return;  // Exécute uniquement sur le serveur
-
-    // Skip if already initialized
-    if (NameWidgetComponent && NameWidgetComponent->GetWidget())
-        return;
-    
-    // Create widget component if it doesn't exist
-    if (!NameWidgetComponent)
+    // S'assurer que cette logique est exécutée seulement côté client
+    if (true)
     {
-        NameWidgetComponent = NewObject<UWidgetComponent>(this, TEXT("NameIndicatorWidget"));
-        NameWidgetComponent->SetupAttachment(GetRootComponent());
-        NameWidgetComponent->RegisterComponent();
-        
-        // Configure widget component
-        NameWidgetComponent->SetWidgetSpace(EWidgetSpace::Screen);
-        NameWidgetComponent->SetDrawSize(FVector2D(200.0f, 50.0f));
-        
-        // Position above head - adjust offsets as needed for your character mesh
-        NameWidgetComponent->SetRelativeLocation(FVector(0.0f, 0.0f, 120.0f));
-        
-        // Set widget class
-        NameWidgetComponent->SetWidgetClass(NameIndicatorWidgetClass);
-        
-        UE_LOG(LogTemp, Log, TEXT("Created name widget component for %s"), *GetName());
-    }
-    
-    // Initialize the widget with the current name
-    if (NameWidgetComponent && !InGameName.IsEmpty())
-    {
-        UWNameIndicatorWidget* NameWidget = Cast<UWNameIndicatorWidget>(NameWidgetComponent->GetWidget());
-        if (NameWidget)
+        if (!NameWidgetComponent)
         {
-            NameWidget->SetNameInfo(TeamId, InGameName);
-            UE_LOG(LogTemp, Log, TEXT("Name widget initialized for %s with name: %s"), *GetName(), *InGameName);
+            // Créer le composant s'il n'existe pas
+            NameWidgetComponent = NewObject<UWidgetComponent>(this, TEXT("NameWidgetComponent"));
+            NameWidgetComponent->SetupAttachment(GetRootComponent());
+            NameWidgetComponent->RegisterComponent();
+            
+            // Configurer la position et l'orientation
+            NameWidgetComponent->SetRelativeLocation(FVector(0, 0, 120.0f)); // Positionner au-dessus de la tête
+            NameWidgetComponent->SetWidgetSpace(EWidgetSpace::Screen); // Toujours face à la caméra
+            
+            UE_LOG(LogTemp, Warning, TEXT("Created NameWidgetComponent for %s"), *GetName());
+        }
+        
+        // Configurer la classe de widget
+        if (NameWidgetComponent && NameIndicatorWidgetClass)
+        {
+            NameWidgetComponent->SetWidgetClass(NameIndicatorWidgetClass);
+            NameWidgetComponent->SetDrawSize(FVector2D(150.0f, 50.0f));
+            
+            // Mettre à jour le widget avec les informations du personnage
+            UWNameIndicatorWidget* NameWidget = Cast<UWNameIndicatorWidget>(NameWidgetComponent->GetUserWidgetObject());
+            if (!NameWidget)
+            {
+                // Créer l'instance de widget si elle n'existe pas
+                NameWidgetComponent->InitWidget();
+                NameWidget = Cast<UWNameIndicatorWidget>(NameWidgetComponent->GetUserWidgetObject());
+            }
+            
+            if (NameWidget)
+            {
+                // Définir les informations à afficher
+                NameWidget->SetNameInfo(TeamId, InGameName.IsEmpty() ? GetName() : InGameName);
+                UE_LOG(LogTemp, Warning, TEXT("Updated name widget for %s with TeamId %d and Name %s"), 
+                    *GetName(), TeamId, *InGameName);
+            }
+            else
+            {
+                UE_LOG(LogTemp, Error, TEXT("Failed to create or cast to UWNameIndicatorWidget for %s"), *GetName());
+            }
         }
         else
         {
-            UE_LOG(LogTemp, Warning, TEXT("Failed to create name widget for %s"), *GetName());
+            if (!NameWidgetComponent)
+                UE_LOG(LogTemp, Error, TEXT("NameWidgetComponent is null for %s"), *GetName());
+            
+            if (!NameIndicatorWidgetClass)
+                UE_LOG(LogTemp, Error, TEXT("NameIndicatorWidgetClass is not set for %s"), *GetName());
         }
-    }
-}
-
-
-void AWormCharacter::UpdateNameWidget()
-{
-    
-    // Check if the name is valid
-    if (InGameName.IsEmpty())
-    {
-        // Set a default name if empty
-        UE_LOG(LogTemp, Warning, TEXT("UpdateNameWidget: Empty name for %s"), *GetName());
-        InGameName = FString::Printf(TEXT("Worm_%d_%d"), TeamId, CharacterIndexInTeam);
-    }
-    
-    // Debug log
-    UE_LOG(LogTemp, Log, TEXT("UpdateNameWidget for %s with name: %s"), *GetName(), *InGameName);
-
-    // Update the name widget if available
-    if (NameIndicatorWidget)
-    {
-        NameIndicatorWidget->SetNameInfo(TeamId, InGameName);
-    }
-    
-}
-void AWormCharacter::OnRep_InGameName()
-{
-    UE_LOG(LogTemp, Log, TEXT("OnRep_InGameName: %s for %s"), *InGameName, *GetName());
-    
-    // If the name is updated after the widget is created, update the widget
-    if (NameWidgetComponent)
-    {
-        UWNameIndicatorWidget* NameWidget = Cast<UWNameIndicatorWidget>(NameWidgetComponent->GetWidget());
-        if (NameWidget)
-        {
-            NameWidget->SetNameInfo(TeamId, InGameName);
-            UE_LOG(LogTemp, Log, TEXT("Name widget updated for %s with name: %s"), *GetName(), *InGameName);
-        }
-    }
-    else
-    {
-        // If widget hasn't been created yet, initialize it
-        InitializeNameWidget();
     }
 }
