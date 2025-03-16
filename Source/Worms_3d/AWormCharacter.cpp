@@ -757,50 +757,17 @@ void AWormCharacter::ApplyDamageToWorm(float DamageAmount, FVector ImpactDirecti
         UE_LOG(LogTemp, Warning, TEXT("Character %s died!"), *GetName());
     
         // Update player alive status in game state
-        AWormGameState* GameState = Cast<AWormGameState>(UGameplayStatics::GetGameState(this));
-        if (GameState)
+        if (Health <= 0)
         {
-            // Trouver notre index
-            int32 MyIndex = -1;
-        
-            AController* MyController = GetController();
-            if (MyController)
+            UE_LOG(LogTemp, Warning, TEXT("Character %s died! (Team %d, Index %d)"), 
+                *GetName(), TeamId, CharacterIndexInTeam);
+
+            // Récupérer le GameState pour vérifier la condition de fin de partie
+            AWormGameState* GameState = Cast<AWormGameState>(UGameplayStatics::GetGameState(this));
+            if (GameState)
             {
-                // Chercher cet index parmi tous les contrôleurs
-                for (int32 i = 0; i < GameState->PlayerNames.Num(); i++)
-                {
-                    if (MyController == UGameplayStatics::GetPlayerController(GetWorld(), i))
-                    {
-                        MyIndex = i;
-                        break;
-                    }
-                }
-            
-                // Si on n'a pas trouvé par le contrôleur, essayer avec l'index du joueur
-                if (MyIndex == -1 && GameState->PlayerNames.Num() > 0)
-                {
-                    // Solution de secours : utiliser index 0 si c'est le joueur local, 1 sinon
-                    MyIndex = IsLocallyControlled() ? 0 : 1;
-                    UE_LOG(LogTemp, Warning, TEXT("Using fallback index %d for %s"), MyIndex, *GetName());
-                }
-            
-                // Si on a trouvé un index valide, marquer le joueur comme mort
-                if (MyIndex != INDEX_NONE && GameState->PlayerIsAlive.IsValidIndex(MyIndex))
-                {
-                    UE_LOG(LogTemp, Warning, TEXT("Setting player at index %d as not alive"), MyIndex);
-                    GameState->PlayerIsAlive[MyIndex] = false;
-                
-                    // Vérifier la condition de fin de partie
-                    GameState->CheckGameOverCondition();
-                }
-                else
-                {
-                    UE_LOG(LogTemp, Error, TEXT("Invalid player index %d"), MyIndex);
-                }
-            }
-            else
-            {
-                UE_LOG(LogTemp, Error, TEXT("Character %s has no controller!"), *GetName());
+                // Vérifier directement la condition de fin de partie
+                GameState->CheckGameOverCondition();
             }
         }
     }

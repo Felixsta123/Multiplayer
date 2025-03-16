@@ -171,9 +171,7 @@ protected:
     // Function called when time expires
     UFUNCTION()
     void OnTurnTimeExpired();
+    bool CheckGameOverCondition();
     
-    // Function to check game end condition
-    UFUNCTION(BlueprintCallable, Category = "Game")
-    bool CheckGameEndCondition();
     
 };

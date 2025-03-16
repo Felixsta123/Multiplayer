@@ -214,57 +214,56 @@ void AWormGameState::CheckGameOverCondition()
 {
     if (HasAuthority() && !bGameOver)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Checking game over condition"));
+        UE_LOG(LogTemp, Warning, TEXT("Vérification de la condition de fin de partie"));
         
-        // Méthode directe: Compter le nombre de personnages vivants dans le monde
-        TArray<AActor*> AllWormChars;
-        UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormCharacter::StaticClass(), AllWormChars);
+        // Compter les équipes actives
+        TSet<int32> ActiveTeams;
         
-        int32 AliveCount = 0;
-        AWormCharacter* LastAliveChar = nullptr;
-        
-        for (AActor* Actor : AllWormChars)
+        // Parcourir toutes les équipes
+        for (int32 i = 0; i < Teams.Num(); i++)
         {
-            AWormCharacter* Character = Cast<AWormCharacter>(Actor);
-            if (Character && Character->GetHealth() > 0)
-            {
-                AliveCount++;
-                LastAliveChar = Character;
-                UE_LOG(LogTemp, Warning, TEXT("Character %s is alive with health %.1f"), 
-                   *Character->GetName(), Character->GetHealth());
-            }
-            else if (Character)
-            {
-                UE_LOG(LogTemp, Warning, TEXT("Character %s is dead with health %.1f"), 
-                   *Character->GetName(), Character->GetHealth());
-            }
-        }
-        
-        UE_LOG(LogTemp, Warning, TEXT("Found %d alive characters"), AliveCount);
-        
-        // Game over si un seul joueur est encore vivant
-        if (AliveCount <= 1 && LastAliveChar)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Game over! Winner is %s"), *LastAliveChar->GetName());
+            bool TeamHasAliveMembers = false;
             
-            // Trouver le nom du joueur gagnant
-             WinnerName = LastAliveChar->GetName();
-            AController* WinnerController = LastAliveChar->GetController();
-            
-            if (WinnerController)
+            // Vérifier si cette équipe a des membres vivants
+            for (AWormCharacter* Character : Teams[i].TeamMembers)
             {
-                // Trouver l'index du contrôleur pour obtenir le nom correct
-                for (int32 i = 0; i < PlayerNames.Num(); i++)
+                if (Character && Character->GetHealth() > 0)
                 {
-                    if (WinnerController == UGameplayStatics::GetPlayerController(GetWorld(), i))
-                    {
-                        WinnerName = PlayerNames[i];
-                        break;
-                    }
+                    TeamHasAliveMembers = true;
+                    UE_LOG(LogTemp, Warning, TEXT("Équipe %d: Personnage %s est vivant avec %.1f PV"), 
+                        i, *Character->GetName(), Character->GetHealth());
+                    break;
                 }
             }
             
+            if (TeamHasAliveMembers)
+            {
+                ActiveTeams.Add(i);
+            }
+            else
+            {
+                UE_LOG(LogTemp, Warning, TEXT("Équipe %d: Tous les personnages sont éliminés"), i);
+            }
+        }
+        
+        UE_LOG(LogTemp, Warning, TEXT("Nombre d'équipes actives: %d"), ActiveTeams.Num());
+        
+        // Fin de partie s'il ne reste qu'une seule équipe
+        if (ActiveTeams.Num() == 1)
+        {
+            int32 WinningTeamId = *ActiveTeams.CreateIterator();
+            WinnerName = Teams[WinningTeamId].TeamName;
+            
+            UE_LOG(LogTemp, Warning, TEXT("Fin de partie! Équipe gagnante: %s (ID: %d)"), 
+                *WinnerName, WinningTeamId);
+            
             TriggerGameOver(WinnerName);
+        }
+        else if (ActiveTeams.Num() == 0)
+        {
+            // Aucune équipe active - match nul ou erreur
+            UE_LOG(LogTemp, Warning, TEXT("Aucune équipe active - Match nul"));
+            TriggerGameOver(TEXT("Match nul"));
         }
     }
 }

@@ -220,7 +220,7 @@ void AWormGameMode::StartNextTurn()
 
     // If no valid character is found, end the game
     if (!foundValidCharacter) {
-        CheckGameEndCondition();
+        CheckGameOverCondition();
     }
     for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
     {
@@ -314,34 +314,78 @@ void AWormGameMode::OnTurnTimeExpired()
     EndCurrentTurn();
 }
 
-bool AWormGameMode::CheckGameEndCondition()
+bool AWormGameMode::CheckGameOverCondition()
 {
-    // Count active teams
+    // Obtenir le GameState pour accéder aux équipes
+    AWormGameState* WormGS = GetGameState<AWormGameState>();
+    if (!WormGS) return false;
+
+    // Compter les équipes qui ont encore des membres vivants
     TSet<int32> ActiveTeams;
-    int32 AlivePlayerCount = 0;
+    int32 TotalAliveCharacters = 0;
     
-    for (AController* Controller : AllPlayerControllers)
+    // Parcourir toutes les équipes pour vérifier les personnages vivants
+    for (int32 i = 0; i < WormGS->Teams.Num(); i++)
     {
-        AWormCharacter* Character = GetWormCharacterFromController(Controller);
-        if (Character && Character->GetHealth() > 0)
+        const FTeamInfo& Team = WormGS->Teams[i];
+        bool TeamHasAliveMembers = false;
+        
+        // Vérifier si cette équipe a au moins un membre vivant
+        for (AWormCharacter* Character : Team.TeamMembers)
         {
-            AlivePlayerCount++;
-            
-            // If you have a team system, you can add:
-            // int32 TeamID = Character->GetTeamID();
-            // ActiveTeams.Add(TeamID);
+            if (Character && Character->GetHealth() > 0)
+            {
+                TeamHasAliveMembers = true;
+                TotalAliveCharacters++;
+                break;
+            }
+        }
+        
+        if (TeamHasAliveMembers)
+        {
+            ActiveTeams.Add(i);
         }
     }
     
-    // If only one player remains (or one team), the game is over
-    if (AlivePlayerCount <= 1)
+    UE_LOG(LogTemp, Warning, TEXT("CheckGameOverCondition: %d équipes actives, %d personnages vivants au total"),
+        ActiveTeams.Num(), TotalAliveCharacters);
+    
+    // La partie est terminée s'il ne reste qu'une seule équipe active ou aucune
+    if (ActiveTeams.Num() <= 1)
     {
-        // Handle game end
-        return true;
+        // Trouver l'équipe gagnante et déclencher la fin de partie
+        if (ActiveTeams.Num() == 1)
+        {
+            int32 WinningTeamId = *ActiveTeams.CreateIterator();
+            const FTeamInfo& WinningTeam = WormGS->Teams[WinningTeamId];
+            
+            // Trouver un personnage vivant de l'équipe gagnante pour obtenir le nom
+            for (AWormCharacter* Character : WinningTeam.TeamMembers)
+            {
+                if (Character && Character->GetHealth() > 0)
+                {
+                    FString WinnerName = WinningTeam.TeamName;
+                    UE_LOG(LogTemp, Warning, TEXT("Équipe gagnante: %s (ID: %d)"), 
+                        *WinnerName, WinningTeamId);
+                    
+                    // Déclencher la fin de partie avec le nom de l'équipe gagnante
+                    WormGS->TriggerGameOver(WinnerName);
+                    return true;
+                }
+            }
+        }
+        else
+        {
+            // Aucune équipe active - match nul ou erreur
+            UE_LOG(LogTemp, Warning, TEXT("Aucune équipe active - Match nul"));
+            WormGS->TriggerGameOver(TEXT("Match nul"));
+            return true;
+        }
     }
     
     return false;
 }
+
 
 void AWormGameMode::OnTurnStarted_Implementation(AController* ActiveController)
 {
