@@ -43,6 +43,10 @@ public:
     
     UPROPERTY(BlueprintReadOnly, Category = "Tutorial")
     UUserWidget* TutorialWidget;
+    // Character class specifically for tutorial
+    UPROPERTY(EditDefaultsOnly, Category = "Tutorial")
+    TSubclassOf<AWormCharacter> TutorialCharacterClass;
+
     
     // Tutorial methods
     UFUNCTION(BlueprintCallable, Category = "Tutorial")
@@ -81,17 +85,17 @@ protected:
     
     UPROPERTY(BlueprintReadOnly, Category = "Tutorial")
     bool bHasPlayerDestroyedTarget;
+    // In protected section:
+    UFUNCTION()
+    void OnTargetDestroyed();
     
-    // Tutorial buildings
     UPROPERTY(BlueprintReadOnly, Category = "Tutorial")
-    AImprovedVoxelBuilding* CorridorBuilding;
-    
-    UPROPERTY(BlueprintReadOnly, Category = "Tutorial")
-    AImprovedVoxelBuilding* TargetBuilding;
+    ATutorialTargetBuilding* TargetBuilding;
     
     // Set up player and dummy for tutorial
     void SetupCharacters();
-    
+    void InitializeTutorial();
+
     // Initialize water system for tutorial
     void SetupWaterSystem();
     

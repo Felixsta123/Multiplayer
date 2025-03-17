@@ -30,6 +30,7 @@ AWormTutorialGameMode::AWormTutorialGameMode()
     bHasPlayerJumped = false;
     bHasPlayerFired = false;
     bHasPlayerDestroyedTarget = false;
+    bUseGameInitManager = false;
     CurrentStageIndex = 0;
 }
 
@@ -46,14 +47,14 @@ void AWormTutorialGameMode::BeginPlay()
     
     // Generate tutorial environment
     GenerateTutorialEnvironment();
-    
+        
     // Start tutorial
     FTimerHandle StartTutorialTimer;
     GetWorld()->GetTimerManager().SetTimer(
         StartTutorialTimer,
         this,
-        &AWormTutorialGameMode::StartTutorial,
-        2.0f,
+        &AWormTutorialGameMode::InitializeTutorial,
+        1.0f,
         false
     );
 }
@@ -62,58 +63,37 @@ void AWormTutorialGameMode::GenerateTutorialEnvironment()
 {
     UE_LOG(LogTemp, Warning, TEXT("Generating tutorial environment"));
     
-    // First clear any existing buildings
-    TArray<AActor*> ExistingBuildings;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AImprovedVoxelBuilding::StaticClass(), ExistingBuildings);
-    for (AActor* Building : ExistingBuildings)
-    {
-        Building->Destroy();
-    }
-    
     // Setup buildings
     SetupBuildings();
     
     // Setup water
     SetupWaterSystem();
-    
-    // Setup characters after environment is ready
-    SetupCharacters();
 }
-
 void AWormTutorialGameMode::SetupBuildings()
 {
     UE_LOG(LogTemp, Warning, TEXT("Setting up tutorial buildings"));
     
-    if (!TargetBuildingClass)
+    // Find pre-placed target building in the scene
+    TArray<AActor*> FoundTargets;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ATutorialTargetBuilding::StaticClass(), FoundTargets);
+    
+    if (FoundTargets.Num() > 0)
     {
-        UE_LOG(LogTemp, Error, TEXT("Building classes not defined in tutorial game mode!"));
-        return;
-    }
-    
-    // Spawn corridor building (main platform)
-    FActorSpawnParameters SpawnParams;
-    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
-    
-    // Main corridor/platform
-    // Target building (for shooting practice)
-    TargetBuilding = GetWorld()->SpawnActor<AImprovedVoxelBuilding>(
-        TargetBuildingClass,
-        FVector(600, 1500, 0), // Position to the side of the main corridor
-        FRotator::ZeroRotator,
-        SpawnParams
-    );
-    
-    if (TargetBuilding)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Tutorial target building created"));
+        // Use the first found target building
+        TargetBuilding = Cast<ATutorialTargetBuilding>(FoundTargets[0]);
         
-        // Configure building
-        TargetBuilding->GridSizeX = 3;
-        TargetBuilding->GridSizeY = 10;
-        TargetBuilding->GridSizeZ = 8;
-        TargetBuilding->VoxelSize = 100.0f;
-        TargetBuilding->BuildingType = EVoxelBuildingType::Standard;
-        TargetBuilding->GenerateBuilding();
+        if (TargetBuilding)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Found pre-placed tutorial target building: %s"), *TargetBuilding->GetName());
+            
+            // Connect to the destruction event
+            TargetBuilding->OnTargetDestroyed.AddDynamic(this, &AWormTutorialGameMode::OnTargetDestroyed);
+            UE_LOG(LogTemp, Warning, TEXT("Connected to target destruction event"));
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("No pre-placed tutorial target building found in scene!"));
     }
 }
 
@@ -211,19 +191,12 @@ void AWormTutorialGameMode::SetupCharacters()
     }
     
     // Spawn player character
-    FVector SpawnLocation = FVector(0, 0, 700); // Above the main corridor
-    if (CorridorBuilding)
-    {
-        // Spawn at the start of the corridor
-        SpawnLocation = CorridorBuilding->GetTopSpawnPoint() + FVector(-500, -2000, 200);
-    }
-    
     FActorSpawnParameters SpawnParams;
     SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
     
     PlayerCharacter = GetWorld()->SpawnActor<AWormCharacter>(
         CharacterClass,
-        SpawnLocation,
+        FVector(0, 0, 300), // Default spawn location
         FRotator::ZeroRotator,
         SpawnParams
     );
@@ -295,6 +268,74 @@ void AWormTutorialGameMode::SetupCharacters()
         
         // Don't add dummy to teams in GameState - it's just a prop
     }
+}
+
+void AWormTutorialGameMode::InitializeTutorial()
+{
+    // 1. Find player controller
+    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+    if (!PC)
+    {
+        UE_LOG(LogTemp, Error, TEXT("No PlayerController found for tutorial"));
+        return;
+    }
+
+    // 2. Check if controller already has a valid pawn
+    AWormCharacter* ExistingCharacter = Cast<AWormCharacter>(PC->GetPawn());
+    if (ExistingCharacter && ExistingCharacter->IsA(TutorialCharacterClass))
+    {
+        // Use existing character if valid
+        PlayerCharacter = ExistingCharacter;
+        UE_LOG(LogTemp, Warning, TEXT("Using existing character: %s"), *PlayerCharacter->GetName());
+    }
+    else
+    {
+        // Spawn new character if needed
+        FVector SpawnLocation = FVector(0, 0, 300); // Default spawn location
+        FRotator SpawnRotation = FRotator::ZeroRotator;
+        
+        // Use spawn point if available
+        AActor* StartSpot = FindPlayerStart(PC);
+        if (StartSpot)
+        {
+            SpawnLocation = StartSpot->GetActorLocation() + FVector(0, 0, 100);
+            SpawnRotation = StartSpot->GetActorRotation();
+        }
+        
+        // Spawn character
+        FActorSpawnParameters SpawnParams;
+        SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+        
+        PlayerCharacter = GetWorld()->SpawnActor<AWormCharacter>(
+            TutorialCharacterClass, 
+            SpawnLocation, 
+            SpawnRotation,
+            SpawnParams
+        );
+        
+        if (PlayerCharacter)
+        {
+            // Setup character
+            PlayerCharacter->Health = 100.0f;
+            PlayerCharacter->TeamId = 0;
+            PlayerCharacter->CharacterIndexInTeam = 0;
+            
+            // Possess character
+            PC->Possess(PlayerCharacter);
+            UE_LOG(LogTemp, Warning, TEXT("Spawned new character: %s"), *PlayerCharacter->GetName());
+        }
+    }
+    
+    // 3. Initialize weapons
+    if (PlayerCharacter && AvailableWeaponTypes.Num() > 0)
+    {
+        PlayerCharacter->SetIsMyTurn(true);
+        PlayerCharacter->SetAvailableWeapons(AvailableWeaponTypes);
+        UE_LOG(LogTemp, Warning, TEXT("Weapons initialized for character"));
+    }
+    
+    // 4. Start tutorial UI
+    StartTutorial();
 }
 
 void AWormTutorialGameMode::StartTutorial()
@@ -431,5 +472,16 @@ void AWormTutorialGameMode::OnPlayerFired()
     if (CurrentStageIndex == 2 && CheckStageObjective())
     {
         CompleteStage(2);
+    }
+}
+
+void AWormTutorialGameMode::OnTargetDestroyed()
+{
+    bHasPlayerDestroyedTarget = true;
+    UE_LOG(LogTemp, Warning, TEXT("Target building destroyed by player!"));
+    
+    if (CurrentStageIndex == 3 && CheckStageObjective())
+    {
+        CompleteStage(3);
     }
 }
