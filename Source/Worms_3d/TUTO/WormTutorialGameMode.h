@@ -49,15 +49,21 @@ public:
     // Character class specifically for tutorial
     UPROPERTY(EditDefaultsOnly, Category = "Tutorial")
     TSubclassOf<AWormCharacter> TutorialCharacterClass;
+    
     bool bWaterSystemInitialized;
-
-
+    FVector RespawnLocation;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Tutorial")
+    FName NextLevelName = FName("MainMenuMap");
     // Tutorial methods
     UFUNCTION(BlueprintCallable, Category = "Tutorial")
     void StartTutorial();
     
     UFUNCTION(BlueprintCallable, Category = "Tutorial")
     void AdvanceToNextStage();
+    
+    UFUNCTION(BlueprintCallable, Category = "Tutorial")
+    void CheckStageCompletion();
+    
     void TriggerWaterRise();
     void CompleteTutorial();
     
@@ -67,6 +73,7 @@ public:
     // Override turn management to not switch characters in tutorial
     virtual void StartNextTurn() override;
     virtual void EndCurrentTurn() override;
+    
     // Check if player has completed current stage objective
     UFUNCTION()
     void OnWaterObserved();
@@ -82,6 +89,11 @@ public:
 
     // Fonction pour configurer la zone d'eau
     void SetupWaterTriggerZone();
+    
+    // Setup tutorial target building
+    void SetupTargetBuilding();
+    UFUNCTION()
+    void RespawnPlayerFromWater();
 protected:
     // Track player progress
     UPROPERTY(BlueprintReadOnly, Category = "Tutorial")
@@ -95,6 +107,7 @@ protected:
     
     UPROPERTY(BlueprintReadOnly, Category = "Tutorial")
     bool bHasPlayerDestroyedTarget;
+    
     // In protected section:
     UFUNCTION()
     void OnTargetDestroyed();
@@ -106,8 +119,8 @@ protected:
 
     // Initialize water system for tutorial
     void SetupWaterSystem();
+    
     void InitializeWaterSystem();
-
 
     // Handle player inputs for tutorial progress tracking
     UFUNCTION()
@@ -118,4 +131,6 @@ protected:
     
     UFUNCTION()
     void OnPlayerFired();
+
+
 };

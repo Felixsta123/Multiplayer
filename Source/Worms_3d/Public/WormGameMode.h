@@ -82,7 +82,7 @@ public:
      AActor* WaterSystemManager;
     
      UFUNCTION(BlueprintCallable, Category = "Water System")
-     void InitializeWaterSystem();
+     virtual void InitializeWaterSystem();
     
     // Available weapon types for distribution to players
     UPROPERTY(EditDefaultsOnly, Category = "Weapons")

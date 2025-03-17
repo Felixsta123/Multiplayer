@@ -170,7 +170,15 @@ void AWormTutorialGameMode::InitializeTutorial()
         UE_LOG(LogTemp, Warning, TEXT("Connected tutorial character events for progression tracking"));
     }
     SetupWaterSystem();
-
+    FTimerHandle CheckInitialProgressTimer;
+    GetWorld()->GetTimerManager().SetTimer(
+        CheckInitialProgressTimer,
+        [this]() {
+            CheckStageCompletion();
+        },
+        0.5f,  // Short delay to ensure all data is properly initialized
+        false
+    );
     // 5. Start tutorial UI
     StartTutorial();
 }
@@ -181,11 +189,7 @@ void AWormTutorialGameMode::StartTutorial()
     
     // Reset progress state
     CurrentStageIndex = 0;
-    bHasPlayerMoved = false;
-    bHasPlayerJumped = false;
-    bHasPlayerFired = false;
-    bHasPlayerDestroyedTarget = false;
-    
+
     // Create tutorial UI
     if (TutorialWidgetClass)
     {
@@ -237,6 +241,15 @@ void AWormTutorialGameMode::StartTutorial()
     {
         PlayerCharacter->SetIsMyTurn(true);
     }
+    FTimerHandle InitialCheckTimer;
+    GetWorld()->GetTimerManager().SetTimer(
+        InitialCheckTimer,
+        [this]() {
+            CheckStageCompletion();
+        },
+        0.2f,  // Short delay
+        false
+    );
 }
 
 void AWormTutorialGameMode::OnPlayerMoved()
@@ -244,54 +257,45 @@ void AWormTutorialGameMode::OnPlayerMoved()
     UE_LOG(LogTemp, Warning, TEXT("Player moved detected!"));
     bHasPlayerMoved = true;
     
-    if (CurrentStageIndex == 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Completing movement tutorial stage"));
-        AdvanceToNextStage();
-    }
+    // Check if this completes the current stage
+    CheckStageCompletion();
 }
+
+
 void AWormTutorialGameMode::OnTargetDestroyed()
 {
     UE_LOG(LogTemp, Warning, TEXT("Tutorial target building destroyed!"));
     bHasPlayerDestroyedTarget = true;
     
-    if (CurrentStageIndex == 3) // Target destruction stage
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Completing target destruction tutorial stage"));
-        AdvanceToNextStage();
-    }
+    // Check if this completes the current stage
+    CheckStageCompletion();
 }
+
 void AWormTutorialGameMode::OnPlayerJumped()
 {
     UE_LOG(LogTemp, Warning, TEXT("Player jumped detected!"));
     bHasPlayerJumped = true;
     
-    if (CurrentStageIndex == 1)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Completing jump tutorial stage"));
-        AdvanceToNextStage();
-    }
+    // Check if this completes the current stage
+    CheckStageCompletion();
 }
-
 void AWormTutorialGameMode::OnPlayerFired()
 {
     UE_LOG(LogTemp, Warning, TEXT("Player fired weapon detected!"));
     bHasPlayerFired = true;
     
-    if (CurrentStageIndex == 2)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Completing weapon firing tutorial stage"));
-        AdvanceToNextStage();
-    }
+    // Check if this completes the current stage
+    CheckStageCompletion();
 }
 
 void AWormTutorialGameMode::AdvanceToNextStage()
 {
+    UE_LOG(LogTemp, Warning, TEXT("Advancing to next tutorial stage size=%d"), TutorialStages.Num());
     if (CurrentStageIndex < TutorialStages.Num() - 1)
     {
         CurrentStageIndex++;
         OnStageCompleted(CurrentStageIndex);
-        
+        UE_LOG(LogTemp, Warning, TEXT("Advanced to tutorial stage %d: %s"), CurrentStageIndex, *TutorialStages[CurrentStageIndex]);
         // Special stage handling
         if (CurrentStageIndex == 4) // Water hazard stage
         {
@@ -304,6 +308,10 @@ void AWormTutorialGameMode::AdvanceToNextStage()
                 5.0f,
                 false
             );
+        }
+        if (CurrentStageIndex == 5) // Target destruction stage
+        {
+            CompleteTutorial();
         }
     }
     else
@@ -324,14 +332,15 @@ void AWormTutorialGameMode::CompleteTutorial()
         OnStageCompleted(TutorialStages.Num() - 1);
     }
     
-    // Give player option to return to main menu after a delay
+    // Give player option to return to next level after a delay
     FTimerHandle ExitTutorialTimer;
     GetWorld()->GetTimerManager().SetTimer(
         ExitTutorialTimer,
-        []()
+        [this]()
         {
-            // Return to main menu
-            UGameplayStatics::OpenLevel(GWorld, FName("MainMenuMap"));
+            // Go to the configured next level instead of hardcoded MainMenuMap
+            UGameplayStatics::OpenLevel(GWorld, NextLevelName);
+            UE_LOG(LogTemp, Warning, TEXT("Tutorial completed, loading level: %s"), *NextLevelName.ToString());
         },
         10.0f, // Allow 10 seconds to read completion message
         false
@@ -561,15 +570,148 @@ void AWormTutorialGameMode::TriggerWaterRise()
     }
 }
 
+
 void AWormTutorialGameMode::OnWaterObserved()
 {
     bHasObservedWater = true;
     UE_LOG(LogTemp, Warning, TEXT("Player has observed water!"));
     
-    // If we're on the water stage, we can consider this step complete
-    if (CurrentStageIndex == 4) // Water hazard stage
+    // Check if this completes the current stage
+    CheckStageCompletion();
+}
+
+void AWormTutorialGameMode::CheckStageCompletion()
+{
+    // Use a static variable to prevent recursive stage advancement
+    static bool bIsCheckingStage = false;
+    
+    // Guard against recursive calls
+    if (bIsCheckingStage)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Water observation objective complete"));
-        AdvanceToNextStage();
+        return;
     }
+    
+    bIsCheckingStage = true;
+    
+    // If we're at a certain stage and the corresponding action has been completed,
+    // we should advance to the next stage
+    switch (CurrentStageIndex)
+    {
+    case 0: // Movement stage
+        if (bHasPlayerMoved)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Movement completed - advancing from stage 0"));
+            AdvanceToNextStage();
+        }
+        break;
+            
+    case 1: // Jump stage
+        if (bHasPlayerJumped)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Jump completed - advancing from stage 1"));
+            AdvanceToNextStage();
+        }
+        break;
+            
+    case 2: // Firing stage
+        if (bHasPlayerFired)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Firing completed - advancing from stage 2"));
+            AdvanceToNextStage();
+        }
+        break;
+            
+    case 3: // Target destruction stage
+        if (bHasPlayerDestroyedTarget)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Target destroyed - advancing from stage 3"));
+            AdvanceToNextStage();
+        }
+        break;
+            
+    case 4: // Water hazard stage
+        if (bHasObservedWater)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Water observed - advancing from stage 4"));
+            AdvanceToNextStage();
+        }
+        break;
+    }
+    
+    bIsCheckingStage = false;
+}
+
+void AWormTutorialGameMode::RespawnPlayerFromWater()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Respawn du joueur après noyade"));
+    
+    if (!PlayerCharacter)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Impossible de respawn: PlayerCharacter est null"));
+        return;
+    }
+    
+    // Déterminer la position de respawn
+    FVector SpawnLocation = RespawnLocation;
+    FRotator SpawnRotation = FRotator::ZeroRotator;
+    
+    // Utiliser un point de spawn s'il est disponible
+    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+    if (PC)
+    {
+        AActor* StartSpot = FindPlayerStart(PC);
+        if (StartSpot)
+        {
+            SpawnLocation = StartSpot->GetActorLocation() + FVector(0, 0, 100);
+            SpawnRotation = StartSpot->GetActorRotation();
+        }
+    }
+    
+    // Téléporter le personnage à la position de respawn
+    PlayerCharacter->SetActorLocation(SpawnLocation, false, nullptr, ETeleportType::TeleportPhysics);
+    PlayerCharacter->SetActorRotation(SpawnRotation);
+    
+    // Réinitialiser la santé
+    PlayerCharacter->Health = 100.0f;
+    
+    // Réactiver le contrôle du joueur
+    PlayerCharacter->SetIsMyTurn(true);
+    PlayerCharacter->GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+    
+    // S'assurer que le joueur n'est pas considéré comme mort
+    PlayerCharacter->SetActorEnableCollision(true);
+    
+    // Si le personnage a des comportements spécifiques après la mort,
+    // il faut le réinitialiser ici
+    AWormTutorialCharacter* TutorialChar = Cast<AWormTutorialCharacter>(PlayerCharacter);
+    if (TutorialChar)
+    {
+        // Réinitialiser les points de mouvement
+        TutorialChar->MovementPoints = TutorialChar->MaxMovementPoints;
+    }
+    
+    // Afficher un message au joueur
+    UWTutorialWidget* TutWidget = Cast<UWTutorialWidget>(TutorialWidget);
+    if (TutWidget)
+    {
+        // Sauvegarder l'instruction actuelle
+        FString CurrentInstruction = TutorialStages[CurrentStageIndex];
+        
+        // Afficher un message temporaire
+        TutWidget->SetInstructionText("Attention! L'eau est mortelle. Vous avez été respawn.");
+        
+        // Rétablir l'instruction originale après un délai
+        FTimerHandle RestoreMessageTimer;
+        GetWorld()->GetTimerManager().SetTimer(
+            RestoreMessageTimer,
+            [this, CurrentInstruction, TutWidget]()
+            {
+                TutWidget->SetInstructionText(CurrentInstruction);
+            },
+            3.0f,
+            false
+        );
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Joueur respawn avec succès à %s"), *SpawnLocation.ToString());
 }
