@@ -8,9 +8,7 @@
 #include "Engine/World.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Net/UnrealNetwork.h"
-// MODIFICATION 1: Dans EnvironmentalEventsManager.cpp
-// Modifier le constructeur pour initialiser le WaterSystem correctement
-// Vers la ligne 14, mettre à jour:
+
 
 AEnvironmentalEventsManager::AEnvironmentalEventsManager()
 {
@@ -63,7 +61,7 @@ void AEnvironmentalEventsManager::BeginPlay()
     // Initialize the water system first
     if (HasAuthority()) // Only on server
     {
-        InitializeWaterLevel();
+        InitializeWaterLevel(false);
         
         // Start events if enabled
         if (EnumHasAnyFlags(ActiveEventTypes, EEventType::Water) && bEnableWaterEvents)
@@ -93,9 +91,7 @@ void AEnvironmentalEventsManager::BeginPlay()
             
             UE_LOG(LogTemp, Log, TEXT("Earthquakes are initialized"));
         }
-        
-        // Create event indicator in UI
-        CreateEnvironmentalEventIndicators();
+
         
         // Configure next random event
         ChooseNextEvent();
@@ -570,7 +566,7 @@ void AEnvironmentalEventsManager::NotifyTurnEnded_Implementation()
     }
 }
 
-void AEnvironmentalEventsManager::InitializeWaterLevel()
+void AEnvironmentalEventsManager::InitializeWaterLevel(bool isTuto)
 {
     if (!WaterSystem)
     {

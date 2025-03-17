@@ -49,8 +49,9 @@ public:
     // Character class specifically for tutorial
     UPROPERTY(EditDefaultsOnly, Category = "Tutorial")
     TSubclassOf<AWormCharacter> TutorialCharacterClass;
+    bool bWaterSystemInitialized;
 
-    
+
     // Tutorial methods
     UFUNCTION(BlueprintCallable, Category = "Tutorial")
     void StartTutorial();
@@ -67,9 +68,9 @@ public:
     virtual void StartNextTurn() override;
     virtual void EndCurrentTurn() override;
     // Check if player has completed current stage objective
-   /* UFUNCTION()
+    UFUNCTION()
     void OnWaterObserved();
-*/
+
     // Référence au trigger d'eau
     UPROPERTY(BlueprintReadOnly, Category = "Tutorial")
     class ATutorialWaterTrigger* WaterTrigger;
@@ -105,9 +106,9 @@ protected:
 
     // Initialize water system for tutorial
     void SetupWaterSystem();
-    
+    void InitializeWaterSystem();
 
-    
+
     // Handle player inputs for tutorial progress tracking
     UFUNCTION()
     void OnPlayerMoved();
