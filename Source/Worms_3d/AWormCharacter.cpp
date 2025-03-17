@@ -369,31 +369,6 @@ void AWormCharacter::ZoomCamera(float Amount)
     }
 }
 
-// void AWormCharacter::OnLookAction(const FInputActionValue& Value)
-// {
-//     FVector2D LookAxisVector = Value.Get<FVector2D>();
-//
-//     if (bIsGuidingMissile && CurrentWeapon)
-//     {
-//         // Check if current weapon is a guided missile weapon
-//         AGuidedMissileWeapon* MissileWeapon = Cast<AGuidedMissileWeapon>(CurrentWeapon);
-//         if (MissileWeapon)
-//         {
-//             // Pass input to missile
-//             MissileWeapon->ProcessMissileMovementInput(LookAxisVector.X, -LookAxisVector.Y);
-//             return;
-//         }
-//     }
-//
-//     // Handle normal character looking if not controlling a missile
-//     if (Controller != nullptr)
-//     {
-//         // Add yaw and pitch input to controller
-//         AddControllerYawInput(LookAxisVector.X);
-//         AddControllerPitchInput(LookAxisVector.Y);
-//     }
-// }
-
 void AWormCharacter::OnLookAction(const FInputActionValue& Value)
 {
     FVector2D LookAxisVector = Value.Get<FVector2D>();
