@@ -4,7 +4,8 @@
 #include "Kismet/GameplayStatics.h"
 #include "WormGameMode.h"
 #include "WormPlayerController.h"
-#include "Worms_3d/AVoxelBuilding.h"
+#include "Worms_3d/Building/AVoxelBuilding.h"
+#include "Worms_3d/Env/EnvironmentalEventsManager.h"
 
 AWormGameState::AWormGameState()
 {
@@ -22,8 +23,6 @@ void AWormGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     
     // Replicate these properties to all clients
-    DOREPLIFETIME(AWormGameState, CurrentPlayerIndex);
-    DOREPLIFETIME(AWormGameState, RemainingTurnTime);
     DOREPLIFETIME(AWormGameState, TurnDuration);
     DOREPLIFETIME(AWormGameState, PlayerNames);
     DOREPLIFETIME(AWormGameState, PlayerIsAlive);
@@ -31,6 +30,11 @@ void AWormGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
     DOREPLIFETIME(AWormGameState, bGameOver);
     DOREPLIFETIME(AWormGameState, WinnerName);
     DOREPLIFETIME(AWormGameState, PlayerDamageDealt);
+
+    DOREPLIFETIME_CONDITION_NOTIFY(AWormGameState, RemainingTurnTime, COND_None, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(AWormGameState, CurrentPlayerIndex, COND_None, REPNOTIFY_Always);
+    DOREPLIFETIME_CONDITION_NOTIFY(AWormGameState, Teams, COND_None, REPNOTIFY_Always);
+    
 }
 
 void AWormGameState::UpdatePlayerList(const TArray<AController*>& Controllers)
@@ -207,93 +211,149 @@ void AWormGameState::AddDamageDealt(const FString& PlayerName, float Damage)
     }
 }
 
+// In WormGameState.cpp, modify the CheckGameOverCondition function
+
 void AWormGameState::CheckGameOverCondition()
 {
-    if (HasAuthority() && !bGameOver)
+    if (!HasAuthority() || bGameOver)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Checking game over condition"));
+        // Skip if not on server or game already over
+        return;
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("Vérification de la condition de fin de partie"));
+    
+    // Compter les équipes actives
+    TSet<int32> ActiveTeams;
+    
+    // Parcourir toutes les équipes
+    for (int32 i = 0; i < Teams.Num(); i++)
+    {
+        bool TeamHasAliveMembers = false;
         
-        // Méthode directe: Compter le nombre de personnages vivants dans le monde
-        TArray<AActor*> AllWormChars;
-        UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormCharacter::StaticClass(), AllWormChars);
-        
-        int32 AliveCount = 0;
-        AWormCharacter* LastAliveChar = nullptr;
-        
-        for (AActor* Actor : AllWormChars)
+        // Vérifier si cette équipe a des membres vivants
+        for (AWormCharacter* Character : Teams[i].TeamMembers)
         {
-            AWormCharacter* Character = Cast<AWormCharacter>(Actor);
-            if (Character && Character->GetHealth() > 0)
+            if (Character && IsValid(Character) && !Character->IsDead())
             {
-                AliveCount++;
-                LastAliveChar = Character;
-                UE_LOG(LogTemp, Warning, TEXT("Character %s is alive with health %.1f"), 
-                   *Character->GetName(), Character->GetHealth());
-            }
-            else if (Character)
-            {
-                UE_LOG(LogTemp, Warning, TEXT("Character %s is dead with health %.1f"), 
-                   *Character->GetName(), Character->GetHealth());
+                TeamHasAliveMembers = true;
+                UE_LOG(LogTemp, Warning, TEXT("Équipe %d: Personnage %s est vivant avec %.1f PV"), 
+                    i, *Character->GetName(), Character->GetHealth());
+                break;
             }
         }
         
-        UE_LOG(LogTemp, Warning, TEXT("Found %d alive characters"), AliveCount);
-        
-        // Game over si un seul joueur est encore vivant
-        if (AliveCount <= 1 && LastAliveChar)
+        if (TeamHasAliveMembers)
         {
-            UE_LOG(LogTemp, Warning, TEXT("Game over! Winner is %s"), *LastAliveChar->GetName());
-            
-            // Trouver le nom du joueur gagnant
-             WinnerName = LastAliveChar->GetName();
-            AController* WinnerController = LastAliveChar->GetController();
-            
-            if (WinnerController)
-            {
-                // Trouver l'index du contrôleur pour obtenir le nom correct
-                for (int32 i = 0; i < PlayerNames.Num(); i++)
-                {
-                    if (WinnerController == UGameplayStatics::GetPlayerController(GetWorld(), i))
-                    {
-                        WinnerName = PlayerNames[i];
-                        break;
-                    }
-                }
-            }
-            
-            TriggerGameOver(WinnerName);
+            ActiveTeams.Add(i);
+        }
+        else if (Teams[i].TeamMembers.Num() > 0)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Équipe %d: Tous les personnages sont éliminés"), i);
         }
     }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Nombre d'équipes actives: %d"), ActiveTeams.Num());
+    
+    // Fin de partie s'il ne reste qu'une seule équipe et qu'on a au moins 2 équipes configurées
+    if (ActiveTeams.Num() == 1 && Teams.Num() > 1)
+    {
+        int32 WinningTeamId = *ActiveTeams.CreateIterator();
+        // Use the proper team name from Teams array
+        FString WinnerTeamName = Teams[WinningTeamId].TeamName;
+        
+        UE_LOG(LogTemp, Warning, TEXT("Fin de partie! Équipe gagnante: %s (ID: %d)"), 
+            *WinnerTeamName, WinningTeamId);
+        
+        // First clear all timers to avoid conflicts
+        ClearAllGameTimers();
+        
+        // Then trigger game over
+        TriggerGameOver(WinnerTeamName);
+    }
+    else if (ActiveTeams.Num() == 0 && Teams.Num() > 0 && Teams[0].TeamMembers.Num() > 0)
+    {
+        // Aucune équipe active - match nul ou erreur
+        UE_LOG(LogTemp, Warning, TEXT("Aucune équipe active - Match nul"));
+        
+        // First clear all timers to avoid conflicts
+        ClearAllGameTimers();
+        
+        // Then trigger game over
+        TriggerGameOver(TEXT("Match nul"));
+    }
 }
+
+// In WormGameState.cpp, modify the TriggerGameOver function
 
 void AWormGameState::TriggerGameOver(const FString& Winner)
 {
-    if (HasAuthority() && !bGameOver)
+    if (!HasAuthority() || bGameOver)
     {
-        bGameOver = true;
-        WinnerName = Winner;
-        
-        // Force replication
-        MARK_PROPERTY_DIRTY_FROM_NAME(AWormGameState, bGameOver, this);
-        MARK_PROPERTY_DIRTY_FROM_NAME(AWormGameState, WinnerName, this);
-        
-        // Broadcast event to all clients
-        OnGameOver.Broadcast(Winner);
-        
-        UE_LOG(LogTemp, Warning, TEXT("Game over triggered! Winner: %s"), *Winner);
-        
-        // Show results widget after a short delay
-        FTimerHandle ShowWidgetTimerHandle;
-        GetWorld()->GetTimerManager().SetTimer(
-            ShowWidgetTimerHandle,
-            this,
-            &AWormGameState::ShowGameOverWidget,
-            2.0f, // 2 second delay before showing widget
-            false
-        );
+        // Skip if already in game over state
+        return;
     }
-}
 
+    bGameOver = true;
+    WinnerName = Winner;
+    
+    // Format player damage records to use InGameName
+    // Create a copy of the damage stats with properly formatted names
+    TArray<FPlayerDamageInfo> FormattedDamageStats;
+    
+    // Find all characters to match their names
+    TArray<AActor*> AllCharacters;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormCharacter::StaticClass(), AllCharacters);
+    
+    // Create a mapping of actor names to InGameNames
+    TMap<FString, FString> NameMapping;
+    for (AActor* Actor : AllCharacters)
+    {
+        AWormCharacter* Character = Cast<AWormCharacter>(Actor);
+        if (Character && !Character->InGameName.IsEmpty())
+        {
+            NameMapping.Add(Character->GetName(), Character->InGameName);
+        }
+    }
+    
+    // Apply name mapping to damage stats
+    for (const FPlayerDamageInfo& DamageInfo : PlayerDamageDealt)
+    {
+        FPlayerDamageInfo FormattedInfo = DamageInfo;
+        
+        // If we have an InGameName mapping for this character, use it
+        FString* MappedName = NameMapping.Find(DamageInfo.PlayerName);
+        if (MappedName && !MappedName->IsEmpty())
+        {
+            FormattedInfo.PlayerName = *MappedName;
+        }
+        
+        FormattedDamageStats.Add(FormattedInfo);
+    }
+    
+    // Replace the original stats with the formatted ones
+    PlayerDamageDealt = FormattedDamageStats;
+    
+    // Force replication
+    MARK_PROPERTY_DIRTY_FROM_NAME(AWormGameState, bGameOver, this);
+    MARK_PROPERTY_DIRTY_FROM_NAME(AWormGameState, WinnerName, this);
+    MARK_PROPERTY_DIRTY_FROM_NAME(AWormGameState, PlayerDamageDealt, this);
+    
+    // Broadcast event to all clients
+    OnGameOver.Broadcast(Winner);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Game over triggered! Winner: %s"), *Winner);
+    
+    // Show results widget after a short delay
+    FTimerHandle ShowWidgetTimerHandle;
+    GetWorld()->GetTimerManager().SetTimer(
+        ShowWidgetTimerHandle,
+        this,
+        &AWormGameState::ShowGameOverWidget,
+        2.0f, // 2 second delay before showing widget
+        false
+    );
+}
 void AWormGameState::ShowGameOverWidget()
 {
     // Use RPC to show the widget on all clients
@@ -343,16 +403,22 @@ void AWormGameState::InitializeTeams(int32 NumTeams)
     UE_LOG(LogTemp, Warning, TEXT("========================"));
 
     Teams.Empty();
-    
+
+   
     for (int32 i = 0; i < NumTeams; i++)
     {
         FTeamInfo NewTeam;
         NewTeam.TeamId = i;
         NewTeam.TeamName = FString::Printf(TEXT("Team %d"), i + 1);
-        float Hue = (float)i / NumTeams;
-        NewTeam.TeamColor = FLinearColor::MakeFromHSV8(Hue * 255, 200, 200);
+        switch (i)
+        {
+        case 0: NewTeam.TeamColor = FLinearColor(0.0f, 0.5f, 1.0f); break; // Blue
+        case 1: NewTeam.TeamColor = FLinearColor(1.0f, 0.2f, 0.2f); break; // Red
+        case 2: NewTeam.TeamColor = FLinearColor(0.2f, 0.8f, 0.2f); break; // Green
+        case 3: NewTeam.TeamColor = FLinearColor(1.0f, 0.8f, 0.0f); break; // Yellow
+        default: NewTeam.TeamColor = FLinearColor(0.7f, 0.7f, 0.7f); break; // Gray
+        }
         Teams.Add(NewTeam);
-        
         UE_LOG(LogTemp, Warning, TEXT("Created Team %d - Name: %s"), i, *NewTeam.TeamName);
     }
     
@@ -401,4 +467,162 @@ void AWormGameState::AddCharacterToTeam(AWormCharacter* Character, int32 TeamId)
     }
 
     ForceNetUpdate();
+}
+void AWormGameState::OnRep_CurrentPlayerIndex()
+{
+    // Notify widgets that the active player has changed
+    UE_LOG(LogTemp, Warning, TEXT("OnRep_CurrentPlayerIndex called: Current player now %d"), CurrentPlayerIndex);
+    
+    // Update CurrentPlayerName to match CurrentPlayerIndex
+    if (PlayerNames.IsValidIndex(CurrentPlayerIndex))
+    {
+        CurrentPlayerName = PlayerNames[CurrentPlayerIndex];
+    }
+    
+    // Broadcast to all registered listeners
+    OnCurrentPlayerChanged.Broadcast(CurrentPlayerIndex);
+    OnActivePlayerChanged.Broadcast();
+}
+
+void AWormGameState::OnRep_RemainingTurnTime()
+{
+    // Notify widgets that the timer has been updated
+    UE_LOG(LogTemp, Warning, TEXT("OnRep_RemainingTurnTime called: %.2f seconds"), RemainingTurnTime);
+    
+    // Broadcast to all registered listeners
+    OnTurnTimerUpdated.Broadcast();
+}
+
+void AWormGameState::OnRep_Teams()
+{
+    // Notify widgets that the teams have been updated
+    UE_LOG(LogTemp, Warning, TEXT("OnRep_Teams called: %d Teams updated"), Teams.Num());
+    
+    // Broadcast to all registered listeners
+    OnTeamStatusUpdated.Broadcast();
+}
+
+bool AWormGameState::IsLocalPlayerTurn() const
+{
+    // Get the local player controller
+    APlayerController* LocalPC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+    if (!LocalPC)
+    {
+        return false;
+    }
+    
+    // Get active character
+    AWormCharacter* ActiveChar = nullptr;
+    for (int32 i = 0; i < Teams.Num(); i++)
+    {
+        for (AWormCharacter* Character : Teams[i].TeamMembers)
+        {
+            if (Character && Character->IsMyTurn())
+            {
+                ActiveChar = Character;
+                break;
+            }
+        }
+        if (ActiveChar) break;
+    }
+    
+    if (!ActiveChar) return false;
+    
+    // Check if the local player is controlling the active character
+    return (LocalPC == ActiveChar->GetController());
+}
+
+// Improved GetActiveCharacter function for team-based play
+AWormCharacter* AWormGameState::GetActiveCharacter() const
+{
+    // Look through all teams to find the active character
+    for (int32 i = 0; i < Teams.Num(); i++)
+    {
+        for (AWormCharacter* Character : Teams[i].TeamMembers)
+        {
+            if (Character && Character->IsMyTurn())
+            {
+                return Character;
+            }
+        }
+    }
+    
+    // Fallback to previous method if no active character found in teams
+    if (CurrentPlayerIndex >= 0 && CurrentPlayerIndex < GetWorld()->GetNumPlayerControllers())
+    {
+        APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), CurrentPlayerIndex);
+        if (PC)
+        {
+            return Cast<AWormCharacter>(PC->GetPawn());
+        }
+    }
+    
+    return nullptr;
+}
+
+
+void AWormGameState::ClearAllGameTimers()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Clearing all game timers for safety"));
+    
+    // Clear any timers that might be active
+    FTimerManager& TimerManager = GetWorldTimerManager();
+    
+    // Find and clear turn timer in GameMode
+    AWormGameMode* GameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(GetWorld()));
+    if (GameMode)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Clearing GameMode timers"));
+        
+        // Clear turn timer if active
+        if (TimerManager.IsTimerActive(GameMode->TurnTimerHandle))
+        {
+            TimerManager.ClearTimer(GameMode->TurnTimerHandle);
+        }
+        
+        // Clear any other GameMode timers if needed
+    }
+    
+    // Clear timers in all characters
+    TArray<AActor*> AllCharacters;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormCharacter::StaticClass(), AllCharacters);
+    
+    for (AActor* Actor : AllCharacters)
+    {
+        AWormCharacter* Character = Cast<AWormCharacter>(Actor);
+        if (Character)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Clearing timers for character: %s"), *Character->GetName());
+            
+            // Clear auto end turn timer if active
+            if (TimerManager.IsTimerActive(Character->AutoEndTurnTimerHandle))
+            {
+                TimerManager.ClearTimer(Character->AutoEndTurnTimerHandle);
+            }
+            
+            // Clear any other character timers if needed
+        }
+    }
+    
+    // Clear any environmental timers
+    // Check for water system
+    TArray<AActor*> EnvManagers;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AEnvironmentalEventsManager::StaticClass(), EnvManagers);
+    
+    for (AActor* Actor : EnvManagers)
+    {
+        AEnvironmentalEventsManager* EnvManager = Cast<AEnvironmentalEventsManager>(Actor);
+        if (EnvManager && EnvManager->WaterSystem)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Clearing timers for water system"));
+            
+            // Clear water ripple timer if active
+            if (TimerManager.IsTimerActive(EnvManager->WaterSystem->RippleTimerHandle))
+            {
+                TimerManager.ClearTimer(EnvManager->WaterSystem->RippleTimerHandle);
+            }
+            
+            // Clear any other water system timers if needed
+        }
+    }
 }

@@ -16,10 +16,12 @@
 // Ajouter les includes manquants pour les collisions Cannot resolve symbol 'SetCollisionEnabled'
 #include "WeaponWheelWidget.h"
 #include "EnvironmentalEventsManager.h"
+#include "Worms_3d/Env/EnvironmentalEventsManager.h"
 #include "WormGameState.h"
 #include "GuidedMissileWeapon.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
+#include "Components/WidgetComponent.h"
 
 // Conserve le constructeur existant sans modifications mais améliore la lisibilité
 AWormCharacter::AWormCharacter()
@@ -58,6 +60,15 @@ AWormCharacter::AWormCharacter()
     // Configuration du système de caméra
     // S'assurer que la physique est activée dès le début
     GetCharacterMovement()->UpdateComponentVelocity();
+    NameWidgetComponent = CreateDefaultSubobject<UWidgetComponent>(TEXT("NameWidgetComponent"));
+    if (NameWidgetComponent)
+    {
+        NameWidgetComponent->SetupAttachment(RootComponent);
+        NameWidgetComponent->SetRelativeLocation(FVector(0, 0, 120.0f)); // Ajuster la hauteur selon les besoins
+        NameWidgetComponent->SetWidgetSpace(EWidgetSpace::Screen);
+        NameWidgetComponent->SetDrawSize(FVector2D(150.0f, 50.0f));
+        // Le NameIndicatorWidgetClass sera défini via une propriété UPROPERTY dans l'éditeur
+    }
     InitializeCameraSystem();
 }
 
@@ -136,7 +147,18 @@ void AWormCharacter::BeginPlay()
         CurrentCameraDistance = DefaultCameraDistance;
         CameraBoom->TargetArmLength = CurrentCameraDistance;
     }
-    
+
+    // Diagnostic d'armes pour client
+    SetupWeaponDiagnostic();
+    FTimerHandle NameWidgetTimerHandle;
+    GetWorld()->GetTimerManager().SetTimer(
+        NameWidgetTimerHandle,
+        [this]() {
+            InitializeNameWidget();
+        },
+        0.5f,
+        false
+    );
     // Configuration de l'input pour le joueur local
     if (IsLocallyControlled())
     {
@@ -146,8 +168,7 @@ void AWormCharacter::BeginPlay()
             SetupEnhancedInput(PC);
         }
         
-        // Diagnostic d'armes pour client
-        SetupWeaponDiagnostic();
+
     }
     if (!HasAuthority() && IsLocallyControlled())
     {
@@ -216,8 +237,34 @@ void AWormCharacter::PossessedBy(AController* NewController)
             SetupEnhancedInput(PC);
         }
     }
+    
+    // If this character is dead, make it visible again but still non-collidable
+    if (IsDead())
+    {
+        // Make sure it's visible - possessed characters should be visible even if dead
+        GetMesh()->SetVisibility(true);
+        GetMesh()->SetRenderCustomDepth(false);
+        
+        // But keep collision disabled
+        GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        
+        UE_LOG(LogTemp, Warning, TEXT("Possessed dead character %s - adjusted visibility"), *GetName());
+    }
 }
-
+void AWormCharacter::UnPossessed()
+{
+    Super::UnPossessed();
+    
+    // If this character is dead and now unpossessed, apply full death visual state
+    if (IsDead())
+    {
+        // Apply death visual state
+        GetMesh()->SetRenderCustomDepth(true);
+        GetMesh()->SetCustomDepthStencilValue(2);
+        
+        UE_LOG(LogTemp, Warning, TEXT("Unpossessed dead character %s - applied death visual state"), *GetName());
+    }
+}
 void AWormCharacter::SetupEnhancedInput(APlayerController* PlayerController)
 {
     if (!PlayerController || !InputMappingContext)
@@ -572,6 +619,7 @@ void AWormCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
     DOREPLIFETIME(AWormCharacter, MovementPoints);
     DOREPLIFETIME(AWormCharacter, AvailableWeapons);
     DOREPLIFETIME(AWormCharacter, CharacterIndexInTeam);
+    DOREPLIFETIME(AWormCharacter, InGameName);
     DOREPLIFETIME(AWormCharacter, TeamId);
 }
 
@@ -789,19 +837,27 @@ void AWormCharacter::SpawnCurrentWeapon()
 
 void AWormCharacter::ApplyDamageToWorm(float DamageAmount, FVector ImpactDirection)
 {
-    // Valeur de santé avant d'appliquer les dégâts
+    // Skip if already dead
+    if (IsDead())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Skipping damage on already dead character %s"), *GetName());
+        return;
+    }
+
+    // Store previous health
     float PreviousHealth = Health;
     
-    // Appliquer les dégâts
+    // Apply damage
     Health = FMath::Max(0.0f, Health - DamageAmount);
     
     // Log pour voir les changements de santé
     UE_LOG(LogTemp, Warning, TEXT("Character %s: Health changed from %.1f to %.1f (damage: %.1f)"), 
            *GetName(), PreviousHealth, Health, DamageAmount);
     
-    // L'impulsion est déjà incluse dans ImpactDirection, ne pas multiplier à nouveau
-    // Juste normaliser pour être sûr
+    // Apply impulse
     ApplyMovementImpulse(ImpactDirection.GetSafeNormal(), ImpactDirection.Size());
+    
+    // Record damage in game state
     AActor* DamageInstigator = GetInstigator();
     if (DamageInstigator)
     {
@@ -809,66 +865,76 @@ void AWormCharacter::ApplyDamageToWorm(float DamageAmount, FVector ImpactDirecti
         AWormGameState* GameState = Cast<AWormGameState>(UGameplayStatics::GetGameState(this));
         if (GameState)
         {
-            FString InstigatorName = DamageInstigator->GetName();
-            GameState->AddDamageDealt(InstigatorName, DamageAmount);
-        }
-    }
-    // Vérifier si le personnage est mort
-    if (Health <= 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Character %s died!"), *GetName());
-    
-        // Update player alive status in game state
-        AWormGameState* GameState = Cast<AWormGameState>(UGameplayStatics::GetGameState(this));
-        if (GameState)
-        {
-            // Trouver notre index
-            int32 MyIndex = -1;
-        
-            AController* MyController = GetController();
-            if (MyController)
+            AWormCharacter* InstigatorChar = Cast<AWormCharacter>(DamageInstigator);
+            FString InstigatorName;
+            
+            if (InstigatorChar && !InstigatorChar->InGameName.IsEmpty())
             {
-                // Chercher cet index parmi tous les contrôleurs
-                for (int32 i = 0; i < GameState->PlayerNames.Num(); i++)
-                {
-                    if (MyController == UGameplayStatics::GetPlayerController(GetWorld(), i))
-                    {
-                        MyIndex = i;
-                        break;
-                    }
-                }
-            
-                // Si on n'a pas trouvé par le contrôleur, essayer avec l'index du joueur
-                if (MyIndex == -1 && GameState->PlayerNames.Num() > 0)
-                {
-                    // Solution de secours : utiliser index 0 si c'est le joueur local, 1 sinon
-                    MyIndex = IsLocallyControlled() ? 0 : 1;
-                    UE_LOG(LogTemp, Warning, TEXT("Using fallback index %d for %s"), MyIndex, *GetName());
-                }
-            
-                // Si on a trouvé un index valide, marquer le joueur comme mort
-                if (MyIndex != INDEX_NONE && GameState->PlayerIsAlive.IsValidIndex(MyIndex))
-                {
-                    UE_LOG(LogTemp, Warning, TEXT("Setting player at index %d as not alive"), MyIndex);
-                    GameState->PlayerIsAlive[MyIndex] = false;
-                
-                    // Vérifier la condition de fin de partie
-                    GameState->CheckGameOverCondition();
-                }
-                else
-                {
-                    UE_LOG(LogTemp, Error, TEXT("Invalid player index %d"), MyIndex);
-                }
+                InstigatorName = InstigatorChar->InGameName;
             }
             else
             {
-                UE_LOG(LogTemp, Error, TEXT("Character %s has no controller!"), *GetName());
+                InstigatorName = DamageInstigator->GetName();
             }
+            
+            GameState->AddDamageDealt(InstigatorName, DamageAmount);
+            UE_LOG(LogTemp, Warning, TEXT("Recorded %.1f damage dealt by %s"), 
+                DamageAmount, *InstigatorName);
+                
+            // NEW: Check if instigator's turn should end
+            if (InstigatorChar && InstigatorChar->IsMyTurn())
+            {
+                // End instigator's turn after damage (water or projectile)
+                AWormGameMode* GameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(GetWorld()));
+                if (GameMode && !GameMode->bDeferTurnEnding)
+                {
+                    // Set flag to prevent multiple ending calls
+                    GameMode->bDeferTurnEnding = true;
+                    
+                    UE_LOG(LogTemp, Warning, TEXT("Ending turn for %s after causing damage to %s"), 
+                        *InstigatorChar->GetName(), *GetName());
+                    
+                    // Use timer to prevent immediate call during damage application
+                    FTimerHandle EndTurnTimerHandle;
+                    GetWorld()->GetTimerManager().SetTimer(
+                        EndTurnTimerHandle,
+                        [GameMode]()
+                        {
+                            if (GameMode && IsValid(GameMode))
+                            {
+                                GameMode->bDeferTurnEnding = false;
+                                GameMode->EndCurrentTurn();
+                            }
+                        },
+                        0.5f,  // Delay to allow damage effects to complete
+                        false
+                    );
+                }
+            }
+        }
+    }
+    
+    // Handle death
+    if (Health <= 0)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Character %s died!"), *GetName());
+        
+        // Handle death state
+        HandleCharacterDeath();
+        
+        UE_LOG(LogTemp, Warning, TEXT("Character %s died! (Team %d, Index %d)"), 
+            *GetName(), TeamId, CharacterIndexInTeam);
+            
+        // Check for game over
+        AWormGameState* GameState = Cast<AWormGameState>(UGameplayStatics::GetGameState(this));
+        if (GameState)
+        {
+            GameState->CheckGameOverCondition();
         }
     }
     else
     {
-        // Jouer l'animation de réaction aux dégâts si pas mort
+        // Play hit animation if not dead
         PlayHitReaction();
     }
 }
@@ -1280,11 +1346,10 @@ void AWormCharacter::UpdateWeaponRotation()
     
     if (CurrentTime - LastSendTime >= MinTimeBetweenUpdates) 
     {
-        if (GetLocalRole() < ROLE_Authority)
-        {
-            Server_UpdateWeaponRotation(TargetRotation);
-            LastSendTime = CurrentTime;
-        }
+        // Send rotation updates regardless of role
+        // This ensures the server always sends to clients and clients always send to server
+        Server_UpdateWeaponRotation(TargetRotation);
+        LastSendTime = CurrentTime;
     }
 }
 void AWormCharacter::Multicast_UpdateWeaponRotation_Implementation(FRotator NewRotation)
@@ -1568,57 +1633,129 @@ void AWormCharacter::PlayHitReaction()
 
 void AWormCharacter::OnSwitchTeamMemberAction(const FInputActionValue& Value)
 {
-    if (!IsMyTurn()) return; // Ne fonctionne que pour le joueur actif
-    
-    // Récupérer le GameState pour accéder aux équipes
-    AWormGameState* WormGS = GetWorld()->GetGameState<AWormGameState>();
-    if (!WormGS) return;
-    
-    // S'assurer qu'on a un controleur
-    AController* MyController = GetController();
-    if (!MyController) return;
-    
-    // Récupérer l'équipe du personnage actuel
-    TArray<AWormCharacter*> TeamMembers = WormGS->GetTeamMembers(TeamId);
-    
-    // Trouver notre index actuel dans l'équipe et le prochain index valide
-    int32 CurrentIndex = -1;
-    for (int32 i = 0; i < TeamMembers.Num(); i++)
+  
+}
+
+void AWormCharacter::InitializeNameWidget()
+{
+    // S'assurer que cette logique est exécutée seulement côté client
+    if (true)
     {
-        if (TeamMembers[i] == this)
+        if (!NameWidgetComponent)
         {
-            CurrentIndex = i;
-            break;
-        }
-    }
-    
-    if (CurrentIndex == -1) return;
-    
-    // Chercher le prochain personnage vivant dans l'équipe
-    int32 NextIndex = (CurrentIndex + 1) % TeamMembers.Num();
-    while (NextIndex != CurrentIndex)
-    {
-        AWormCharacter* NextChar = TeamMembers[NextIndex];
-        if (NextChar && NextChar->GetHealth() > 0)
-        {
-            // Transférer le statut "c'est mon tour"
-            SetIsMyTurn(false);
-            NextChar->SetIsMyTurn(true);
+            // Créer le composant s'il n'existe pas
+            NameWidgetComponent = NewObject<UWidgetComponent>(this, TEXT("NameWidgetComponent"));
+            NameWidgetComponent->SetupAttachment(GetRootComponent());
+            NameWidgetComponent->RegisterComponent();
             
-            // Transférer le contrôle
-            MyController->UnPossess();
-            MyController->Possess(NextChar);
+            // Configurer la position et l'orientation
+            NameWidgetComponent->SetRelativeLocation(FVector(0, 0, 120.0f)); // Positionner au-dessus de la tête
+            NameWidgetComponent->SetWidgetSpace(EWidgetSpace::Screen); // Toujours face à la caméra
             
-            UE_LOG(LogTemp, Warning, TEXT("DEBUG: Switched from %s to %s within team %d"), 
-                *GetName(), *NextChar->GetName(), TeamId);
-            
-            return;
+            UE_LOG(LogTemp, Warning, TEXT("Created NameWidgetComponent for %s"), *GetName());
         }
         
-        NextIndex = (NextIndex + 1) % TeamMembers.Num();
+        // Configurer la classe de widget
+        if (NameWidgetComponent && NameIndicatorWidgetClass)
+        {
+            NameWidgetComponent->SetWidgetClass(NameIndicatorWidgetClass);
+            NameWidgetComponent->SetDrawSize(FVector2D(150.0f, 50.0f));
+            
+            // Mettre à jour le widget avec les informations du personnage
+            UWNameIndicatorWidget* NameWidget = Cast<UWNameIndicatorWidget>(NameWidgetComponent->GetUserWidgetObject());
+            if (!NameWidget)
+            {
+                // Créer l'instance de widget si elle n'existe pas
+                NameWidgetComponent->InitWidget();
+                NameWidget = Cast<UWNameIndicatorWidget>(NameWidgetComponent->GetUserWidgetObject());
+            }
+            
+            if (NameWidget)
+            {
+                // Définir les informations à afficher
+                NameWidget->SetNameInfo(TeamId, InGameName.IsEmpty() ? GetName() : InGameName);
+                UE_LOG(LogTemp, Warning, TEXT("Updated name widget for %s with TeamId %d and Name %s"), 
+                    *GetName(), TeamId, *InGameName);
+            }
+            else
+            {
+                UE_LOG(LogTemp, Error, TEXT("Failed to create or cast to UWNameIndicatorWidget for %s"), *GetName());
+            }
+        }
+        else
+        {
+            if (!NameWidgetComponent)
+                UE_LOG(LogTemp, Error, TEXT("NameWidgetComponent is null for %s"), *GetName());
+            
+            if (!NameIndicatorWidgetClass)
+                UE_LOG(LogTemp, Error, TEXT("NameIndicatorWidgetClass is not set for %s"), *GetName());
+        }
+    }
+    if (HasAuthority())
+    {
+        NameWidgetComponent->SetIsReplicated(true);
+    }
+
+}
+
+
+void AWormCharacter::HandleCharacterDeath()
+{
+    if (!HasAuthority())
+    {
+        return; // Only run on server
+    }
+
+    // Don't process if already handled
+    if (IsDead() && GetCapsuleComponent()->GetCollisionEnabled() == ECollisionEnabled::NoCollision)
+    {
+        return;
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("Character %s died - handling death state"), *GetName());
+
+    // Multicast to ensure visual state is consistent on all clients
+    Multicast_ProcessDeath();
+}
+void AWormCharacter::Multicast_ProcessDeath_Implementation()
+{
+    // Stop all movement and animations
+    GetCharacterMovement()->DisableMovement();
+    GetCharacterMovement()->StopMovementImmediately();
+    
+    // Disable collision to prevent further damage
+    GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    
+    // If not possessed, we can adjust visibility (keep visible for possessed characters)
+    if (!IsPlayerControlled())
+    {
+        // Make semi-transparent to show it's dead
+        GetMesh()->SetRenderCustomDepth(true);
+        GetMesh()->SetCustomDepthStencilValue(2); // Use a value for "dead" state
+        
+        // You could also add a death animation/pose here
+        if (DeathMontage)
+        {
+            PlayAnimMontage(DeathMontage);
+        }
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("DEBUG: No other valid team members found in team %d"), TeamId);
+    // Disable weapon if present
+    if (CurrentWeapon)
+    {
+        CurrentWeapon->SetActorEnableCollision(false);
+    }
+    
+    // End turn if this was the active character
+    if (bIsMyTurn)
+    {
+        AWormGameMode* GameMode = Cast<AWormGameMode>(UGameplayStatics::GetGameMode(GetWorld()));
+        if (GameMode)
+        {
+            FTimerHandle EndTurnHandle;
+            GetWorldTimerManager().SetTimer(EndTurnHandle, GameMode, &AWormGameMode::EndCurrentTurn, 1.0f, false);
+        }
+    }
 }
 
 // Weapon Wheel

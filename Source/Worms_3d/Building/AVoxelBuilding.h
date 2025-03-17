@@ -1,0 +1,207 @@
+﻿#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
+#include "ProceduralMeshComponent.h"
+#include "AVoxelBuilding.generated.h"
+
+USTRUCT()
+struct FVoxelDestructionData
+{
+    GENERATED_BODY()
+    
+    UPROPERTY()
+    FVector Location;
+    
+    UPROPERTY()
+    FVector Normal;
+    
+    UPROPERTY()
+    float Radius;
+    
+    UPROPERTY()
+    int32 RandomSeed;
+    
+    FVoxelDestructionData() : Location(FVector::ZeroVector), Normal(FVector::UpVector), 
+                            Radius(0.0f), RandomSeed(0) {}
+    
+    FVoxelDestructionData(FVector InLocation, FVector InNormal, float InRadius, int32 InSeed)
+        : Location(InLocation), Normal(InNormal), Radius(InRadius), RandomSeed(InSeed) {}
+};
+
+// Structure to store voxel data
+USTRUCT(BlueprintType)
+struct FVoxelData
+{
+    GENERATED_BODY()
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel")
+    bool bIsActive;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel")
+    FColor Color;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Voxel")
+    int32 MaterialIndex;
+    
+    FVoxelData()
+    {
+        bIsActive = true;
+        Color = FColor::White;
+        MaterialIndex = 0;
+    }
+};
+
+// Enum to define the building type
+UENUM(BlueprintType)
+enum class EVoxelBuildingType : uint8
+{
+    Standard UMETA(DisplayName = "Standard"),
+    Staircase UMETA(DisplayName = "Staircase")
+};
+
+/**
+ * Class that generates a procedural voxel-based building
+ */
+UCLASS()
+class WORMS_3D_API AImprovedVoxelBuilding : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    AImprovedVoxelBuilding();
+
+    virtual void OnConstruction(const FTransform& Transform) override;
+
+    // Properties to configure the building
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", Replicated)
+    int32 GridSizeX;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", Replicated)
+    int32 GridSizeY;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", Replicated)
+    int32 GridSizeZ;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", Replicated)
+    float VoxelSize;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", Replicated)
+    float SmoothingFactor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", Replicated)
+    bool bUseRandomColors;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", meta = (EditCondition = "!bUseRandomColors"))
+    FLinearColor BuildingColor;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
+    bool bGenerateOnBeginPlay;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building")
+    TArray<UMaterialInterface*> Materials;
+
+    // Building type selection
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building", Replicated)
+    EVoxelBuildingType BuildingType;
+
+    // Procedural mesh configuration
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building|Rendering")
+    bool bUseDoubleSidedGeometry;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building|Rendering")
+    bool bEnableCollision;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Building|Rendering")
+    float CubeMargin;
+
+    // Debris system component for visual effects when destroying voxels
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "VFX")
+    class UVoxelDebrisSystem* DebrisSystem;
+
+    // Whether to spawn debris when destroying voxels
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    bool bSpawnDebrisOnDestruction;
+
+    // Multiplier for debris amount
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    float DebrisAmountMultiplier;
+
+    // Whether to spawn larger debris cloud at the impact center
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+    bool bSpawnImpactCloud;
+
+
+    // Fonction statique pour localiser tous les buildings voxel
+    UFUNCTION(BlueprintCallable, Category = "Building", meta = (WorldContext = "WorldContextObject"))
+    static TArray<AImprovedVoxelBuilding*> FindAllVoxelBuildings(const UObject* WorldContextObject);
+
+    // Function to generate the building
+    UFUNCTION(BlueprintCallable, Category = "Building")
+    void GenerateBuilding();
+
+    // Function to destroy part of the building
+    UFUNCTION(BlueprintCallable, Category = "Building")
+    virtual void DestroyVoxelsAt(FVector Location, FVector ImpactNormal, float Radius);
+    // RPC serveur pour détruire des voxels (appelé par les clients)
+    UFUNCTION(Server, Reliable, WithValidation)
+    void Server_DestroyVoxelsAt(FVector Location, FVector ImpactNormal, float Radius);
+
+    // RPC multicast pour synchroniser la destruction sur tous les clients
+    UFUNCTION(NetMulticast, Reliable)
+    void Multicast_DestroyVoxelsAt(FVector Location, FVector ImpactNormal, float Radius);
+    UPROPERTY(BlueprintReadOnly, Category = "Building")
+    FVector TopSpawnPoint;
+
+    // Fonction pour obtenir le point de spawn
+    UFUNCTION(BlueprintCallable, Category = "Building")
+    FVector GetTopSpawnPoint() const { return TopSpawnPoint; }
+protected:
+    virtual void BeginPlay() override;
+
+    // Procedural mesh component
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UProceduralMeshComponent* BuildingMesh;
+
+    // Voxel data
+    TArray<TArray<TArray<FVoxelData>>> VoxelGrid;
+    UPROPERTY()
+    int32 LastProcessedDestructionCount;
+    // Initialize voxel grid
+    void InitializeVoxelGrid();
+
+    // Generate a staircase pattern
+    void GenerateStaircasePattern();
+    
+    // Create mesh from voxel grid
+    void CreateMesh();
+    void GenerateOptimizedRayDirections(TArray<FVector>& RayDirections, const FVector& ImpactNormal, int32 NumRays);
+
+    // Add only visible faces to reduce polygon count
+    void AddVisibleFacesToMesh(int32 X, int32 Y, int32 Z, TArray<FVector>& Vertices, TArray<int32>& Triangles, 
+                          TArray<FVector>& Normals, TArray<FVector2D>& UVs, TArray<FColor>& Colors, TArray<FProcMeshTangent>& Tangents,
+                          bool bBottomFaceVisible, bool bTopFaceVisible, bool bLeftFaceVisible, bool bRightFaceVisible,
+                          bool bBackFaceVisible, bool bFrontFaceVisible);   
+    // Helper functions for mesh creation
+    void AddFaceTriangles(TArray<int32>& Triangles, int32 BaseIndex, bool bReversed);
+    void AddFaceNormals(TArray<FVector>& Normals, FVector Normal, int32 Count);
+    void AddFaceUVs(TArray<FVector2D>& UVs);
+    void AddFaceColors(TArray<FColor>& Colors, FColor Color, int32 Count);
+    void AddFaceTangents(TArray<FProcMeshTangent>& Tangents, FVector Tangent, int32 Count);
+    
+    // Function to get a random color
+    FColor GetRandomColor();
+    UPROPERTY(ReplicatedUsing=OnRep_DestructionHistory)  // ✅ Correct
+    TArray<FVoxelDestructionData> DestructionHistory;
+    // Apply deterministic destruction using a seed
+    void ApplyDeterministicDestruction(const FVoxelDestructionData& DestructionData);
+    
+    // Current random stream for deterministic randomization
+    FRandomStream RandomStream;
+    
+    // Handle newly received destruction history
+    UFUNCTION()
+    void OnRep_DestructionHistory();
+    // Function to apply smoothing to vertices
+    void SmoothVertices(TArray<FVector>& Vertices, TArray<int32>& Triangles);
+};

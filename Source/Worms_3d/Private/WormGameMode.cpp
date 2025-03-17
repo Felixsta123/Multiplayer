@@ -9,12 +9,13 @@
 #include "WormPlayerController.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Worms_3d/AVoxelBuilding.h"
-#include "Worms_3d/EnvironmentalEventsManager.h"
-#include "Worms_3d/GameInitFactorySubsystem.h"
-#include "Worms_3d/VoxelTerrainSettings.h"
-#include "Worms_3d/WormGameInstance.h"
-#include "Worms_3d/W_GameResultsScreen.h"
+#include "Worms_3d/Building/AVoxelBuilding.h"
+#include "Worms_3d/Env/EnvironmentalEventsManager.h"
+#include "Worms_3d/Init/GameInitFactorySubsystem.h"
+#include "Worms_3d/Building/VoxelTerrainSettings.h"
+#include "Worms_3d/Init/NetworkLoadingManager.h"
+#include "Worms_3d/Misc/WormGameInstance.h"
+#include "Worms_3d/UI/W_GameResultsScreen.h"
 
 AWormGameMode::AWormGameMode()
 {
@@ -35,6 +36,22 @@ AWormGameMode::AWormGameMode()
     
     UE_LOG(LogTemp, Log, TEXT("WormGameMode constructor - Setting GameStateClass to: %s"), 
         *GameStateClass->GetName());
+    FCharacterNameList LauraNames;
+    LauraNames.Names = { "Athena", "Nova", "Spark" };
+    
+    FCharacterNameList GuyNames;
+    GuyNames.Names = { "Titan", "Specter", "Orion" };
+    
+    FCharacterNameList DavidNames;
+    DavidNames.Names = { "Cipher", "Phoenix", "Echo" };
+    
+    FCharacterNameList EmilyNames;
+    EmilyNames.Names = { "Raven", "Aurora", "Luna" };
+    
+    CharacterNamesByType.Add("Laura", LauraNames);
+    CharacterNamesByType.Add("Guy", GuyNames);
+    CharacterNamesByType.Add("David", DavidNames);
+    CharacterNamesByType.Add("Emily", EmilyNames);
 }
 
 void AWormGameMode::BeginPlay()
@@ -177,6 +194,12 @@ void AWormGameMode::StartNextTurn()
                     TeamController->Possess(Character);
                 }
                 
+                // Update GameState's current player index
+                WormGS->SetCurrentPlayerByIndex(CurrentTeamIndex);
+                
+                // Start the turn timer
+                StartTurnTimer();
+                
                 foundValidCharacter = true;
                 break;
             }
@@ -197,11 +220,36 @@ void AWormGameMode::StartNextTurn()
 
     // If no valid character is found, end the game
     if (!foundValidCharacter) {
-        CheckGameEndCondition();
+        CheckGameOverCondition();
+    }
+    for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+    {
+        AWormPlayerController* PC = Cast<AWormPlayerController>(It->Get());
+        if (PC && PC->IsLocalController())
+        {
+            PC->RefreshMainHUD();
+        }
+    }
+    // IMPORTANT: Force GameState to replicate updated values
+    if (WormGS) {
+        WormGS->ForceNetUpdate();
     }
 }
 
+// Enhanced StartTurnTimer function to update GameState
+void AWormGameMode::StartTurnTimer()
+{
+    GetWorldTimerManager().SetTimer(TurnTimerHandle, this, &AWormGameMode::OnTurnTimeExpired, TurnDuration, false);
+    
+    AWormGameState* WormGS = GetGameState<AWormGameState>();
+    if (WormGS)
+    {
+        WormGS->RemainingTurnTime = TurnDuration;
+        WormGS->ForceNetUpdate();
+    }
+}
 
+// Enhanced EndCurrentTurn with GameState updates
 void AWormGameMode::EndCurrentTurn()
 {
     // Cancel current timer
@@ -241,6 +289,20 @@ void AWormGameMode::EndCurrentTurn()
     
     // Call turn end event
     OnTurnEnded(ActiveController);
+    for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+    {
+        AWormPlayerController* PC = Cast<AWormPlayerController>(It->Get());
+        if (PC && PC->IsLocalController())
+        {
+            PC->RefreshMainHUD();
+        }
+    }
+    // Force GameState update before next turn
+    AWormGameState* WormGS = GetGameState<AWormGameState>();
+    if (WormGS)
+    {
+        WormGS->ForceNetUpdate();
+    }
     
     // Start next turn after a delay
     GetWorldTimerManager().SetTimer(TurnTimerHandle, this, &AWormGameMode::StartNextTurn, 2.0f, false);
@@ -252,34 +314,78 @@ void AWormGameMode::OnTurnTimeExpired()
     EndCurrentTurn();
 }
 
-bool AWormGameMode::CheckGameEndCondition()
+bool AWormGameMode::CheckGameOverCondition()
 {
-    // Count active teams
+    // Obtenir le GameState pour accéder aux équipes
+    AWormGameState* WormGS = GetGameState<AWormGameState>();
+    if (!WormGS) return false;
+
+    // Compter les équipes qui ont encore des membres vivants
     TSet<int32> ActiveTeams;
-    int32 AlivePlayerCount = 0;
+    int32 TotalAliveCharacters = 0;
     
-    for (AController* Controller : AllPlayerControllers)
+    // Parcourir toutes les équipes pour vérifier les personnages vivants
+    for (int32 i = 0; i < WormGS->Teams.Num(); i++)
     {
-        AWormCharacter* Character = GetWormCharacterFromController(Controller);
-        if (Character && Character->GetHealth() > 0)
+        const FTeamInfo& Team = WormGS->Teams[i];
+        bool TeamHasAliveMembers = false;
+        
+        // Vérifier si cette équipe a au moins un membre vivant
+        for (AWormCharacter* Character : Team.TeamMembers)
         {
-            AlivePlayerCount++;
-            
-            // If you have a team system, you can add:
-            // int32 TeamID = Character->GetTeamID();
-            // ActiveTeams.Add(TeamID);
+            if (Character && Character->GetHealth() > 0)
+            {
+                TeamHasAliveMembers = true;
+                TotalAliveCharacters++;
+                break;
+            }
+        }
+        
+        if (TeamHasAliveMembers)
+        {
+            ActiveTeams.Add(i);
         }
     }
     
-    // If only one player remains (or one team), the game is over
-    if (AlivePlayerCount <= 1)
+    UE_LOG(LogTemp, Warning, TEXT("CheckGameOverCondition: %d équipes actives, %d personnages vivants au total"),
+        ActiveTeams.Num(), TotalAliveCharacters);
+    
+    // La partie est terminée s'il ne reste qu'une seule équipe active ou aucune
+    if (ActiveTeams.Num() <= 1)
     {
-        // Handle game end
-        return true;
+        // Trouver l'équipe gagnante et déclencher la fin de partie
+        if (ActiveTeams.Num() == 1)
+        {
+            int32 WinningTeamId = *ActiveTeams.CreateIterator();
+            const FTeamInfo& WinningTeam = WormGS->Teams[WinningTeamId];
+            
+            // Trouver un personnage vivant de l'équipe gagnante pour obtenir le nom
+            for (AWormCharacter* Character : WinningTeam.TeamMembers)
+            {
+                if (Character && Character->GetHealth() > 0)
+                {
+                    FString WinnerName = WinningTeam.TeamName;
+                    UE_LOG(LogTemp, Warning, TEXT("Équipe gagnante: %s (ID: %d)"), 
+                        *WinnerName, WinningTeamId);
+                    
+                    // Déclencher la fin de partie avec le nom de l'équipe gagnante
+                    WormGS->TriggerGameOver(WinnerName);
+                    return true;
+                }
+            }
+        }
+        else
+        {
+            // Aucune équipe active - match nul ou erreur
+            UE_LOG(LogTemp, Warning, TEXT("Aucune équipe active - Match nul"));
+            WormGS->TriggerGameOver(TEXT("Match nul"));
+            return true;
+        }
     }
     
     return false;
 }
+
 
 void AWormGameMode::OnTurnStarted_Implementation(AController* ActiveController)
 {
@@ -314,8 +420,6 @@ TArray<AImprovedVoxelBuilding*> AWormGameMode::GetAllVoxelBuildings()
     return AImprovedVoxelBuilding::FindAllVoxelBuildings(this);
 }
 
-// Updated GenerateVoxelBuildings function with better replication
-
 void AWormGameMode::GenerateVoxelBuildings()
 {
     if (!VoxelBuildingClass)
@@ -326,6 +430,11 @@ void AWormGameMode::GenerateVoxelBuildings()
 
     // Appliquer les paramètres de terrain avant de générer
     ApplyTerrainSettings();
+
+    UE_LOG(LogTemp, Warning, TEXT("Generating %d regular voxel buildings..."), NumberOfBuildings);
+
+    FActorSpawnParameters SpawnParams;
+    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
 
     // Obtenir les paramètres de terrain
     UVoxelTerrainSettingsManager* Manager = UVoxelTerrainSettingsManager::GetInstance();
@@ -341,25 +450,8 @@ void AWormGameMode::GenerateVoxelBuildings()
         Settings = FVoxelTerrainSettings();
     }
 
-    // Get building counts
-    int32 RegularBuildingCount = NumberOfBuildings;
-    int32 StairsBuildingCount = 0;
-    bool bGenerateStairs = false;
-
-    if (Manager)
-    {
-        bGenerateStairs = Settings.bGenerateStairsBuildings;
-        StairsBuildingCount = Settings.NumberOfStairsBuildings;
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("Generating %d regular buildings and %d stairs buildings..."),
-        RegularBuildingCount, StairsBuildingCount);
-
-    FActorSpawnParameters SpawnParams;
-    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
-
-    // Generate regular buildings
-    for (int32 i = 0; i < RegularBuildingCount; i++)
+    // Generate regular box buildings
+    for (int32 i = 0; i < NumberOfBuildings; i++)
     {
         // Calculer une position aléatoire dans la zone
         float X = FMath::RandRange(-SpawnAreaSize, SpawnAreaSize);
@@ -379,7 +471,10 @@ void AWormGameMode::GenerateVoxelBuildings()
 
         if (Building)
         {
-            UE_LOG(LogTemp, Warning, TEXT("Regular building %d generated at %s"), i, *Location.ToString());
+            UE_LOG(LogTemp, Warning, TEXT("Regular voxel building %d generated at %s"), i, *Location.ToString());
+
+            // Set building type to standard
+            Building->BuildingType = EVoxelBuildingType::Standard;
 
             // Appliquer les paramètres de terrain
             Building->GridSizeX = Settings.GridSizeX;
@@ -392,76 +487,70 @@ void AWormGameMode::GenerateVoxelBuildings()
             Building->bSpawnDebrisOnDestruction = Settings.bSpawnDebrisOnDestruction;
             Building->DebrisAmountMultiplier = Settings.DebrisAmountMultiplier;
             Building->bSpawnImpactCloud = Settings.bSpawnImpactCloud;
-            Building->bIsStairsBuilding = false;
-            Building->StairsDirection = 0;
-
-            // Make sure properties are replicated before generating
             Building->ForceNetUpdate();
 
-            // Small delay before generation to ensure properties are replicated
-            FTimerHandle GenerationTimerHandle;
-            FTimerDelegate GenerationDelegate;
-            GenerationDelegate.BindUObject(Building, &AImprovedVoxelBuilding::GenerateBuilding);
-            GetWorldTimerManager().SetTimer(GenerationTimerHandle, GenerationDelegate, 0.1f, false);
+            // Generate building
+            Building->GenerateBuilding();
         }
     }
 
-    // Generate stairs buildings if enabled
-    if (bGenerateStairs && StairsBuildingCount > 0)
+    // Check if staircase buildings are enabled
+    if (Settings.bEnableStaircaseBuildings && Settings.NumberOfStaircaseBuildings > 0)
     {
-        for (int32 i = 0; i < StairsBuildingCount; i++)
+        UE_LOG(LogTemp, Warning, TEXT("Generating %d staircase buildings..."), Settings.NumberOfStaircaseBuildings);
+
+        // Generate staircase buildings
+        for (int32 i = 0; i < Settings.NumberOfStaircaseBuildings; i++)
         {
-            // Calculate a random position in the area (spread out from regular buildings)
-            float Angle = (float)i / StairsBuildingCount * 2.0f * PI;
-            float Radius = SpawnAreaSize * 0.7f; // Place at 70% of the max area
-            float X = FMath::Cos(Angle) * Radius;
-            float Y = FMath::Sin(Angle) * Radius;
+            // Position staircase buildings in a different area to avoid overlapping
+            float X = FMath::RandRange(-SpawnAreaSize * 0.8f, SpawnAreaSize * 0.8f);
+            float Y = FMath::RandRange(-SpawnAreaSize * 0.8f, SpawnAreaSize * 0.8f);
             float Z = 0.0f;
 
-            FVector Location = FVector(X, Y, Z);
-            FRotator Rotation = FRotator(0.0f, FMath::RandRange(0.0f, 360.0f), 0.0f);
+            // Add some distance from regular buildings
+            if (X > 0) X += 400.0f;
+            else X -= 400.0f;
 
-            // Spawn stairs building
-            AImprovedVoxelBuilding* Building = GetWorld()->SpawnActor<AImprovedVoxelBuilding>(
+            if (Y > 0) Y += 400.0f;
+            else Y -= 400.0f;
+
+            FVector Location = FVector(X, Y, Z);
+            // Rotate staircases to vary their orientation
+            FRotator Rotation = FRotator(0.0f, FMath::RandRange(1, 3) * 90.0f, 0.0f);
+
+            // Spawn staircase building
+            AImprovedVoxelBuilding* StairBuilding = GetWorld()->SpawnActor<AImprovedVoxelBuilding>(
                 VoxelBuildingClass,
                 Location,
                 Rotation,
                 SpawnParams
             );
 
-            if (Building)
+            if (StairBuilding)
             {
-                UE_LOG(LogTemp, Warning, TEXT("Stairs building %d generated at %s with direction %d"),
-                    i, *Location.ToString(), i % 4);
+                UE_LOG(LogTemp, Warning, TEXT("Staircase building %d generated at %s with rotation %s"),
+                    i, *Location.ToString(), *Rotation.ToString());
 
-                // Apply terrain settings
-                Building->GridSizeX = Settings.GridSizeX;
-                Building->GridSizeY = Settings.GridSizeY;
-                Building->GridSizeZ = Settings.GridSizeZ;
-                Building->VoxelSize = Settings.VoxelSize;
-                Building->SmoothingFactor = Settings.SmoothingFactor;
-                Building->bUseRandomColors = Settings.bUseRandomColors;
-                Building->CubeMargin = Settings.CubeMargin;
-                Building->bSpawnDebrisOnDestruction = Settings.bSpawnDebrisOnDestruction;
-                Building->DebrisAmountMultiplier = Settings.DebrisAmountMultiplier;
-                Building->bSpawnImpactCloud = Settings.bSpawnImpactCloud;
+                // Configure as staircase building with same parameters as regular buildings
+                StairBuilding->BuildingType = EVoxelBuildingType::Staircase;
+                StairBuilding->GridSizeX = Settings.GridSizeX;
+                StairBuilding->GridSizeY = Settings.GridSizeY;
+                StairBuilding->GridSizeZ = Settings.GridSizeZ;
+                StairBuilding->VoxelSize = Settings.VoxelSize;
+                StairBuilding->SmoothingFactor = Settings.SmoothingFactor;
+                StairBuilding->bUseRandomColors = Settings.bUseRandomColors;
+                StairBuilding->CubeMargin = Settings.CubeMargin;
+                StairBuilding->bSpawnDebrisOnDestruction = Settings.bSpawnDebrisOnDestruction;
+                StairBuilding->DebrisAmountMultiplier = Settings.DebrisAmountMultiplier;
+                StairBuilding->bSpawnImpactCloud = Settings.bSpawnImpactCloud;
+                StairBuilding->ForceNetUpdate();
 
-                // Set stairs properties
-                Building->bIsStairsBuilding = true;
-                Building->StairsDirection = i % 4; // Cycle through 4 directions
-
-                // Make sure properties are replicated before generating
-                Building->ForceNetUpdate();
-
-                // Small delay before generation to ensure properties are replicated
-                FTimerHandle StairsGenerationTimerHandle;
-                FTimerDelegate StairsGenerationDelegate;
-                StairsGenerationDelegate.BindUObject(Building, &AImprovedVoxelBuilding::GenerateBuilding);
-                GetWorldTimerManager().SetTimer(StairsGenerationTimerHandle, StairsGenerationDelegate, 0.2f, false);
+                // Generate building
+                StairBuilding->GenerateBuilding();
             }
         }
     }
-    
+
     // Update GameState with reference to buildings
     AWormGameState* WormGS = GetGameState<AWormGameState>();
     if (WormGS)
@@ -470,6 +559,26 @@ void AWormGameMode::GenerateVoxelBuildings()
         // For now, just log success
         UE_LOG(LogTemp, Warning, TEXT("Voxel buildings generated and available through Game Mode"));
     }
+}
+
+// Update to ApplyTerrainSettings function in WormGameMode.cpp
+void AWormGameMode::ApplyTerrainSettings()
+{
+    // Obtenir les paramètres actuels
+    UVoxelTerrainSettingsManager* Manager = UVoxelTerrainSettingsManager::GetInstance();
+    if (!Manager)
+    {
+        return;
+    }
+
+    FVoxelTerrainSettings Settings = Manager->GetSettings();
+
+    // Mettre à jour les propriétés du GameMode
+    NumberOfBuildings = Settings.NumberOfBuildings;
+    SpawnAreaSize = Settings.SpawnAreaSize;
+
+    UE_LOG(LogTemp, Warning, TEXT("Applied terrain settings: Buildings=%d, Area=%.1f, Staircases=%d"),
+        NumberOfBuildings, SpawnAreaSize, Settings.bEnableStaircaseBuildings ? Settings.NumberOfStaircaseBuildings : 0);
 }
 
 
@@ -591,25 +700,6 @@ void AWormGameMode::VerifyWeaponsForAllPlayers()
     }
 }
 
-void AWormGameMode::ApplyTerrainSettings()
-{
-    // Obtenir les paramètres actuels
-    UVoxelTerrainSettingsManager* Manager = UVoxelTerrainSettingsManager::GetInstance();
-    if (!Manager)
-    {
-        return;
-    }
-    
-    FVoxelTerrainSettings Settings = Manager->GetSettings();
-    
-    // Mettre à jour les propriétés du GameMode
-    NumberOfBuildings = Settings.NumberOfBuildings;
-    SpawnAreaSize = Settings.SpawnAreaSize;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Applied terrain settings: Regular Buildings=%d, Stairs Buildings=%d, Area=%.1f"),
-        NumberOfBuildings, Settings.bGenerateStairsBuildings ? Settings.NumberOfStairsBuildings : 0, SpawnAreaSize);
-}
-
 AGameInitManager* AWormGameMode::SetupGameInitialization()
 {
     if (GameInitManager)
@@ -704,13 +794,24 @@ void AWormGameMode::ShowGameOverWidget()
     GameOverWidget->AddToViewport(1000); // High Z-order to be on top
     
     // Set input mode to UI
-    PC->SetInputMode(FInputModeUIOnly());
-    PC->bShowMouseCursor = true;
+    //for all player controllers
+    for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+    {
+        APlayerController* PCBis = It->Get();
+        if (PCBis)
+        {
+            PCBis->bShowMouseCursor = true;
+            PCBis->bEnableClickEvents = true;
+            PCBis->bEnableMouseOverEvents = true;
+            PCBis->SetInputMode(FInputModeUIOnly());
+        }
+    }
     
     // Freeze the game
-    UGameplayStatics::SetGamePaused(GetWorld(), true);
+ //   UGameplayStatics::SetGamePaused(GetWorld(), true);
 }
 
+// Modify StartRestartSequence in WormGameMode.cpp:
 
 void AWormGameMode::StartRestartSequence()
 {
@@ -721,18 +822,7 @@ void AWormGameMode::StartRestartSequence()
 
     UE_LOG(LogTemp, Warning, TEXT("Starting game restart sequence"));
     
-    // Reset game state
-    AWormGameState* WormGS = GetGameState<AWormGameState>();
-    if (WormGS)
-    {
-        WormGS->bGameOver = false;
-        WormGS->WinnerName = TEXT("");
-        WormGS->PlayerDamageDealt.Empty();
-        
-        // Force replication
-        WormGS->ForceNetUpdate();
-    }
-    // Clear any existing game over widget from all screens
+    // First, clear all game over widgets from all screens
     for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
     {
         APlayerController* PC = It->Get();
@@ -750,20 +840,47 @@ void AWormGameMode::StartRestartSequence()
             }
         }
     }
-    // Reset all characters
+    
+    // Reset game state FIRST before touching any actors
+    AWormGameState* WormGS = GetGameState<AWormGameState>();
+    if (WormGS)
+    {
+        WormGS->bGameOver = false;
+        WormGS->WinnerName = TEXT("");
+        WormGS->PlayerDamageDealt.Empty();
+        
+        // Reset teams - important: Empty team arrays BEFORE destroying characters
+        for (FTeamInfo& Team : WormGS->Teams)
+        {
+            Team.TeamMembers.Empty();
+        }
+        
+        // Force replication
+        WormGS->ForceNetUpdate();
+    }
+    
+    // Unpossess all controllers first to avoid crashes
     for (FConstControllerIterator It = GetWorld()->GetControllerIterator(); It; ++It)
     {
         AController* Controller = It->Get();
-        if (Controller)
+        if (Controller && Controller->GetPawn())
         {
-            // Respawn controlled characters
-            if (Controller->GetPawn())
-            {
-                Controller->GetPawn()->Destroy();
-            }
-            
-            // Force possession of a new character when restart completes
-            // This will be handled by GameInitManager for player positioning
+            Controller->UnPossess();
+        }
+    }
+    
+    // Now reset all existing characters instead of destroying them
+    TArray<AActor*> AllCharacters;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormCharacter::StaticClass(), AllCharacters);
+    UE_LOG(LogTemp, Warning, TEXT("Cleaning up %d worm characters from previous session"), AllCharacters.Num());
+    
+    for (AActor* Actor : AllCharacters)
+    {
+        if (Actor)
+        {
+            // Fully destroy the actor instead of just resetting it
+            UE_LOG(LogTemp, Warning, TEXT("Destroying character: %s"), *Actor->GetName());
+            Actor->Destroy();
         }
     }
     
@@ -776,6 +893,7 @@ void AWormGameMode::StartRestartSequence()
             Building->Destroy();
         }
     }
+    
     // Clean up any leftover weapons
     TArray<AActor*> LeftoverWeapons;
     UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWormWeapon::StaticClass(), LeftoverWeapons);
@@ -787,34 +905,42 @@ void AWormGameMode::StartRestartSequence()
             Weapon->Destroy();
         }
     }
-    // Use GameInitManager to handle the restart
-    if (GameInitManager)
-    {
-        // Show loading screen first
-        if (WormGS && WormGS->LoadingManager)
-        {
-            WormGS->ShowLoadingScreen(10.0f);
-        }
+    
+    // Wait a short moment to ensure all actors are properly destroyed
+    FTimerHandle CleanupTimerHandle;
+    GetWorld()->GetTimerManager().SetTimer(
+        CleanupTimerHandle,
+        [this]() {
+            // Reset game parameters
+            CurrentTeamIndex = 0;
+            CurrentCharacterIndex = 0;
+            
+            // Use GameInitManager to handle the restart
+            AWormGameState* WormGS = GetGameState<AWormGameState>();
+            if (WormGS)
+            {
+                // Show loading screen first
+                if (WormGS->LoadingManager)
+                {
+                    WormGS->ShowLoadingScreen(10.0f);
+                }
 
-        // Start initialization sequence after a short delay
-        FTimerHandle RestartTimerHandle;
-        GetWorld()->GetTimerManager().SetTimer(
-            RestartTimerHandle,
-            [this]() {
+                // Start initialization sequence using the GameInitManager
                 if (GameInitManager)
                 {
                     GameInitManager->StartInitializationSequence();
                 }
-            },
-            1.0f, // Small delay to ensure everything is ready
-            false
-        );
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("Cannot restart: GameInitManager is null"));
-    }
+                else
+                {
+                    UE_LOG(LogTemp, Error, TEXT("Cannot restart: GameInitManager is null"));
+                }
+            }
+        },
+        0.5f, // Small delay to ensure destruction completes
+        false
+    );
 }
+
 
 
 void AWormGameMode::InitializeWaterSystem()
@@ -913,13 +1039,62 @@ void AWormGameMode::CheckAllPlayersReady()
     }
 }
 
-void AWormGameMode::StartTurnTimer()
+
+FString AWormGameMode::GetCharacterInGameName(UClass* CharacterClass, int32 TeamId, int32 CharIndexInTeam)
 {
-    GetWorldTimerManager().SetTimer(TurnTimerHandle, this, &AWormGameMode::OnTurnTimeExpired, TurnDuration, false);
+    if (!CharacterClass)
+        return FString("Unknown");
     
-    AWormGameState* WormGS = GetGameState<AWormGameState>();
-    if (WormGS)
+    // Get the character class name
+    FString ClassName = CharacterClass->GetName();
+    
+    // Log the input parameters
+    UE_LOG(LogTemp, Warning, TEXT("Getting in-game name for class: %s"), *ClassName);
+    
+    // Find which character type this is
+    FString CharacterType;
+    for (const FString& Type : {"Laura", "Guy", "David", "Emily"})
     {
-        WormGS->RemainingTurnTime = TurnDuration;
+        if (ClassName.Contains(Type))
+        {
+            CharacterType = Type;
+            UE_LOG(LogTemp, Warning, TEXT("Found character type: %s"), *CharacterType);
+            break;
+        }
     }
+    
+    if (CharacterType.IsEmpty())
+        return FString::Printf(TEXT("Agent %d-%d"), TeamId, CharIndexInTeam);
+    
+    // Get name array for this type
+    FCharacterNameList* NameList = CharacterNamesByType.Find(CharacterType);
+    if (!NameList || NameList->Names.Num() == 0)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("No names found for character type: %s"), *CharacterType);
+        return FString::Printf(TEXT("%s %d-%d"), *CharacterType, TeamId, CharIndexInTeam);
+    }
+    // Use the character index to pick a name, wrapping around if needed
+    int32 NameIndex = CharIndexInTeam % NameList->Names.Num();
+    
+    // Make sure we have a valid name
+    if (!NameList->Names.IsValidIndex(NameIndex))
+        return FString::Printf(TEXT("%s %d-%d"), *CharacterType, TeamId, CharIndexInTeam);
+    
+    FString CharacterName = NameList->Names[NameIndex];
+    //print the list of names and the selected name
+    FString NamesList;
+    for (const FString& Name : NameList->Names)
+    {
+        NamesList += Name + ", ";
+    }
+    UE_LOG(LogTemp, Warning, TEXT("Available names for %s: %s"), *CharacterType, *NamesList);
+    UE_LOG(LogTemp, Warning, TEXT("Selected character name: %s"), *CharacterName);
+    // Double check the name is valid
+    if (CharacterName.IsEmpty())
+        return FString::Printf(TEXT("%s %d-%d"), *CharacterType, TeamId, CharIndexInTeam);
+    
+    // Log the selected name for debugging
+    UE_LOG(LogTemp, Warning, TEXT("Selected character name: %s"), *CharacterName);
+    
+    return CharacterName;
 }

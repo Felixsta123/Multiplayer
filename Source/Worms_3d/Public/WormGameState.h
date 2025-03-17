@@ -2,9 +2,9 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameState.h"
+#include "Worms_3d/Init/NetworkLoadingManager.h"
 #include "../AWormCharacter.h"
-#include "Worms_3d/AVoxelBuilding.h"
-#include "../NetworkLoadingManager.h"
+
 #include "WormGameState.generated.h"
 //struct that holds player DamagePlayerNames;DamageValues
 USTRUCT(BlueprintType)
@@ -23,6 +23,7 @@ struct FPlayerDamageInfo
     FPlayerDamageInfo(const FString& InName, float InDamage) 
         : PlayerName(InName), DamageValue(InDamage) {}
 };
+
 USTRUCT(BlueprintType)
 struct FTeamInfo
 {
@@ -54,11 +55,45 @@ public:
     UPROPERTY(EditDefaultsOnly, Category = "UI")
     TSubclassOf<UGameLoadingWidget> LoadingWidgetClass;
     // Replicated properties for all clients
-    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Turns")
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnTurnTimerUpdated);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnActivePlayerChanged);
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnTeamStatusUpdated);
+
+    // Timer pour le tour actuel - déjà existant mais on ajoute un ReplicatedUsing
+    UPROPERTY(ReplicatedUsing=OnRep_RemainingTurnTime, BlueprintReadOnly, Category = "UI")
+    float RemainingTurnTime;
+
+    // Joueur actif pour le tour
+    UPROPERTY(ReplicatedUsing=OnRep_CurrentPlayerIndex, BlueprintReadOnly, Category = "UI")
     int32 CurrentPlayerIndex;
     
-    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Turns")
-    float RemainingTurnTime;
+    void ClearAllGameTimers();
+
+    // Les deux fonctions ci-dessous existent déjà, mais on va ajouter les callbacks OnRep
+    UFUNCTION()
+    void OnRep_CurrentPlayerIndex();
+
+    UFUNCTION()
+    void OnRep_RemainingTurnTime();
+
+    UFUNCTION()
+    void OnRep_Teams();
+    UPROPERTY(BlueprintAssignable, Category = "UI")
+    FOnTurnTimerUpdated OnTurnTimerUpdated;
+
+    UPROPERTY(BlueprintAssignable, Category = "UI")
+    FOnActivePlayerChanged OnActivePlayerChanged;
+
+    UPROPERTY(BlueprintAssignable, Category = "UI")
+    FOnTeamStatusUpdated OnTeamStatusUpdated;
+
+    // Fonctions utilitaires pour les widgets
+    UFUNCTION(BlueprintPure, Category = "UI")
+    bool IsLocalPlayerTurn() const;
+
+    UFUNCTION(BlueprintPure, Category = "UI")
+    AWormCharacter* GetActiveCharacter() const;
+
     
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Turns")
     float TurnDuration;

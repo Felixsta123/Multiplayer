@@ -1,6 +1,6 @@
 ﻿#include "AWormsProjectile.h"
 
-#include "AVoxelBuilding.h"
+#include "Worms_3d/Building/AVoxelBuilding.h"
 #include "Components/SphereComponent.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
@@ -546,38 +546,6 @@ void AWormProjectile::Explode()
 }
 
 
-void AWormProjectile::Multicast_SpawnDestructionField_Implementation(FVector Location)
-{
-    if (!GetWorld()) return;
-
-    // Spawn un Field System Actor
-    AFieldSystemActor* FieldActor = GetWorld()->SpawnActor<AFieldSystemActor>(AFieldSystemActor::StaticClass(), Location, FRotator::ZeroRotator);
-    if (!FieldActor) return;
-
-    UFieldSystemComponent* FieldSystem = FieldActor->GetFieldSystemComponent();
-    if (!FieldSystem) return;
-
-    // Création d'un Radial Falloff Field
-    URadialFalloff* RadialFalloff = NewObject<URadialFalloff>();
-    RadialFalloff->Magnitude = -5000.0f;   // Force de destruction (doit être négative)
-    RadialFalloff->Radius = 300.0f;       // Rayon d'affectation
-    RadialFalloff->Position = Location;
-    RadialFalloff->Falloff = EFieldFalloffType::Field_FallOff_None;
-
-    // Création d'une force linéaire
-    UUniformVector* LinearForce = NewObject<UUniformVector>();
-    LinearForce->Magnitude = 2000.0f;
-    LinearForce->Direction = FVector(0, 0, 1); // Force vers le haut
-
-    // Application au Field System
-    FieldSystem->ApplyPhysicsField(true, EFieldPhysicsType::Field_LinearForce, nullptr, LinearForce);
-    FieldSystem->ApplyPhysicsField(true, EFieldPhysicsType::Field_ExternalClusterStrain, nullptr, RadialFalloff);
-
-    // Détruire après quelques secondes
-    FieldActor->SetLifeSpan(2.0f);
-}
-
-
 void AWormProjectile::Multicast_Explode_Implementation(FVector Location)
 {
     // Jouer l'effet d'explosion
@@ -674,6 +642,10 @@ void AWormProjectile::ApplyDamageToCharacters(const FVector& ExplosionLocation, 
 
             UE_LOG(LogTemp, Warning, TEXT("Applying %.1f damage to %s with impulse dir: %s, strength: %.1f"), 
                 DamageToApply, *WormChar->GetName(), *ImpactDirection.ToString(), ImpulseStrength);
+            if (GetInstigator())
+            {
+                WormChar->SetInstigator(GetInstigator());
+            }
 
             // Apply damage and impulse
             WormChar->ApplyDamageToWorm(DamageToApply, ImpactDirection * ImpulseStrength);

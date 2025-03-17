@@ -4,11 +4,20 @@
 #include "CoreMinimal.h"
 #include "GameFramework/GameMode.h"
 #include "../AWormCharacter.h"
-#include "Worms_3d/AVoxelBuilding.h" // Added VoxelBuilding include
-#include "../W_GameLoadingScreen.h"
-#include "../WaterSystem.h"
+#include "Worms_3d/Building/AVoxelBuilding.h" // Added VoxelBuilding include
+#include "Worms_3d/UI/W_GameLoadingScreen.h"
+#include "Worms_3d/Env//WaterSystem.h"
 #include "WormGameMode.generated.h"
 
+
+USTRUCT(BlueprintType)
+struct FCharacterNameList
+{
+    GENERATED_BODY()
+    
+    UPROPERTY(EditDefaultsOnly, Category = "Names")
+    TArray<FString> Names;
+};
 UCLASS()
 class WORMS_3D_API AWormGameMode : public AGameMode
 {
@@ -29,10 +38,10 @@ public:
     void ApplyTerrainSettings();
     // Turn management functions
     UFUNCTION(BlueprintCallable, Category = "Turns")
-    void StartNextTurn();
+    virtual void StartNextTurn();
     
     UFUNCTION(BlueprintCallable, Category = "Turns")
-    void EndCurrentTurn();
+    virtual void EndCurrentTurn();
     
     UFUNCTION(BlueprintNativeEvent, Category = "Turns")
     void OnTurnStarted(AController* ActiveController);
@@ -55,7 +64,8 @@ public:
     // Index of active controller
     UPROPERTY(BlueprintReadWrite, Category = "Turns")
     int32 CurrentPlayerIndex;
-    
+    UPROPERTY(EditDefaultsOnly, Category = "Identification")
+    TMap<FString, FCharacterNameList> CharacterNamesByType;
     // Turn duration in seconds
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Turns")
     float TurnDuration;
@@ -140,9 +150,13 @@ public:
 
     UFUNCTION()
     void StartTurnTimer();
+    FString GetCharacterInGameName(UClass* CharacterClass, int32 TeamId, int32 CharIndexInTeam);
     // Offset pour les positions de spawn d'une même équipe
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Setup")
     float TeamSpawnOffset = 100.0f;
+    FTimerHandle TurnTimerHandle;
+    UPROPERTY(BlueprintReadWrite, Category = "Turns")
+    bool bDeferTurnEnding = false;
 protected:
     // Miscellaneous variables 
     UPROPERTY(BlueprintReadWrite, Category = "Game")
@@ -155,14 +169,11 @@ protected:
     TArray<APlayerController*> ReadyPlayers;
     virtual void CheckAllPlayersReady();
     // Turn timer handle
-    FTimerHandle TurnTimerHandle;
 
     // Function called when time expires
     UFUNCTION()
     void OnTurnTimeExpired();
+    bool CheckGameOverCondition();
     
-    // Function to check game end condition
-    UFUNCTION(BlueprintCallable, Category = "Game")
-    bool CheckGameEndCondition();
     
 };

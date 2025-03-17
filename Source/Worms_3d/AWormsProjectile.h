@@ -97,6 +97,10 @@ protected:
     virtual void OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, 
                FVector NormalImpulse, const FHitResult& Hit);
     void Multicast_SpawnDestructionField_Implementation(FVector Location);
+
+    // Fonction pour l'explosion
+    UFUNCTION(BlueprintCallable)
+    void Explode();
     
     // Timer pour l'explosion auto
     FTimerHandle DetonationTimerHandle;

@@ -7,6 +7,7 @@
 #include "InputActionValue.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "Worms_3d/UI/W_NameIndicator.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "AWormCharacter.generated.h"
@@ -74,6 +75,24 @@ public:
 
     UPROPERTY(BlueprintReadOnly, Category = "UI")
     UUserWidget* AimingWidget;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Worm")
+    float MaxHealth = 100.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI")
+    TSubclassOf<UWNameIndicatorWidget> NameIndicatorWidgetClass;
+        
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "UI")
+    class UWidgetComponent* NameWidgetComponent;
+
+    UPROPERTY( BlueprintReadWrite, Category = "Identification", Replicated)
+    FString InGameName;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Team", Replicated)
+    int32 TeamId = -1;
+
+    UFUNCTION(BlueprintCallable, Category = "UI")
+    void InitializeNameWidget();
     // Animation parameter
     UPROPERTY(BlueprintReadOnly, Category = "Animation")
     float AnimationSpeed;
@@ -84,12 +103,13 @@ public:
     // Fonction pour déclencher l'animation de dégâts
     UFUNCTION(BlueprintCallable, Category = "Animation")
     void PlayHitReaction();
+    
     void OnSwitchTeamMemberAction(const FInputActionValue& Value);
     // === FONCTIONS DE JEU PRINCIPALES ===
     
     // Armes
     UFUNCTION(BlueprintCallable, Category = "Worm")
-    void FireWeapon();
+    virtual void FireWeapon();
     
     UFUNCTION(BlueprintCallable, Category = "Worm")
     void SwitchWeapon(int32 WeaponIndex);
@@ -129,14 +149,14 @@ public:
     // Événement de changement de tour
     UFUNCTION(BlueprintNativeEvent, Category = "Game")
     void OnTurnChanged(bool bIsTurn);
-    UPROPERTY(Replicated)
-    FGuid CurrentWeaponInstanceID;
+
     // === FONCTIONS DE CYCLE DE VIE ===
     virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
     virtual void PossessedBy(AController* NewController) override;
+    virtual void UnPossessed() override;
 
     // === SYSTÈME D'ARMES ===
     UFUNCTION(NetMulticast, Reliable)
@@ -182,11 +202,26 @@ public:
     // Current weapon wheel widget instance
     // UPROPERTY()
 
-    UPROPERTY(Replicated, BlueprintReadWrite, Category = "Team")
-    int32 TeamId = -1;
-
+    
     UPROPERTY(Replicated, BlueprintReadWrite, Category = "Team")
     int32 CharacterIndexInTeam;
+    
+    // === SYSTÈME DE TOUR DE JEU === 
+    FTimerHandle AutoEndTurnTimerHandle;
+    bool bAutoEndTurnTimerActive;
+    
+    UFUNCTION(BlueprintCallable, Category = "Worm")
+    void HandleCharacterDeath();
+
+    // Check if character is dead
+    UFUNCTION(BlueprintPure, Category = "Worm")
+    bool IsDead() const { return Health <= 0.0f; }
+
+    UFUNCTION(NetMulticast, Reliable)
+    void Multicast_ProcessDeath();
+        
+    UPROPERTY(ReplicatedUsing = OnRep_Health, BlueprintReadOnly, Category = "Worm")
+    float Health;
     class UUserWidget* WeaponWheelWidget;
 
     // Functions to handle weapon wheel
@@ -207,9 +242,7 @@ protected:
     // === ÉTAT DU PERSONNAGE ===
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Worm")
     bool bIsMyTurn;
-    
-    UPROPERTY(ReplicatedUsing = OnRep_Health, BlueprintReadOnly, Category = "Worm")
-    float Health;
+
     
     UPROPERTY(ReplicatedUsing = OnRep_CurrentWeaponIndex, BlueprintReadOnly, Category = "Worm")
     int32 CurrentWeaponIndex;
@@ -229,10 +262,7 @@ protected:
     
     float LastWeaponUseTime;
 
-    // === SYSTÈME DE TOUR DE JEU === 
-    FTimerHandle AutoEndTurnTimerHandle;
-    bool bAutoEndTurnTimerActive;
-    
+
     UFUNCTION()
     void OnAutoEndTurnTimerExpired();
 
@@ -306,8 +336,8 @@ protected:
     void OnAimActionEnded(const FInputActionValue& Value);
 
     // === FONCTIONS DE MOUVEMENT ===
-    void MoveForward(float Value);
-    void MoveRight(float Value);
+    virtual void MoveForward(float Value);
+    virtual void MoveRight(float Value); // Declare as virtual
     void LimitMovementWhenNotMyTurn();
     
     // === FONCTIONS LIÉES AUX ARMES ===
@@ -367,4 +397,5 @@ protected:
     // We'll reuse the existing look actions for missile control
     void HandleMissileControl();
 
+    virtual void UpdateMovementPoints();
 };
