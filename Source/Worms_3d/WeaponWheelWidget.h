@@ -28,6 +28,22 @@ public:
     virtual void NativeConstruct() override;
     virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
     virtual FReply NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon Grid", meta = (ClampMin = "1", ClampMax = "10"))
+    int32 MaxButtonsPerRow = 3;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon Grid", meta = (ClampMin = "0", ClampMax = "100"))
+    float ButtonPadding = 20.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon Grid")
+    FVector2D ButtonSize = FVector2D(100.0f, 100.0f);
+
+    // Grid Position Adjustments
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon Grid")
+    float GridOffsetX = 50.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon Grid")
+    float GridOffsetY = 0.0f;
     
     // Create the weapon wheel buttons
     void CreateWeaponWheel();
