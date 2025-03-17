@@ -8,6 +8,7 @@
 #include "Engine/World.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Net/UnrealNetwork.h"
+#include "Worms_3d/TUTO/WormTutorialGameMode.h"
 
 
 AEnvironmentalEventsManager::AEnvironmentalEventsManager()
@@ -578,8 +579,14 @@ void AEnvironmentalEventsManager::InitializeWaterLevel(bool isTuto)
     float AverageHeight = CalculateAverageTerrainHeight();
     
     // Set initial water level well below terrain
-    float InitialLevel = AverageHeight - 500.0f; // 500 units below terrain
-    
+    float InitialLevel = AverageHeight - 700.0f; // 500 units below terrain
+    //check if its the tuto if yes make the water level -1000
+    AWormTutorialGameMode* GameMode = Cast<AWormTutorialGameMode>(GetWorld()->GetAuthGameMode());
+    if (GameMode)
+    {
+        // Si on est en tuto, on utilise la fonction de respawn spécifique
+        InitialLevel = -1000.0f;
+    } 
     // Limit to minimum configured level
     InitialLevel = FMath::Max(InitialLevel, WaterSystem->MinWaterLevel);
     

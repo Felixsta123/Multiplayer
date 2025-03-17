@@ -56,7 +56,7 @@ void UWeaponWheelWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTi
 
 void UWeaponWheelWidget::CreateWeaponWheel()
 {
-    UE_LOG(LogTemp, Warning, TEXT("CreateWeaponWheel with grid layout on right side"));
+    UE_LOG(LogTemp, Warning, TEXT("CreateWeaponWheel with grid layout in the centre of the screen"));
     
     // Clear any existing buttons
     for (UWeaponButtonWidget* Button : WeaponButtons)
@@ -90,25 +90,39 @@ void UWeaponWheelWidget::CreateWeaponWheel()
     
     UE_LOG(LogTemp, Warning, TEXT("Screen dimensions: %.1f x %.1f"), ViewportSize.X, ViewportSize.Y);
     
-    // Button size (consistent for all buttons)
-    FVector2D ButtonSize(100.0f, 100.0f);
+    // Button size is now defined as a property in the header
     
-    // Grid parameters
-    float RightMargin = 150.0f; // Distance from right edge of screen
-    float TopMargin = 100.0f;   // Distance from top of screen
-    float ButtonPadding = 20.0f; // Space between buttons
-    int32 MaxButtonsPerRow = 2;  // Number of buttons per row
+    // Use the properties defined in the header file
+    // Calculate grid dimensions
+    int32 NumRows = FMath::CeilToInt((float)WeaponCount / (float)MaxButtonsPerRow);
+    int32 LastRowButtons = WeaponCount % MaxButtonsPerRow;
+    if (LastRowButtons == 0 && WeaponCount > 0)
+    {
+        LastRowButtons = MaxButtonsPerRow;
+    }
     
-    // Calculate positions in a grid layout on the right side
+    // Calculate total grid width and height
+    float TotalGridWidth = MaxButtonsPerRow * ButtonSize.X + (MaxButtonsPerRow - 1) * ButtonPadding;
+    float TotalGridHeight = NumRows * ButtonSize.Y + (NumRows - 1) * ButtonPadding;
+    
+    // Calculate centre point of screen
+    float CentreX = ViewportSize.X * 0.5f;
+    float CentreY = ViewportSize.Y * 0.5f;
+    
+    // Calculate top-left corner of grid (to centre the entire grid)
+    float StartX = CentreX - (TotalGridWidth * 0.5f) + GridOffsetX;
+    float StartY = CentreY - (TotalGridHeight * 0.5f) + GridOffsetY;
+    
+    // Calculate positions in a grid layout centred on screen
     for (int32 i = 0; i < WeaponCount; ++i)
     {
         // Calculate row and column for grid layout
         int32 Row = i / MaxButtonsPerRow;
         int32 Col = i % MaxButtonsPerRow;
         
-        // Calculate position (from top-right corner of screen)
-        float X = ViewportSize.X - RightMargin - ((Col + 1) * (ButtonSize.X + ButtonPadding));
-        float Y = TopMargin + (Row * (ButtonSize.Y + ButtonPadding));
+        // Calculate position from top-left of grid
+        float X = StartX + (Col * (ButtonSize.X + ButtonPadding));
+        float Y = StartY + (Row * (ButtonSize.Y + ButtonPadding));
         
         UE_LOG(LogTemp, Warning, TEXT("Button %d: grid pos=(%d,%d), screen pos=(%.1f, %.1f)"), 
             i, Row, Col, X, Y);
@@ -121,7 +135,7 @@ void UWeaponWheelWidget::CreateWeaponWheel()
             UCanvasPanelSlot* CanvasSlot = WheelCanvas->AddChildToCanvas(ButtonWidget);
             if (CanvasSlot)
             {
-                // Set button size
+                // Set button size using our property
                 CanvasSlot->SetSize(ButtonSize);
                 
                 // Position on screen
@@ -250,11 +264,12 @@ int32 UWeaponWheelWidget::GetWeaponIndexFromMousePosition(FVector2D MousePositio
             FVector2D LocalMousePos = ButtonGeometry.AbsoluteToLocal(
                 WheelCanvas->GetCachedGeometry().LocalToAbsolute(MousePosition));
             
-            FVector2D ButtonSize = ButtonGeometry.GetLocalSize();
+            // Use a different name for the local variable to avoid conflict with class member
+            FVector2D ButtonLocalSize = ButtonGeometry.GetLocalSize();
             
             // Check if mouse is within button bounds
-            if (LocalMousePos.X >= 0 && LocalMousePos.X <= ButtonSize.X &&
-                LocalMousePos.Y >= 0 && LocalMousePos.Y <= ButtonSize.Y)
+            if (LocalMousePos.X >= 0 && LocalMousePos.X <= ButtonLocalSize.X &&
+                LocalMousePos.Y >= 0 && LocalMousePos.Y <= ButtonLocalSize.Y)
             {
                 return i; // Mouse is directly over this button
             }

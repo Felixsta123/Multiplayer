@@ -120,5 +120,4 @@ void UWTutorialWidget::ShowTutorialComplete()
         ObjectiveText->SetText(FText::FromString("Congratulations!"));
     }
     
-
 }

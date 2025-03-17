@@ -10,6 +10,7 @@
 #include "Engine/World.h"
 #include "TimerManager.h"
 #include "Net/Core/PushModel/PushModel.h"
+#include "Worms_3d/TUTO/WormTutorialGameMode.h"
 
 UWaterSystem::UWaterSystem()
 {
@@ -260,13 +261,24 @@ void UWaterSystem::OnWaterOverlap(UPrimitiveComponent* OverlappedComponent, AAct
                                   bool bFromSweep, const FHitResult& SweepResult)
 {
     // Vérifier si c'est un personnage
+    //check du game mode si on est en tuto ou non
+
+
+    
     AWormCharacter* Character = Cast<AWormCharacter>(OtherActor);
     if (Character)
     {
+        AWormTutorialGameMode* GameMode = Cast<AWormTutorialGameMode>(GetWorld()->GetAuthGameMode());
+        if (GameMode)
+        {
+            // Si on est en tuto, on utilise la fonction de respawn spécifique
+            GameMode->RespawnPlayerFromWater();
+            return;
+        } 
         // Jouer un effet de splash
         SpawnWaterSplashEffect(Character->GetActorLocation());
         
-        // Tuer le personnage
+        // Tuer le personnage   
         KillCharacterInWater(Character);
         
         UE_LOG(LogTemp, Warning, TEXT("Character %s entered water and died"), *Character->GetName());
