@@ -456,7 +456,15 @@ void AWormGameMode::GenerateVoxelBuildings()
         // Calculer une position aléatoire dans la zone
         float X = FMath::RandRange(-SpawnAreaSize, SpawnAreaSize);
         float Y = FMath::RandRange(-SpawnAreaSize, SpawnAreaSize);
-        float Z = 0.0f; // Position buildings at ground level
+        // Apply height variation if enabled
+        float Z = 0.0f;
+        if (Settings.MaxHeightVariation > 0)
+        {
+            // Random height between 0 and MaxHeightVariation
+            int32 HeightLevel = FMath::RandRange(0, Settings.MaxHeightVariation);
+            // Convert to actual Z position (using VoxelSize for proper scaling)
+            Z = HeightLevel * Settings.VoxelSize;
+        }
 
         FVector Location = FVector(X, Y, Z);
         FRotator Rotation = FRotator(0.0f, FMath::RandRange(0.0f, 360.0f), 0.0f);
@@ -506,7 +514,13 @@ void AWormGameMode::GenerateVoxelBuildings()
             float X = FMath::RandRange(-SpawnAreaSize * 0.8f, SpawnAreaSize * 0.8f);
             float Y = FMath::RandRange(-SpawnAreaSize * 0.8f, SpawnAreaSize * 0.8f);
             float Z = 0.0f;
-
+            if (Settings.MaxHeightVariation > 0)
+            {
+                // Random height between 0 and MaxHeightVariation
+                int32 HeightLevel = FMath::RandRange(0, Settings.MaxHeightVariation);
+                // Convert to actual Z position (using VoxelSize for proper scaling)
+                Z = HeightLevel * Settings.VoxelSize;
+            }
             // Add some distance from regular buildings
             if (X > 0) X += 400.0f;
             else X -= 400.0f;

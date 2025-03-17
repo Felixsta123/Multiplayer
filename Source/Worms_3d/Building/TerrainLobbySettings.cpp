@@ -145,6 +145,11 @@ void UTerrainLobbySettings::UpdateWidgetsFromSettings(const FVoxelTerrainSetting
         GridSizeZSpinBox->SetValue(Settings.GridSizeZ);
     }
 
+    if (MaxHeightVariationSpinBox)
+    {
+        MaxHeightVariationSpinBox->SetValue(Settings.MaxHeightVariation);
+    }
+
     if (VoxelSizeSlider)
     {
         VoxelSizeSlider->SetValue((Settings.VoxelSize - 50.0f) / 150.0f); // Normaliser entre 0 et 1
@@ -220,6 +225,11 @@ FVoxelTerrainSettings UTerrainLobbySettings::GetSettingsFromWidgets()
     if (GridSizeZSpinBox)
     {
         Settings.GridSizeZ = FMath::RoundToInt(GridSizeZSpinBox->GetValue());
+    }
+
+    if (MaxHeightVariationSpinBox)
+    {
+        MaxHeightVariationSpinBox->SetValue(Settings.MaxHeightVariation);
     }
 
     if (VoxelSizeSlider)

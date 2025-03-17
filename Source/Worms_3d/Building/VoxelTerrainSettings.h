@@ -42,6 +42,10 @@ struct FVoxelTerrainSettings
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Voxel", meta = (ClampMin = "50", ClampMax = "200"))
     float VoxelSize = 100.0f;
 
+    // Maximum height variation for buildings (0 = all at same level)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Buildings", meta = (ClampMin = "0", ClampMax = "10"))
+    int32 MaxHeightVariation = 0;
+
     // Facteur de lissage
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Voxel", meta = (ClampMin = "0", ClampMax = "0.1"))
     float SmoothingFactor = 0.01f;

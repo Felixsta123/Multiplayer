@@ -64,6 +64,10 @@ protected:
     UPROPERTY(meta = (BindWidget))
     USpinBox* GridSizeZSpinBox;
 
+    // Variation de hauteur max
+    UPROPERTY(meta = (BindWidget))
+    USpinBox* MaxHeightVariationSpinBox;
+
     // Taille de voxel
     UPROPERTY(meta = (BindWidget))
     USlider* VoxelSizeSlider;

@@ -20,58 +20,58 @@ UCLASS()
 class WORMS_3D_API UVoxelSettingsWidget : public UUserWidget
 {
     GENERATED_BODY()
-    
+
 public:
     // Initialisation du widget
     virtual void NativeConstruct() override;
-    
+
     // Mise à jour du widget à chaque frame
     virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
-    
+
     // Fonctions principales
     UFUNCTION(BlueprintCallable, Category = "Voxel Settings")
     void SaveSettings();
-    
+
     UFUNCTION(BlueprintCallable, Category = "Voxel Settings")
     void LoadSettings();
-    
+
     UFUNCTION(BlueprintCallable, Category = "Voxel Settings")
     void ResetToDefaults();
-    
+
     // Événement déclenché lorsque les paramètres sont modifiés
     UFUNCTION(BlueprintImplementableEvent, Category = "Voxel Settings")
     void OnSettingsChanged();
-    
+
 protected:
     // === Section des contrôles de base ===
-    
+
     // Container vertical principal
     UPROPERTY(meta = (BindWidget))
     UVerticalBox* MainContainer;
-    
+
     // Titre du widget
     UPROPERTY(meta = (BindWidget))
     UTextBlock* TitleText;
-    
+
     // === Section des paramètres de bâtiments ===
-    
+
     // Nombre de bâtiments
     UPROPERTY(meta = (BindWidget))
     USpinBox* NumberOfBuildingsSpinBox;
-    
+
     UPROPERTY(meta = (BindWidget))
     UTextBlock* NumberOfBuildingsLabel;
-    
+
     // Taille de la zone de spawn
     UPROPERTY(meta = (BindWidget))
     USlider* SpawnAreaSizeSlider;
-    
+
     UPROPERTY(meta = (BindWidget))
     UTextBlock* SpawnAreaSizeLabel;
-    
+
     UPROPERTY(meta = (BindWidget))
     UTextBlock* SpawnAreaSizeValue;
-    
+
     // === Staircase building settings (simplified) ===
     UPROPERTY(meta = (BindWidget))
     UCheckBox* EnableStaircaseBuildingsCheckBox;
@@ -107,6 +107,16 @@ protected:
 
     UPROPERTY(meta = (BindWidget))
     UTextBlock* GridSizeZLabel;
+
+    // Variation de hauteur maximum
+    UPROPERTY(meta = (BindWidget))
+    USpinBox* MaxHeightVariationSpinBox;
+
+    UPROPERTY(meta = (BindWidget))
+    UTextBlock* MaxHeightVariationLabel;
+
+    UFUNCTION()
+    void OnMaxHeightVariationChanged(float Value);
 
     // Taille de voxel
     UPROPERTY(meta = (BindWidget))

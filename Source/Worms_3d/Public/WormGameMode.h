@@ -165,7 +165,6 @@ protected:
     UPROPERTY(BlueprintReadWrite, Category = "Game")
     bool local;
     bool bInitializationStarted;
-
     TArray<APlayerController*> ReadyPlayers;
     virtual void CheckAllPlayersReady();
     // Turn timer handle
