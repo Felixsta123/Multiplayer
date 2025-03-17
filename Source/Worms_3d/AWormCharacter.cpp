@@ -1604,6 +1604,11 @@ void AWormCharacter::InitializeNameWidget()
                 UE_LOG(LogTemp, Error, TEXT("NameIndicatorWidgetClass is not set for %s"), *GetName());
         }
     }
+    if (HasAuthority())
+    {
+        NameWidgetComponent->SetIsReplicated(true);
+    }
+
 }
 
 

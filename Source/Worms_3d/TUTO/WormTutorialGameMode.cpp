@@ -8,6 +8,8 @@
 #include "WormGameState.h"
 #include "WormPlayerController.h"
 #include "EngineUtils.h"
+#include "TutorialTargetBuilding.h"
+#include "WormTutorialCharacter.h"
 
 AWormTutorialGameMode::AWormTutorialGameMode()
 {
@@ -82,7 +84,7 @@ void AWormTutorialGameMode::SetupBuildings()
 {
     UE_LOG(LogTemp, Warning, TEXT("Setting up tutorial buildings"));
     
-    if (!CorridorBuildingClass || !TargetBuildingClass)
+    if (!TargetBuildingClass)
     {
         UE_LOG(LogTemp, Error, TEXT("Building classes not defined in tutorial game mode!"));
         return;
@@ -93,26 +95,6 @@ void AWormTutorialGameMode::SetupBuildings()
     SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
     
     // Main corridor/platform
-    CorridorBuilding = GetWorld()->SpawnActor<AImprovedVoxelBuilding>(
-        CorridorBuildingClass,
-        FVector(0, 0, 0),
-        FRotator::ZeroRotator,
-        SpawnParams
-    );
-    
-    if (CorridorBuilding)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Tutorial corridor building created"));
-        
-        // Configure building
-        CorridorBuilding->GridSizeX = 20;
-        CorridorBuilding->GridSizeY = 60;
-        CorridorBuilding->GridSizeZ = 5;
-        CorridorBuilding->VoxelSize = 100.0f;
-        CorridorBuilding->BuildingType = EVoxelBuildingType::Standard;
-        CorridorBuilding->GenerateBuilding();
-    }
-    
     // Target building (for shooting practice)
     TargetBuilding = GetWorld()->SpawnActor<AImprovedVoxelBuilding>(
         TargetBuildingClass,
@@ -335,6 +317,14 @@ void AWormTutorialGameMode::StartTutorial()
                 // Set initial instruction via event dispatcher or interface
                 // This would be implemented in BP
             }
+            AWormTutorialCharacter* TutorialChar = Cast<AWormTutorialCharacter>(PlayerCharacter);
+            if (TutorialChar)
+            {
+                TutorialChar->OnCharacterMoved.AddDynamic(this, &AWormTutorialGameMode::OnPlayerMoved);
+                TutorialChar->OnCharacterJumped.AddDynamic(this, &AWormTutorialGameMode::OnPlayerJumped);
+                TutorialChar->OnCharacterFired.AddDynamic(this, &AWormTutorialGameMode::OnPlayerFired);
+            }
+            
         }
     }
     

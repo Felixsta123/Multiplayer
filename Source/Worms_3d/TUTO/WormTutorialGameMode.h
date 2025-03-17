@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "WormGameMode.h"
+#include "TutorialTargetBuilding.h"
 #include "Worms_3d/AWormCharacter.h"
 #include "WormTutorialGameMode.generated.h"
 
@@ -33,12 +34,8 @@ public:
     UPROPERTY(BlueprintReadOnly, Category = "Tutorial")
     AWormCharacter* DummyTarget;
     
-    // Tutorial building classes
     UPROPERTY(EditDefaultsOnly, Category = "Tutorial|Buildings")
-    TSubclassOf<AImprovedVoxelBuilding> CorridorBuildingClass;
-    
-    UPROPERTY(EditDefaultsOnly, Category = "Tutorial|Buildings")
-    TSubclassOf<AImprovedVoxelBuilding> TargetBuildingClass;
+    TSubclassOf<ATutorialTargetBuilding> TargetBuildingClass;
     
     // Tutorial UI Widget
     UPROPERTY(EditDefaultsOnly, Category = "Tutorial")

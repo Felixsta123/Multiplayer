@@ -404,14 +404,7 @@ void AWormGameState::InitializeTeams(int32 NumTeams)
 
     Teams.Empty();
 
-    /*	switch (TeamId)
-    {
-        case 0: return FLinearColor(0.0f, 0.5f, 1.0f); // Blue
-        case 1: return FLinearColor(1.0f, 0.2f, 0.2f); // Red
-        case 2: return FLinearColor(0.2f, 0.8f, 0.2f); // Green
-        case 3: return FLinearColor(1.0f, 0.8f, 0.0f); // Yellow
-        default: return FLinearColor(0.7f, 0.7f, 0.7f); // Gray
-        */
+   
     for (int32 i = 0; i < NumTeams; i++)
     {
         FTeamInfo NewTeam;
