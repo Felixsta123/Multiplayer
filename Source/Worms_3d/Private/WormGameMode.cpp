@@ -141,7 +141,6 @@ AWormCharacter* AWormGameMode::GetWormCharacterFromController(AController* Contr
     APawn* ControlledPawn = Controller->GetPawn();
     return Cast<AWormCharacter>(ControlledPawn);
 }
-
 void AWormGameMode::StartNextTurn()
 {
     if (AllPlayerControllers.Num() == 0) return;
@@ -149,20 +148,19 @@ void AWormGameMode::StartNextTurn()
     AWormGameState* WormGS = GetGameState<AWormGameState>();
     if (!WormGS) return;
 
-    // IMPORTANT: First increment team index, then character index when we've gone through all teams
-    CurrentTeamIndex = (CurrentTeamIndex + 1) % NumTeams;
-    
-    // If we've gone through all teams for this character position, move to the next character
-    if (CurrentTeamIndex == 0)
-    {
-        CurrentCharacterIndex = (CurrentCharacterIndex + 1) % CharactersPerTeam;
-    }
-
-    // Store starting point to avoid infinite loop
+    // Store current position
     int32 startTeamIndex = CurrentTeamIndex;
     int32 startCharIndex = CurrentCharacterIndex;
     bool foundValidCharacter = false;
     
+    // Advance to next position FIRST before starting search
+    CurrentTeamIndex = (CurrentTeamIndex + 1) % NumTeams;
+    if (CurrentTeamIndex == 0)
+    {
+        CurrentCharacterIndex = (CurrentCharacterIndex + 1) % CharactersPerTeam;
+    }
+    
+    // Try to find a valid character, starting from the new position
     do {
         // Get the characters of the current team
         TArray<AWormCharacter*> TeamMembers = WormGS->GetTeamMembers(CurrentTeamIndex);
@@ -222,6 +220,8 @@ void AWormGameMode::StartNextTurn()
     if (!foundValidCharacter) {
         CheckGameOverCondition();
     }
+    
+    // Update UI for all players
     for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
     {
         AWormPlayerController* PC = Cast<AWormPlayerController>(It->Get());
@@ -230,7 +230,8 @@ void AWormGameMode::StartNextTurn()
             PC->RefreshMainHUD();
         }
     }
-    // IMPORTANT: Force GameState to replicate updated values
+    
+    // Force GameState to replicate updated values
     if (WormGS) {
         WormGS->ForceNetUpdate();
     }

@@ -43,16 +43,11 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Spawning")
     void TeleportPlayersToBuildings();
 
-    // Teleport players to specific positions
-    UFUNCTION(BlueprintCallable, Category = "Spawning")
-    void TeleportPlayersToPositions(const TArray<FVector>& SpawnLocations);
-
 private:
     // Timer handle for delayed initialization
     FTimerHandle InitializationTimerHandle;
 
     // Find suitable spawn location on a building
-    FVector FindSpawnLocationOnBuilding(AImprovedVoxelBuilding* Building, TArray<FVector>& ExistingLocations);
     float FindMaximumZValueInLevel();
 
     // Helper function to check if a position is far enough from existing positions

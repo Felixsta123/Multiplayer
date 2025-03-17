@@ -2,10 +2,6 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Field/FieldSystemComponent.h"
-#include "Field/FieldSystemActor.h"
-#include "Chaos/ChaosSolverActor.h"
-#include "Field/FieldSystemTypes.h"
 #include "GeometryCollection/GeometryCollectionComponent.h"
 #include "AWormsProjectile.generated.h"
 
@@ -97,7 +93,6 @@ protected:
     UFUNCTION()
     virtual void OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, 
                FVector NormalImpulse, const FHitResult& Hit);
-    void Multicast_SpawnDestructionField_Implementation(FVector Location);
 
     // Timer pour l'explosion auto
     FTimerHandle DetonationTimerHandle;

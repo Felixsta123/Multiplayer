@@ -167,6 +167,7 @@ public:
     
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Worm")
     AWormWeapon* CurrentWeapon;
+    void SyncWeaponRotationAfterAttachment();
     UFUNCTION(BlueprintCallable, Category = "Worm")
     void AttachWeaponToSocket(AWormWeapon* Weapon);
 
