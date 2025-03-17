@@ -384,7 +384,6 @@ protected:
     void SetupWeaponDiagnostic();
     void UpdateWeaponRotation();
     bool IsRotationWithinLimits(const FRotator& TestRotation) const;
-    void UpdateMovementPoints();
 
     // Input action for aborting missile guidance
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input")

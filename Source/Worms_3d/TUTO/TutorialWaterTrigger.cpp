@@ -28,7 +28,7 @@ void ATutorialWaterTrigger::NotifyActorBeginOverlap(AActor* OtherActor)
 		AWormTutorialGameMode* TutorialGameMode = Cast<AWormTutorialGameMode>(UGameplayStatics::GetGameMode(GetWorld()));
 		if (TutorialGameMode)
 		{
-			TutorialGameMode->OnWaterObserved();
+			// TutorialGameMode->OnWaterObserved();
 		}
 	}
 }

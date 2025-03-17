@@ -24,10 +24,6 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     class USphereComponent* CollisionComp;
     FTimerHandle TrailTimerHandle;
-
-    // Fonction pour l'explosion
-    UFUNCTION(BlueprintCallable)
-    void Explode();
     
     // Rayon d'explosion
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Projectile")
@@ -36,6 +32,11 @@ public:
     // Dégâts de l'explosion
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Projectile")
     float ExplosionDamage;
+
+
+    // Fonction pour l'explosion
+    UFUNCTION(BlueprintCallable)
+    void Explode();
     
     // Initialiser le projectile avec une direction et une puissance
     UFUNCTION(BlueprintCallable, Category = "Projectile")
@@ -98,10 +99,6 @@ protected:
                FVector NormalImpulse, const FHitResult& Hit);
     void Multicast_SpawnDestructionField_Implementation(FVector Location);
 
-    // Fonction pour l'explosion
-    UFUNCTION(BlueprintCallable)
-    void Explode();
-    
     // Timer pour l'explosion auto
     FTimerHandle DetonationTimerHandle;
     

@@ -15,7 +15,6 @@
 #include "Math/UnrealMathUtility.h"
 // Ajouter les includes manquants pour les collisions Cannot resolve symbol 'SetCollisionEnabled'
 #include "WeaponWheelWidget.h"
-#include "EnvironmentalEventsManager.h"
 #include "Worms_3d/Env/EnvironmentalEventsManager.h"
 #include "WormGameState.h"
 #include "GuidedMissileWeapon.h"
