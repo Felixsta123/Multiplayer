@@ -38,7 +38,7 @@ public:
     void ApplyTerrainSettings();
     // Turn management functions
     UFUNCTION(BlueprintCallable, Category = "Turns")
-    void StartNextTurn();
+    virtual void StartNextTurn();
     
     UFUNCTION(BlueprintCallable, Category = "Turns")
     void EndCurrentTurn();

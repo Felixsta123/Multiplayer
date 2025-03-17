@@ -142,7 +142,7 @@ public:
 
     // Function to destroy part of the building
     UFUNCTION(BlueprintCallable, Category = "Building")
-    void DestroyVoxelsAt(FVector Location, FVector ImpactNormal, float Radius);
+    virtual void DestroyVoxelsAt(FVector Location, FVector ImpactNormal, float Radius);
     // RPC serveur pour détruire des voxels (appelé par les clients)
     UFUNCTION(Server, Reliable, WithValidation)
     void Server_DestroyVoxelsAt(FVector Location, FVector ImpactNormal, float Radius);

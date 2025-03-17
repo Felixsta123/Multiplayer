@@ -102,7 +102,7 @@ public:
     
     // Armes
     UFUNCTION(BlueprintCallable, Category = "Worm")
-    void FireWeapon();
+    virtual void FireWeapon();
     
     UFUNCTION(BlueprintCallable, Category = "Worm")
     void SwitchWeapon(int32 WeaponIndex);
@@ -302,8 +302,8 @@ protected:
     void OnAimActionEnded(const FInputActionValue& Value);
 
     // === FONCTIONS DE MOUVEMENT ===
-    void MoveForward(float Value);
-    void MoveRight(float Value);
+    virtual void MoveForward(float Value);
+    virtual void MoveRight(float Value); // Declare as virtual
     void LimitMovementWhenNotMyTurn();
     
     // === FONCTIONS LIÉES AUX ARMES ===
