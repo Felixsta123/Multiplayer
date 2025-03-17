@@ -350,5 +350,5 @@ protected:
     void SetupWeaponDiagnostic();
     void UpdateWeaponRotation();
     bool IsRotationWithinLimits(const FRotator& TestRotation) const;
-    void UpdateMovementPoints();
+    virtual void UpdateMovementPoints();
 };

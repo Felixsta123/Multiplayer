@@ -1,4 +1,6 @@
-﻿#pragma once
+﻿// WormTutorialCharacter.h - Enhanced implementation
+
+#pragma once
 
 #include "CoreMinimal.h"
 #include "../AWormCharacter.h"
@@ -14,6 +16,8 @@ class WORMS_3D_API AWormTutorialCharacter : public AWormCharacter
 
 public:
 	AWormTutorialCharacter();
+    
+	virtual void BeginPlay() override;
 
 	// Event dispatchers for tutorial tracking
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnCharacterMovedSignature);
@@ -28,19 +32,25 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Tutorial")
 	FOnCharacterFiredSignature OnCharacterFired;
     
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnTargetDestroyedSignature);
-	UPROPERTY(BlueprintAssignable, Category = "Tutorial")
-	FOnTargetDestroyedSignature OnTargetDestroyed;
-
-protected:
-	// Override movement and action functions to detect tutorial progress
-	virtual void MoveForward(float Value);
-	virtual void MoveRight(float Value);
+	// Override movement to track tutorial progress
+	virtual void MoveForward(float Value) override;
+	virtual void MoveRight(float Value) override;
 	virtual void Jump() override;
 	virtual void FireWeapon() override;
     
-	// Track if player has moved in tutorial
+	// Override movement points for tutorial
+	virtual void UpdateMovementPoints() override;
+
+protected:
+	// Track if player has performed tutorial actions
 	bool bHasMovedInTutorial;
 	bool bHasJumpedInTutorial;
 	bool bHasFiredInTutorial;
+    
+	// Timer handle for movement check
+	FTimerHandle MovementCheckTimerHandle;
+    
+	// Additional method to detect movement
+	UFUNCTION()
+	void CheckInitialMovement();
 };

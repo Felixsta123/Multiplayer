@@ -6,6 +6,7 @@
 #include "Worms_3d/Building/AVoxelBuilding.h"
 #include "Worms_3d/Env/EnvironmentalEventsManager.h"
 #include "WormGameState.h"
+#include "WTutorialWidget.h"
 #include "WormPlayerController.h"
 #include "EngineUtils.h"
 #include "TutorialTargetBuilding.h"
@@ -33,10 +34,13 @@ AWormTutorialGameMode::AWormTutorialGameMode()
     bUseGameInitManager = false;
     CurrentStageIndex = 0;
 }
-
 void AWormTutorialGameMode::BeginPlay()
 {
     Super::BeginPlay();
+    
+    // Disable team mechanics for tutorial - we just need one player
+    NumTeams = 1;
+    CharactersPerTeam = 1;
     
     // Initialize game state for single player
     AWormGameState* WormGS = GetGameState<AWormGameState>();
@@ -45,10 +49,7 @@ void AWormTutorialGameMode::BeginPlay()
         WormGS->InitializeTeams(1); // Just one team for tutorial
     }
     
-    // Generate tutorial environment
-    GenerateTutorialEnvironment();
-        
-    // Start tutorial
+    // Start tutorial with slight delay to ensure everything is loaded
     FTimerHandle StartTutorialTimer;
     GetWorld()->GetTimerManager().SetTimer(
         StartTutorialTimer,
@@ -59,21 +60,155 @@ void AWormTutorialGameMode::BeginPlay()
     );
 }
 
-void AWormTutorialGameMode::GenerateTutorialEnvironment()
+void AWormTutorialGameMode::InitializeTutorial()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Generating tutorial environment"));
+    UE_LOG(LogTemp, Warning, TEXT("Initializing tutorial..."));
     
-    // Setup buildings
-    SetupBuildings();
+    // 1. Find player controller
+    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+    if (!PC)
+    {
+        UE_LOG(LogTemp, Error, TEXT("No PlayerController found for tutorial"));
+        return;
+    }
+
+    // 2. Spawn our tutorial character if needed
+    AWormTutorialCharacter* TutorialChar = nullptr;
     
-    // Setup water
-    SetupWaterSystem();
+    // Check if controller already has a valid character
+    AWormCharacter* ExistingCharacter = Cast<AWormCharacter>(PC->GetPawn());
+    if (ExistingCharacter && ExistingCharacter->IsA<AWormTutorialCharacter>())
+    {
+        // Use existing character if it's the right type
+        TutorialChar = Cast<AWormTutorialCharacter>(ExistingCharacter);
+        PlayerCharacter = TutorialChar;
+        UE_LOG(LogTemp, Warning, TEXT("Using existing tutorial character: %s"), *PlayerCharacter->GetName());
+    }
+    else
+    {
+        // Spawn new character if needed
+        FVector SpawnLocation = FVector(0, 0, 300); // Default spawn location
+        FRotator SpawnRotation = FRotator::ZeroRotator;
+        
+        // Use spawn point if available
+        AActor* StartSpot = FindPlayerStart(PC);
+        if (StartSpot)
+        {
+            SpawnLocation = StartSpot->GetActorLocation() + FVector(0, 0, 100);
+            SpawnRotation = StartSpot->GetActorRotation();
+        }
+        
+        // Spawn tutorial character
+        FActorSpawnParameters SpawnParams;
+        SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+        
+        UClass* CharClass = TutorialCharacterClass ? 
+            TutorialCharacterClass.Get() : AWormTutorialCharacter::StaticClass();
+            
+        TutorialChar = GetWorld()->SpawnActor<AWormTutorialCharacter>(
+            CharClass, 
+            SpawnLocation, 
+            SpawnRotation,
+            SpawnParams
+        );
+        
+        PlayerCharacter = TutorialChar;
+        
+        if (TutorialChar)
+        {
+            // Setup character
+            TutorialChar->Health = 100.0f;
+            TutorialChar->TeamId = 0;
+            TutorialChar->CharacterIndexInTeam = 0;
+            TutorialChar->InGameName = "Tutorial Player";
+            
+            // Unpossess old pawn if needed
+            if (PC->GetPawn() && PC->GetPawn() != TutorialChar)
+            {
+                PC->UnPossess();
+            }
+            
+            // Possess tutorial character
+            PC->Possess(TutorialChar);
+            UE_LOG(LogTemp, Warning, TEXT("Spawned new tutorial character: %s"), *TutorialChar->GetName());
+            
+            // Add to team in GameState
+            AWormGameState* WormGS = GetGameState<AWormGameState>();
+            if (WormGS)
+            {
+                WormGS->AddCharacterToTeam(TutorialChar, 0);
+            }
+        }
+        else
+        {
+            UE_LOG(LogTemp, Error, TEXT("Failed to spawn tutorial character!"));
+            return;
+        }
+    }
+    
+    // 3. Initialize weapons
+    if (TutorialChar && AvailableWeaponTypes.Num() > 0)
+    {
+        TutorialChar->SetIsMyTurn(true);
+        TutorialChar->SetAvailableWeapons(AvailableWeaponTypes);
+        UE_LOG(LogTemp, Warning, TEXT("Weapons initialized for tutorial character"));
+    }
+    
+    // 4. Connect event handlers - THIS IS CRITICAL FOR PROGRESSION
+    if (TutorialChar)
+    {
+        // Make absolutely sure we're connecting to the events
+        TutorialChar->OnCharacterMoved.Clear();
+        TutorialChar->OnCharacterJumped.Clear();
+        TutorialChar->OnCharacterFired.Clear();
+        
+        TutorialChar->OnCharacterMoved.AddDynamic(this, &AWormTutorialGameMode::OnPlayerMoved);
+        TutorialChar->OnCharacterJumped.AddDynamic(this, &AWormTutorialGameMode::OnPlayerJumped);
+        TutorialChar->OnCharacterFired.AddDynamic(this, &AWormTutorialGameMode::OnPlayerFired);
+        
+        UE_LOG(LogTemp, Warning, TEXT("Connected tutorial character events for progression tracking"));
+    }
+    
+    // 5. Start tutorial UI
+    StartTutorial();
 }
-void AWormTutorialGameMode::SetupBuildings()
+
+void AWormTutorialGameMode::StartTutorial()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Setting up tutorial buildings"));
+    UE_LOG(LogTemp, Warning, TEXT("Starting tutorial"));
     
-    // Find pre-placed target building in the scene
+    // Reset progress state
+    CurrentStageIndex = 0;
+    bHasPlayerMoved = false;
+    bHasPlayerJumped = false;
+    bHasPlayerFired = false;
+    bHasPlayerDestroyedTarget = false;
+    
+    // Create tutorial UI
+    if (TutorialWidgetClass)
+    {
+        APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+        if (PC)
+        {
+            // Remove existing widget if any
+            if (TutorialWidget)
+            {
+                TutorialWidget->RemoveFromParent();
+                TutorialWidget = nullptr;
+            }
+            
+            // Create and cast to the proper widget type
+            TutorialWidget = CreateWidget<UWTutorialWidget>(PC, TutorialWidgetClass);
+            if (TutorialWidget)
+            {
+                TutorialWidget->AddToViewport(100); // High Z-order to be on top
+                
+                // Call blueprint event to initialize UI
+                OnStageCompleted(CurrentStageIndex);
+                UE_LOG(LogTemp, Warning, TEXT("Tutorial UI created and displayed"));
+            }
+        }
+    }
     TArray<AActor*> FoundTargets;
     UGameplayStatics::GetAllActorsOfClass(GetWorld(), ATutorialTargetBuilding::StaticClass(), FoundTargets);
     
@@ -95,296 +230,56 @@ void AWormTutorialGameMode::SetupBuildings()
     {
         UE_LOG(LogTemp, Error, TEXT("No pre-placed tutorial target building found in scene!"));
     }
-}
-
-void AWormTutorialGameMode::SetupWaterSystem()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Setting up tutorial water system"));
-    
-    // Find or create water system manager
-    AEnvironmentalEventsManager* EnvManager = nullptr;
-    
-    // First try to find existing manager
-    for (TActorIterator<AEnvironmentalEventsManager> It(GetWorld()); It; ++It)
-    {
-        EnvManager = *It;
-        break;
-    }
-    
-    // If no manager exists and we have a class defined, create one
-    if (!EnvManager && WaterSystemManagerClass)
-    {
-        FActorSpawnParameters SpawnParams;
-        SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-        
-        EnvManager = GetWorld()->SpawnActor<AEnvironmentalEventsManager>(
-            WaterSystemManagerClass,
-            FVector::ZeroVector,
-            FRotator::ZeroRotator,
-            SpawnParams
-        );
-    }
-    
-    if (EnvManager && EnvManager->WaterSystem)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Tutorial water system initialized"));
-        
-        // Store reference
-        WaterSystemManager = EnvManager;
-        
-        // Configure water for tutorial
-        EnvManager->WaterSystem->InitialWaterLevel = -800.0f; // Start below platform
-        EnvManager->WaterSystem->MinWaterLevel = -1000.0f;
-        EnvManager->WaterSystem->MaxWaterLevel = 800.0f;
-        
-        // Initialize water at low level
-        EnvManager->WaterSystem->SetWaterLevel(EnvManager->WaterSystem->InitialWaterLevel, true);
-        
-        // Enable water events but don't auto-start rising
-        EnvManager->bEnableWaterEvents = true;
-        EnvManager->bIsWaterRisingActive = false;
-        EnvManager->SetActiveEventTypes(EEventType::Water);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("Failed to initialize water system for tutorial!"));
-    }
-}
-
-void AWormTutorialGameMode::SetupCharacters()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Setting up tutorial characters"));
-    
-    // Get player controller
-    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
-    if (!PC)
-    {
-        UE_LOG(LogTemp, Error, TEXT("No player controller found for tutorial!"));
-        return;
-    }
-    
-    // Get character class from player settings
-    TSubclassOf<AWormCharacter> CharacterClass = nullptr;
-    AWormPlayerController* WPC = Cast<AWormPlayerController>(PC);
-    if (WPC && WPC->PlayerSettings.MyPlayerCharacter)
-    {
-        CharacterClass = WPC->PlayerSettings.MyPlayerCharacter;
-    }
-    else
-    {
-        // Default character class if not found in player settings
-        for (TObjectIterator<UClass> ClassIt; ClassIt; ++ClassIt)
-        {
-            UClass* Class = *ClassIt;
-            if (Class->IsChildOf(AWormCharacter::StaticClass()) && !Class->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated))
-            {
-                CharacterClass = Class;
-                break;
-            }
-        }
-    }
-    
-    if (!CharacterClass)
-    {
-        UE_LOG(LogTemp, Error, TEXT("No character class found for tutorial!"));
-        return;
-    }
-    
-    // Spawn player character
-    FActorSpawnParameters SpawnParams;
-    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
-    
-    PlayerCharacter = GetWorld()->SpawnActor<AWormCharacter>(
-        CharacterClass,
-        FVector(0, 0, 300), // Default spawn location
-        FRotator::ZeroRotator,
-        SpawnParams
-    );
-    
-    if (PlayerCharacter)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Tutorial player character spawned"));
-        
-        // Configure character
-        PlayerCharacter->Health = 100.0f;
-        PlayerCharacter->TeamId = 0;
-        PlayerCharacter->CharacterIndexInTeam = 0;
-        PlayerCharacter->SetIsMyTurn(true);
-        
-        // Set weapon for player
-        if (AvailableWeaponTypes.Num() > 0)
-        {
-            PlayerCharacter->SetAvailableWeapons(AvailableWeaponTypes);
-        }
-        
-        // Let player controller possess character
-        PC->Possess(PlayerCharacter);
-        
-        // Add to team in GameState
-        AWormGameState* WormGS = GetGameState<AWormGameState>();
-        if (WormGS)
-        {
-            WormGS->AddCharacterToTeam(PlayerCharacter, 0);
-        }
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("Failed to spawn player character for tutorial!"));
-    }
-    
-    // Spawn dummy target (optional - for combat training)
-    FVector DummyLocation = FVector(600, 2500, 600); // Near target building
-    if (TargetBuilding)
-    {
-        DummyLocation = TargetBuilding->GetTopSpawnPoint() + FVector(0, 200, 0);
-    }
-    
-    DummyTarget = GetWorld()->SpawnActor<AWormCharacter>(
-        CharacterClass,
-        DummyLocation,
-        FRotator::ZeroRotator,
-        SpawnParams
-    );
-    
-    if (DummyTarget)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Tutorial dummy target spawned"));
-        
-        // Configure dummy
-        DummyTarget->Health = 100.0f;
-        DummyTarget->TeamId = 1; // Different team from player
-        
-        // Disable AI or player control for dummy
-        if (DummyTarget->GetController())
-        {
-            DummyTarget->GetController()->UnPossess();
-        }
-        
-        // Disable movement
-        if (DummyTarget->GetCharacterMovement())
-        {
-            DummyTarget->GetCharacterMovement()->MaxWalkSpeed = 0;
-        }
-        
-        // Don't add dummy to teams in GameState - it's just a prop
-    }
-}
-
-void AWormTutorialGameMode::InitializeTutorial()
-{
-    // 1. Find player controller
-    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
-    if (!PC)
-    {
-        UE_LOG(LogTemp, Error, TEXT("No PlayerController found for tutorial"));
-        return;
-    }
-
-    // 2. Check if controller already has a valid pawn
-    AWormCharacter* ExistingCharacter = Cast<AWormCharacter>(PC->GetPawn());
-    if (ExistingCharacter && ExistingCharacter->IsA(TutorialCharacterClass))
-    {
-        // Use existing character if valid
-        PlayerCharacter = ExistingCharacter;
-        UE_LOG(LogTemp, Warning, TEXT("Using existing character: %s"), *PlayerCharacter->GetName());
-    }
-    else
-    {
-        // Spawn new character if needed
-        FVector SpawnLocation = FVector(0, 0, 300); // Default spawn location
-        FRotator SpawnRotation = FRotator::ZeroRotator;
-        
-        // Use spawn point if available
-        AActor* StartSpot = FindPlayerStart(PC);
-        if (StartSpot)
-        {
-            SpawnLocation = StartSpot->GetActorLocation() + FVector(0, 0, 100);
-            SpawnRotation = StartSpot->GetActorRotation();
-        }
-        
-        // Spawn character
-        FActorSpawnParameters SpawnParams;
-        SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
-        
-        PlayerCharacter = GetWorld()->SpawnActor<AWormCharacter>(
-            TutorialCharacterClass, 
-            SpawnLocation, 
-            SpawnRotation,
-            SpawnParams
-        );
-        
-        if (PlayerCharacter)
-        {
-            // Setup character
-            PlayerCharacter->Health = 100.0f;
-            PlayerCharacter->TeamId = 0;
-            PlayerCharacter->CharacterIndexInTeam = 0;
-            
-            // Possess character
-            PC->Possess(PlayerCharacter);
-            UE_LOG(LogTemp, Warning, TEXT("Spawned new character: %s"), *PlayerCharacter->GetName());
-        }
-    }
-    
-    // 3. Initialize weapons
-    if (PlayerCharacter && AvailableWeaponTypes.Num() > 0)
-    {
-        PlayerCharacter->SetIsMyTurn(true);
-        PlayerCharacter->SetAvailableWeapons(AvailableWeaponTypes);
-        UE_LOG(LogTemp, Warning, TEXT("Weapons initialized for character"));
-    }
-    
-    // 4. Start tutorial UI
-    StartTutorial();
-}
-
-void AWormTutorialGameMode::StartTutorial()
-{
-    UE_LOG(LogTemp, Warning, TEXT("Starting tutorial"));
-    
-    CurrentStageIndex = 0;
-    
-    // Create tutorial UI
-    if (TutorialWidgetClass)
-    {
-        APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
-        if (PC)
-        {
-            TutorialWidget = CreateWidget<UUserWidget>(PC, TutorialWidgetClass);
-            if (TutorialWidget)
-            {
-                TutorialWidget->AddToViewport(100); // High Z-order to be on top
-                
-                // Set initial instruction via event dispatcher or interface
-                // This would be implemented in BP
-            }
-            AWormTutorialCharacter* TutorialChar = Cast<AWormTutorialCharacter>(PlayerCharacter);
-            if (TutorialChar)
-            {
-                TutorialChar->OnCharacterMoved.AddDynamic(this, &AWormTutorialGameMode::OnPlayerMoved);
-                TutorialChar->OnCharacterJumped.AddDynamic(this, &AWormTutorialGameMode::OnPlayerJumped);
-                TutorialChar->OnCharacterFired.AddDynamic(this, &AWormTutorialGameMode::OnPlayerFired);
-            }
-            
-        }
-    }
-    
     // Make sure player character is in control
     if (PlayerCharacter)
     {
         PlayerCharacter->SetIsMyTurn(true);
     }
-    
-    // Trigger first tutorial stage
-    OnStageCompleted(CurrentStageIndex);
 }
 
-void AWormTutorialGameMode::StartNextTurn()
+void AWormTutorialGameMode::OnPlayerMoved()
 {
-    // Override to keep player in control during tutorial
-    if (PlayerCharacter)
+    UE_LOG(LogTemp, Warning, TEXT("Player moved detected!"));
+    bHasPlayerMoved = true;
+    
+    if (CurrentStageIndex == 0)
     {
-        PlayerCharacter->SetIsMyTurn(true);
+        UE_LOG(LogTemp, Warning, TEXT("Completing movement tutorial stage"));
+        AdvanceToNextStage();
+    }
+}
+void AWormTutorialGameMode::OnTargetDestroyed()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Tutorial target building destroyed!"));
+    bHasPlayerDestroyedTarget = true;
+    
+    if (CurrentStageIndex == 3) // Target destruction stage
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Completing target destruction tutorial stage"));
+        AdvanceToNextStage();
+    }
+}
+void AWormTutorialGameMode::OnPlayerJumped()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Player jumped detected!"));
+    bHasPlayerJumped = true;
+    
+    if (CurrentStageIndex == 1)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Completing jump tutorial stage"));
+        AdvanceToNextStage();
+    }
+}
+
+void AWormTutorialGameMode::OnPlayerFired()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Player fired weapon detected!"));
+    bHasPlayerFired = true;
+    
+    if (CurrentStageIndex == 2)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Completing weapon firing tutorial stage"));
+        AdvanceToNextStage();
     }
 }
 
@@ -394,94 +289,106 @@ void AWormTutorialGameMode::AdvanceToNextStage()
     {
         CurrentStageIndex++;
         OnStageCompleted(CurrentStageIndex);
+        
+        // Special stage handling
+        if (CurrentStageIndex == 4) // Water hazard stage
+        {
+            // Start water rising for demonstration after a short delay
+            FTimerHandle WaterRiseTimer;
+            GetWorld()->GetTimerManager().SetTimer(
+                WaterRiseTimer,
+                this,
+                &AWormTutorialGameMode::TriggerWaterRise,
+                5.0f,
+                false
+            );
+        }
     }
     else
     {
         // Tutorial complete
         UE_LOG(LogTemp, Warning, TEXT("Tutorial completed!"));
+        CompleteTutorial();
+    }
+}
+
+void AWormTutorialGameMode::TriggerWaterRise()
+{
+    if (WaterSystemManager)
+    {
+        // Try to cast to our manager class
+        AEnvironmentalEventsManager* EnvManager = Cast<AEnvironmentalEventsManager>(WaterSystemManager);
+        if (EnvManager && EnvManager->WaterSystem)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Triggering water rise for tutorial"));
+            EnvManager->StartWaterRising();
+            
+            // Set a timer to advance to completion after a few seconds
+            FTimerHandle WaterDemoTimer;
+            GetWorld()->GetTimerManager().SetTimer(
+                WaterDemoTimer,
+                this,
+                &AWormTutorialGameMode::AdvanceToNextStage,
+                10.0f, // Allow 10 seconds to observe water
+                false
+            );
+        }
+    }
+}
+
+void AWormTutorialGameMode::CompleteTutorial()
+{
+    // Show completion message in UI
+    if (TutorialWidget)
+    {
+        // This will be handled in Blueprint via OnStageCompleted
+        OnStageCompleted(TutorialStages.Num() - 1);
+    }
+    
+    // Give player option to return to main menu after a delay
+    FTimerHandle ExitTutorialTimer;
+    GetWorld()->GetTimerManager().SetTimer(
+        ExitTutorialTimer,
+        []()
+        {
+            // Return to main menu
+            UGameplayStatics::OpenLevel(GWorld, FName("MainMenuMap"));
+        },
+        10.0f, // Allow 10 seconds to read completion message
+        false
+    );
+}
+
+// Override this to keep player in control during tutorial
+void AWormTutorialGameMode::StartNextTurn()
+{
+    // Do nothing - don't switch turns in tutorial
+    if (PlayerCharacter)
+    {
+        PlayerCharacter->SetIsMyTurn(true);
+    }
+}
+
+// Override this to prevent turn ending in tutorial
+void AWormTutorialGameMode::EndCurrentTurn()
+{
+    // Do nothing - ignore turn ending in tutorial
+    if (PlayerCharacter)
+    {
+        PlayerCharacter->SetIsMyTurn(true);
+    }
+}
+
+void AWormTutorialGameMode::OnStageCompleted_Implementation(int32 CurrentStage)
+{
+    // Update tutorial UI - cast to the proper widget type
+    UWTutorialWidget* TutWidget = Cast<UWTutorialWidget>(TutorialWidget);
+    if (TutWidget)
+    {
+        // Set current instruction text
+        TutWidget->SetInstructionText(TutorialStages[CurrentStage]);
         
-        // You could add completion reward or return to main menu logic here
-    }
-}
-
-void AWormTutorialGameMode::CompleteStage(int32 StageIndex)
-{
-    if (StageIndex == CurrentStageIndex)
-    {
-        AdvanceToNextStage();
-    }
-}
-
-bool AWormTutorialGameMode::CheckStageObjective()
-{
-    // Check objectives based on current stage
-    switch (CurrentStageIndex)
-    {
-        case 0: // Movement
-            return bHasPlayerMoved;
-            
-        case 1: // Jump
-            return bHasPlayerJumped;
-            
-        case 2: // Fire weapon
-            return bHasPlayerFired;
-            
-        case 3: // Destroy target
-            return bHasPlayerDestroyedTarget;
-            
-        case 4: // Water hazard
-            // This would be triggered by special event or timer
-            return false;
-            
-        default:
-            return false;
-    }
-}
-
-void AWormTutorialGameMode::OnStageCompleted_Implementation(int32 StageIndex)
-{
-    // Blueprint implementable function to update UI with new instructions
-    UE_LOG(LogTemp, Warning, TEXT("Tutorial stage %d: %s"), 
-        StageIndex, *TutorialStages[FMath::Min(StageIndex, TutorialStages.Num()-1)]);
-}
-
-void AWormTutorialGameMode::OnPlayerMoved()
-{
-    bHasPlayerMoved = true;
-    
-    if (CurrentStageIndex == 0 && CheckStageObjective())
-    {
-        CompleteStage(0);
-    }
-}
-
-void AWormTutorialGameMode::OnPlayerJumped()
-{
-    bHasPlayerJumped = true;
-    
-    if (CurrentStageIndex == 1 && CheckStageObjective())
-    {
-        CompleteStage(1);
-    }
-}
-
-void AWormTutorialGameMode::OnPlayerFired()
-{
-    bHasPlayerFired = true;
-    
-    if (CurrentStageIndex == 2 && CheckStageObjective())
-    {
-        CompleteStage(2);
-    }
-}
-
-void AWormTutorialGameMode::OnTargetDestroyed()
-{
-    bHasPlayerDestroyedTarget = true;
-    UE_LOG(LogTemp, Warning, TEXT("Target building destroyed by player!"));
-    
-    if (CurrentStageIndex == 3 && CheckStageObjective())
-    {
-        CompleteStage(3);
+        // Update progress indicator
+        TutWidget->UpdateProgressIndicator(CurrentStage, TutorialStages.Num() - 1);
     }
 }
