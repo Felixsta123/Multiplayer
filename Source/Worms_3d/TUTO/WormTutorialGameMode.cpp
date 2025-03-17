@@ -173,6 +173,8 @@ void AWormTutorialGameMode::InitializeTutorial()
     StartTutorial();
 }
 
+
+
 void AWormTutorialGameMode::StartTutorial()
 {
     UE_LOG(LogTemp, Warning, TEXT("Starting tutorial"));

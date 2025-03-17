@@ -44,12 +44,7 @@ protected:
     
 	UPROPERTY(meta = (BindWidget))
 	class UProgressBar* ProgressBar;
-    
-	UPROPERTY(meta = (BindWidget))
-	class UButton* SkipTutorialButton;
-    
-	UPROPERTY(meta = (BindWidget))
-	class UButton* MainMenuButton;
+	
     
 	UPROPERTY(meta = (BindWidget))
 	class UImage* SuccessImage;
@@ -63,11 +58,4 @@ protected:
     
 	UPROPERTY(Transient, meta = (BindWidgetAnim))
 	class UWidgetAnimation* TutorialCompleteAnimation;
-    
-	// Button click handlers
-	UFUNCTION()
-	void OnSkipTutorialClicked();
-    
-	UFUNCTION()
-	void OnMainMenuClicked();
 };

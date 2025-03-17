@@ -67,7 +67,20 @@ public:
     virtual void StartNextTurn() override;
     virtual void EndCurrentTurn() override;
     // Check if player has completed current stage objective
+   /* UFUNCTION()
+    void OnWaterObserved();
+*/
+    // Référence au trigger d'eau
+    UPROPERTY(BlueprintReadOnly, Category = "Tutorial")
+    class ATutorialWaterTrigger* WaterTrigger;
 
+    // Dans la section protected:
+    // Ajouter cette variable
+    UPROPERTY(BlueprintReadOnly, Category = "Tutorial")
+    bool bHasObservedWater;
+
+    // Fonction pour configurer la zone d'eau
+    void SetupWaterTriggerZone();
 protected:
     // Track player progress
     UPROPERTY(BlueprintReadOnly, Category = "Tutorial")
@@ -87,16 +100,13 @@ protected:
     
     UPROPERTY(BlueprintReadOnly, Category = "Tutorial")
     ATutorialTargetBuilding* TargetBuilding;
-    
-    // Set up player and dummy for tutorial
-    void SetupCharacters();
+
     void InitializeTutorial();
 
     // Initialize water system for tutorial
     void SetupWaterSystem();
     
-    // Initialize tutorial buildings
-    void SetupBuildings();
+
     
     // Handle player inputs for tutorial progress tracking
     UFUNCTION()

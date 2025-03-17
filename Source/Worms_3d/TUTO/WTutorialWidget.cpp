@@ -28,11 +28,6 @@ void UWTutorialWidget::NativeConstruct()
         ProgressBar->SetPercent(0.0f);
     }
     
-    // Set up button bindings if available
-    if (SkipTutorialButton)
-    {
-        SkipTutorialButton->OnClicked.AddDynamic(this, &UWTutorialWidget::OnSkipTutorialClicked);
-    }
 }
 
 void UWTutorialWidget::SetInstructionText(const FString& NewText)
@@ -125,21 +120,5 @@ void UWTutorialWidget::ShowTutorialComplete()
         ObjectiveText->SetText(FText::FromString("Congratulations!"));
     }
     
-    // Show main menu button if available
-    if (MainMenuButton)
-    {
-        MainMenuButton->SetVisibility(ESlateVisibility::Visible);
-    }
-}
 
-void UWTutorialWidget::OnSkipTutorialClicked()
-{
-    // Return to main menu
-    UGameplayStatics::OpenLevel(GetWorld(), FName("MainMenuMap"));
-}
-
-void UWTutorialWidget::OnMainMenuClicked()
-{
-    // Return to main menu
-    UGameplayStatics::OpenLevel(GetWorld(), FName("MainMenuMap"));
 }
