@@ -51,7 +51,11 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "Weapon|Aiming")
     float GetNormalizedPower() const { return (FirePower - MinFirePower) / (MaxFirePower - MinFirePower); }
-
+    
+    // Fonction appelée après le rechargement
+    UFUNCTION()
+    void OnReloadComplete();
+    
     // Événement Blueprint appelé lors des changements de puissance
     UFUNCTION(BlueprintImplementableEvent, Category = "Weapon|Aiming")
     void OnPowerChanged(float NewPower, float NormalizedPower);
@@ -124,10 +128,7 @@ protected:
     
     // Timer pour le rechargement
     FTimerHandle ReloadTimerHandle;
-    
-    // Fonction appelée après le rechargement
-    UFUNCTION()
-    void OnReloadComplete();
+
 
     UPROPERTY(EditDefaultsOnly, Category = "Weapon|Aiming")
     float MinFirePower;

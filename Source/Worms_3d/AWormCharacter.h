@@ -20,6 +20,13 @@ class WORMS_3D_API AWormCharacter : public ACharacter
 public:
     AWormCharacter();
 
+    int32 DiagnosticCount = 0;
+
+    
+    // Flag to track if we're currently guiding a missile
+    UPROPERTY(BlueprintReadOnly, Category="Weapons")
+    bool bIsGuidingMissile;
+    
     // === COMPOSANTS DE CAMÉRA ===
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     class USpringArmComponent* CameraBoom;
@@ -180,9 +187,20 @@ public:
     UPROPERTY(EditDefaultsOnly, Category = "Worm")
     float MaxMovementPoints;
 
-    // Count of diagnostic attempts for this instance
-    UPROPERTY()
-    int32 DiagnosticCount;
+    // Toggle weapon wheel
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input")
+    class UInputAction* ToggleWeaponWheelAction;
+
+    // Weapon wheel widget class
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="UI")
+    TSubclassOf<class UUserWidget> WeaponWheelWidgetClass;
+
+    // Weapon data table
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="UI")
+    class UDataTable* WeaponDataTable;
+
+    // Current weapon wheel widget instance
+    // UPROPERTY()
 
     
     UPROPERTY(Replicated, BlueprintReadWrite, Category = "Team")
@@ -204,6 +222,22 @@ public:
         
     UPROPERTY(ReplicatedUsing = OnRep_Health, BlueprintReadOnly, Category = "Worm")
     float Health;
+    class UUserWidget* WeaponWheelWidget;
+
+    // Functions to handle weapon wheel
+    UFUNCTION(BlueprintCallable, Category="Weapon")
+    void ToggleWeaponWheel();
+
+    UFUNCTION(BlueprintCallable, Category="Weapon")
+    void SelectWeaponFromWheel(int32 WeaponIndex);
+
+    // Input action handler
+    void OnToggleWeaponWheelAction(const FInputActionValue& Value);
+
+    // Whether weapon wheel is active
+    UPROPERTY(BlueprintReadOnly, Category="Weapon")
+    bool bWeaponWheelActive;
+    
 protected:
     // === ÉTAT DU PERSONNAGE ===
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Worm")
@@ -350,5 +384,17 @@ protected:
     void SetupWeaponDiagnostic();
     void UpdateWeaponRotation();
     bool IsRotationWithinLimits(const FRotator& TestRotation) const;
-    void UpdateMovementPoints();
+
+    // Input action for aborting missile guidance
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input")
+    class UInputAction* AbortMissileAction;
+
+    // Handler for the abort missile action
+    void OnAbortMissileAction(const FInputActionValue& Value);
+
+    // Override the existing look actions to also control missiles
+    // We'll reuse the existing look actions for missile control
+    void HandleMissileControl();
+
+    virtual void UpdateMovementPoints();
 };

@@ -41,7 +41,7 @@ public:
     virtual void StartNextTurn();
     
     UFUNCTION(BlueprintCallable, Category = "Turns")
-    void EndCurrentTurn();
+    virtual void EndCurrentTurn();
     
     UFUNCTION(BlueprintNativeEvent, Category = "Turns")
     void OnTurnStarted(AController* ActiveController);

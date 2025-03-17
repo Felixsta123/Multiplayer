@@ -5,7 +5,7 @@
 #include "WTutorialWidget.generated.h"
 
 /**
- * Widget for displaying tutorial instructions
+ * Widget for displaying tutorial instructions with enhanced features
  */
 UCLASS()
 class WORMS_3D_API UWTutorialWidget : public UUserWidget
@@ -27,6 +27,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Tutorial")
 	void UpdateProgressIndicator(int32 CurrentStep, int32 TotalSteps);
     
+	// Show tutorial completion
+	UFUNCTION(BlueprintCallable, Category = "Tutorial")
+	void ShowTutorialComplete();
+    
 protected:
 	// UI Elements (to be bound in Blueprint)
 	UPROPERTY(meta = (BindWidget))
@@ -36,9 +40,22 @@ protected:
 	class UTextBlock* ObjectiveText;
     
 	UPROPERTY(meta = (BindWidget))
-	class UProgressBar* ProgressBar;
+	class UTextBlock* StepText;
     
-	// Animation for when objective completes
+	UPROPERTY(meta = (BindWidget))
+	class UProgressBar* ProgressBar;
+	
+    
+	UPROPERTY(meta = (BindWidget))
+	class UImage* SuccessImage;
+    
+	// Animations
 	UPROPERTY(Transient, meta = (BindWidgetAnim))
 	class UWidgetAnimation* ObjectiveCompleteAnimation;
+    
+	UPROPERTY(Transient, meta = (BindWidgetAnim))
+	class UWidgetAnimation* TextChangeAnimation;
+    
+	UPROPERTY(Transient, meta = (BindWidgetAnim))
+	class UWidgetAnimation* TutorialCompleteAnimation;
 };

@@ -11,10 +11,13 @@
 #include "Blueprint/UserWidget.h"
 #include "Components/ProgressBar.h"
 #include "Components/TextBlock.h"
+//include for   AWormCharacter.cpp(1045): [C2039] 'IsNormalized': is not a member of 'UE::Math::TRotator<double>'
 #include "Math/UnrealMathUtility.h"
 // Ajouter les includes manquants pour les collisions Cannot resolve symbol 'SetCollisionEnabled'
+#include "WeaponWheelWidget.h"
 #include "Worms_3d/Env/EnvironmentalEventsManager.h"
 #include "WormGameState.h"
+#include "GuidedMissileWeapon.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/WidgetComponent.h"
@@ -108,6 +111,22 @@ void AWormCharacter::InitializeCameraSystem()
 void AWormCharacter::BeginPlay()
 {
     Super::BeginPlay();
+
+    bIsGuidingMissile = false;
+    
+    // Debug
+    UE_LOG(LogTemp, Warning, TEXT("Available weapons count: %d"), AvailableWeapons.Num());
+    for (auto Weapon : AvailableWeapons)
+    {
+        if (Weapon)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Weapon class: %s"), *Weapon->GetName());
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Null weapon class found in AvailableWeapons"));
+        }
+    }
     
     // Initialisation des valeurs par défaut
     LastPosition = GetActorLocation();
@@ -315,6 +334,11 @@ void AWormCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
             EnhancedInputComponent->BindAction(AimAction, ETriggerEvent::Started, this, &AWormCharacter::OnAimActionStarted);
             EnhancedInputComponent->BindAction(AimAction, ETriggerEvent::Completed, this, &AWormCharacter::OnAimActionEnded);
         }
+        if (AbortMissileAction)
+            EnhancedInputComponent->BindAction(AbortMissileAction, ETriggerEvent::Triggered, this, &AWormCharacter::OnAbortMissileAction);
+        // Binding for toggling weapon wheel
+        if (ToggleWeaponWheelAction)
+            EnhancedInputComponent->BindAction(ToggleWeaponWheelAction, ETriggerEvent::Started, this, &AWormCharacter::OnToggleWeaponWheelAction);
     }
     else
     {
@@ -395,9 +419,35 @@ void AWormCharacter::OnLookAction(const FInputActionValue& Value)
 {
     FVector2D LookAxisVector = Value.Get<FVector2D>();
 
+    // Log input for debugging
+    UE_LOG(LogTemp, Verbose, TEXT("Look input: X=%.2f, Y=%.2f, bIsGuidingMissile=%s"), 
+        LookAxisVector.X, LookAxisVector.Y, 
+        bIsGuidingMissile ? TEXT("true") : TEXT("false"));
+
+    if (bIsGuidingMissile && CurrentWeapon)
+    {
+        // Try to cast to missile weapon
+        AGuidedMissileWeapon* MissileWeapon = Cast<AGuidedMissileWeapon>(CurrentWeapon);
+        if (MissileWeapon)
+        {
+            // Use raw input values for missile control - no need to negate Y
+            UE_LOG(LogTemp, Verbose, TEXT("Sending missile input: Yaw=%.2f, Pitch=%.2f"), 
+                LookAxisVector.X, LookAxisVector.Y);
+                
+            MissileWeapon->ProcessMissileMovementInput(LookAxisVector.X, LookAxisVector.Y);
+            return;
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Expected GuidedMissileWeapon but got %s"), 
+                CurrentWeapon ? *CurrentWeapon->GetClass()->GetName() : TEXT("NULL"));
+        }
+    }
+
+    // Handle normal character looking if not controlling a missile
     if (Controller != nullptr)
     {
-        // Add yaw and pitch input to the controller
+        // Add yaw and pitch input to controller
         AddControllerYawInput(LookAxisVector.X);
         AddControllerPitchInput(LookAxisVector.Y);
     }
@@ -435,6 +485,38 @@ void AWormCharacter::OnPrevWeaponAction(const FInputActionValue& Value)
 void AWormCharacter::OnEndTurnAction(const FInputActionValue& Value)
 {
     EndTurn();
+}
+
+
+void AWormCharacter::HandleMissileControl()
+{
+    // Previous missile control state
+    bool bWasGuidingMissile = bIsGuidingMissile;
+    
+    // Check if weapon is a missile weapon
+    AGuidedMissileWeapon* MissileWeapon = Cast<AGuidedMissileWeapon>(CurrentWeapon);
+    if (MissileWeapon)
+    {
+        // Update guided missile state
+        bIsGuidingMissile = MissileWeapon->IsGuidingMissile();
+        
+        // Log state change for debugging
+        if (bIsGuidingMissile != bWasGuidingMissile)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Missile control state changed: %s -> %s"), 
+                bWasGuidingMissile ? TEXT("Guiding") : TEXT("Not Guiding"),
+                bIsGuidingMissile ? TEXT("Guiding") : TEXT("Not Guiding"));
+        }
+    }
+    else
+    {
+        // Not a missile weapon
+        if (bIsGuidingMissile)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("No longer using a missile weapon"));
+            bIsGuidingMissile = false;
+        }
+    }
 }
 
 void AWormCharacter::Tick(float DeltaTime)
@@ -476,6 +558,7 @@ void AWormCharacter::Tick(float DeltaTime)
     
     // Limiter le mouvement quand ce n'est pas le tour du personnage
     LimitMovementWhenNotMyTurn();
+    HandleMissileControl();
 }
 
 // Optionnel: Ajouter une fonction helper pour vérifier si une rotation est dans les limites
@@ -750,6 +833,7 @@ void AWormCharacter::SpawnCurrentWeapon()
         }, 0.1f, false);
     }
 }
+
 void AWormCharacter::ApplyDamageToWorm(float DamageAmount, FVector ImpactDirection)
 {
     // Skip if already dead
@@ -765,6 +849,7 @@ void AWormCharacter::ApplyDamageToWorm(float DamageAmount, FVector ImpactDirecti
     // Apply damage
     Health = FMath::Max(0.0f, Health - DamageAmount);
     
+    // Log pour voir les changements de santé
     UE_LOG(LogTemp, Warning, TEXT("Character %s: Health changed from %.1f to %.1f (damage: %.1f)"), 
            *GetName(), PreviousHealth, Health, DamageAmount);
     
@@ -775,6 +860,7 @@ void AWormCharacter::ApplyDamageToWorm(float DamageAmount, FVector ImpactDirecti
     AActor* DamageInstigator = GetInstigator();
     if (DamageInstigator)
     {
+        // Get the game state to record damage
         AWormGameState* GameState = Cast<AWormGameState>(UGameplayStatics::GetGameState(this));
         if (GameState)
         {
@@ -1667,6 +1753,136 @@ void AWormCharacter::Multicast_ProcessDeath_Implementation()
         {
             FTimerHandle EndTurnHandle;
             GetWorldTimerManager().SetTimer(EndTurnHandle, GameMode, &AWormGameMode::EndCurrentTurn, 1.0f, false);
+        }
+    }
+}
+
+// Weapon Wheel
+
+void AWormCharacter::ToggleWeaponWheel()
+{
+    UE_LOG(LogTemp, Warning, TEXT("ToggleWeaponWheel called, IsMyTurn: %s, IsLocallyControlled: %s"), 
+        bIsMyTurn ? TEXT("true") : TEXT("false"),
+        IsLocallyControlled() ? TEXT("true") : TEXT("false"));
+    
+    // Check turn condition
+    if (!bIsMyTurn || !IsLocallyControlled())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("ToggleWeaponWheel early return - not my turn or not locally controlled"));
+        return;
+    }
+    // Toggle the flag
+    bWeaponWheelActive = !bWeaponWheelActive;
+    
+    // Create or remove the widget
+    if (bWeaponWheelActive)
+    {
+        if (WeaponWheelWidgetClass && !WeaponWheelWidget)
+        {
+            APlayerController* PC = Cast<APlayerController>(GetController());
+            if (PC)
+            {
+                // Create the widget
+                WeaponWheelWidget = CreateWidget<UUserWidget>(PC, WeaponWheelWidgetClass);
+                
+                // Cast to the specific type to access its methods
+                if (UWeaponWheelWidget* TypedWidget = Cast<UWeaponWheelWidget>(WeaponWheelWidget))
+                {
+                    // Add debug log for data table
+                    UE_LOG(LogTemp, Warning, TEXT("Setting weapon data table: %s"), 
+                        WeaponDataTable ? *WeaponDataTable->GetName() : TEXT("NULL"));
+                    
+                    // Set the data table
+                    TypedWidget->SetWeaponDataTable(WeaponDataTable);
+                    
+                    // Add to viewport
+                    WeaponWheelWidget->AddToViewport(100); // High Z-order to be on top
+                    
+                    // Set input mode to UI with game
+                    FInputModeGameAndUI InputMode;
+                    InputMode.SetWidgetToFocus(WeaponWheelWidget->TakeWidget());
+                    InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+                    PC->SetInputMode(InputMode);
+                    PC->SetShowMouseCursor(true);
+                }
+            }
+        }
+    }
+    else
+    {
+        // Remove the widget and restore game input
+        if (WeaponWheelWidget)
+        {
+            WeaponWheelWidget->RemoveFromParent();
+            WeaponWheelWidget = nullptr;
+            
+            // Restore game input
+            APlayerController* PC = Cast<APlayerController>(GetController());
+            if (PC)
+            {
+                FInputModeGameOnly InputMode;
+                PC->SetInputMode(InputMode);
+                PC->SetShowMouseCursor(false);
+            }
+        }
+    }
+}
+
+// void AWormCharacter::OnToggleWeaponWheelAction(const FInputActionValue& Value)
+// {
+//     // Visual on-screen message - visible during gameplay
+//     GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, TEXT("G KEY PRESSED - Toggle Weapon Wheel Action Called"));
+//     
+//     // Console log message
+//     UE_LOG(LogTemp, Warning, TEXT("G KEY PRESSED - Toggle Weapon Wheel Action Called"));
+//     
+//     // Call the original function
+//     ToggleWeaponWheel();
+// }
+
+void AWormCharacter::SelectWeaponFromWheel(int32 WeaponIndex)
+{
+    // Close the weapon wheel
+    bWeaponWheelActive = false;
+    
+    if (WeaponWheelWidget)
+    {
+        WeaponWheelWidget->RemoveFromParent();
+        WeaponWheelWidget = nullptr;
+        
+        // Restore game input
+        APlayerController* PC = Cast<APlayerController>(GetController());
+        if (PC)
+        {
+            FInputModeGameOnly InputMode;
+            PC->SetInputMode(InputMode);
+            PC->SetShowMouseCursor(false);
+        }
+    }
+    
+    // Switch to the selected weapon if valid
+    if (WeaponIndex >= 0 && WeaponIndex < AvailableWeapons.Num())
+    {
+        SwitchWeapon(WeaponIndex);
+    }
+}
+
+void AWormCharacter::OnToggleWeaponWheelAction(const FInputActionValue& Value)
+{
+    UE_LOG(LogTemp, Warning, TEXT("G key pressed - OnToggleWeaponWheelAction called"));
+    ToggleWeaponWheel();
+}
+
+void AWormCharacter::OnAbortMissileAction(const FInputActionValue& Value)
+{
+    if (bIsGuidingMissile && CurrentWeapon)
+    {
+        // Check if current weapon is a guided missile weapon
+        AGuidedMissileWeapon* MissileWeapon = Cast<AGuidedMissileWeapon>(CurrentWeapon);
+        if (MissileWeapon)
+        {
+            MissileWeapon->AbortGuidance();
+            bIsGuidingMissile = false;
         }
     }
 }

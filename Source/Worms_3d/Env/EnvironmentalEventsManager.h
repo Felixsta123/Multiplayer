@@ -223,7 +223,7 @@ protected:
     FTimerHandle EarthquakeDurationTimerHandle;
     
     // ===== FONCTIONS INTERNES =====
-    void InitializeWaterLevel();
+    void InitializeWaterLevel(bool isTuto);
     void PeriodicWaterRise();
     void CheckForDangerousWaterLevel();
     void UpdateUI();
@@ -237,10 +237,7 @@ protected:
     EEventType SelectRandomEventType();
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
-    // ===== FONCTIONS BLUEPRINT =====
-    UFUNCTION(BlueprintImplementableEvent, Category = "Events")
-    void CreateEnvironmentalEventIndicators();
-    
+
     // ===== UTILITAIRES =====
     float CalculateAverageTerrainHeight() const;
     float GetRandomValueBetween(float Min, float Max) const;

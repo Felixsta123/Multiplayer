@@ -15,6 +15,8 @@
 #include "AWormCharacter.h"
 #include "Net/UnrealNetwork.h"
 
+TArray<AWormProjectile*> AWormProjectile::ActiveProjectiles;
+
 AWormProjectile::AWormProjectile()
 {
     PrimaryActorTick.bCanEverTick = true;
@@ -110,6 +112,21 @@ void AWormProjectile::InitializeProjectile(FVector Direction, float Power)
 void AWormProjectile::BeginPlay()
 {
     Super::BeginPlay();
+
+    ActiveProjectiles.Add(this);
+
+    // Make this projectile ignore all other active projectiles
+    for (AWormProjectile* OtherProjectile : ActiveProjectiles)
+    {
+        if (OtherProjectile != this)
+        {
+            CollisionComp->IgnoreActorWhenMoving(OtherProjectile, true);
+            if (OtherProjectile->CollisionComp)
+            {
+                OtherProjectile->CollisionComp->IgnoreActorWhenMoving(this, true);
+            }
+        }
+    }
     
     // Configurer le mouvement du projectile avec la vélocité initiale
     if (ProjectileMovement && !InitialVelocity.IsNearlyZero())
@@ -634,4 +651,12 @@ void AWormProjectile::ApplyDamageToCharacters(const FVector& ExplosionLocation, 
             WormChar->ApplyDamageToWorm(DamageToApply, ImpactDirection * ImpulseStrength);
         }
     }
+}
+
+void AWormProjectile::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    Super::EndPlay(EndPlayReason);
+    
+    // Remove from active projectiles list
+    ActiveProjectiles.Remove(this);
 }

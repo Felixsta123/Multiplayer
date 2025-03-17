@@ -24,7 +24,20 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     class USphereComponent* CollisionComp;
     FTimerHandle TrailTimerHandle;
+    
+    // Rayon d'explosion
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Projectile")
+    float ExplosionRadius;
+    
+    // Dégâts de l'explosion
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Projectile")
+    float ExplosionDamage;
 
+
+    // Fonction pour l'explosion
+    UFUNCTION(BlueprintCallable)
+    void Explode();
+    
     // Initialiser le projectile avec une direction et une puissance
     UFUNCTION(BlueprintCallable, Category = "Projectile")
     void InitializeProjectile(FVector Direction, float Power);
@@ -35,6 +48,9 @@ public:
     UFUNCTION()
     void DrawDebugTrail();
 protected:
+
+    static TArray<AWormProjectile*> ActiveProjectiles;
+    
     UPROPERTY()
     TArray<FVector> TrailPositions;
 
@@ -54,6 +70,8 @@ protected:
     FLinearColor ClientTrailColor = FLinearColor(0.0f, 0.0f, 1.0f, 1.0f); // Bleu pour le client
 
     virtual void BeginPlay() override;
+
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
     
     // Composant de mouvement projectile
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -62,14 +80,6 @@ protected:
     // Mesh du projectile
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     UStaticMeshComponent* ProjectileMesh;
-    
-    // Rayon d'explosion
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Projectile")
-    float ExplosionRadius;
-    
-    // Dégâts de l'explosion
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Projectile")
-    float ExplosionDamage;
     
     // Délai avant explosion auto
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Projectile")
@@ -85,13 +95,10 @@ protected:
     
     // Callback quand le projectile touche quelque chose
     UFUNCTION()
-    void OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, 
+    virtual void OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, 
                FVector NormalImpulse, const FHitResult& Hit);
+    void Multicast_SpawnDestructionField_Implementation(FVector Location);
 
-    // Fonction pour l'explosion
-    UFUNCTION(BlueprintCallable)
-    void Explode();
-    
     // Timer pour l'explosion auto
     FTimerHandle DetonationTimerHandle;
     
@@ -113,7 +120,7 @@ protected:
     
     // Fonction pour activer les collisions après un délai
     UFUNCTION()
-    void EnableCollisions();
+    virtual void EnableCollisions();
     
     // Fonction pour configurer les acteurs à ignorer
     void SetupIgnoredActors();
