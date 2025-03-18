@@ -148,39 +148,45 @@ void AWormGameMode::StartNextTurn()
     AWormGameState* WormGS = GetGameState<AWormGameState>();
     if (!WormGS) return;
 
-    // Store current position
+    // Remember starting point to detect if we've made a full loop
     int32 startTeamIndex = CurrentTeamIndex;
     int32 startCharIndex = CurrentCharacterIndex;
     bool foundValidCharacter = false;
     
-    // Advance to next position FIRST before starting search
+    // Move to the next team first
     CurrentTeamIndex = (CurrentTeamIndex + 1) % NumTeams;
+    
+    // If we wrapped around to team 0, move to the next character index
     if (CurrentTeamIndex == 0)
     {
         CurrentCharacterIndex = (CurrentCharacterIndex + 1) % CharactersPerTeam;
     }
     
-    // Try to find a valid character, starting from the new position
+    // Keep searching until we find a valid character or loop back to where we started
     do {
-        // Get the characters of the current team
+        // Get current team's characters
         TArray<AWormCharacter*> TeamMembers = WormGS->GetTeamMembers(CurrentTeamIndex);
         UE_LOG(LogTemp, Warning, TEXT("Looking for active character - Team %d, Char %d (%d members)"), 
             CurrentTeamIndex, CurrentCharacterIndex, TeamMembers.Num());
-                
-        // Check if the current index is valid
+        
+        // Check if current character is valid and alive
         if (TeamMembers.IsValidIndex(CurrentCharacterIndex))
         {
             AWormCharacter* Character = TeamMembers[CurrentCharacterIndex];
             if (Character && Character->GetHealth() > 0)
             {
+                // Found a valid character
+                
                 // Deactivate all characters first
-                for (int32 i = 0; i < WormGS->Teams.Num(); i++) {
-                    for (AWormCharacter* Member : WormGS->Teams[i].TeamMembers) {
+                for (int32 i = 0; i < WormGS->Teams.Num(); i++)
+                {
+                    for (AWormCharacter* Member : WormGS->Teams[i].TeamMembers)
+                    {
                         if (Member) Member->SetIsMyTurn(false);
                     }
                 }
                 
-                // Activate only this character
+                // Set the current character as active
                 Character->SetIsMyTurn(true);
                 
                 // Make the team controller possess this character
@@ -192,21 +198,21 @@ void AWormGameMode::StartNextTurn()
                     TeamController->Possess(Character);
                 }
                 
-                // Update GameState's current player index
+                // Update GameState
                 WormGS->SetCurrentPlayerByIndex(CurrentTeamIndex);
                 
-                // Start the turn timer
+                // Start turn timer
                 StartTurnTimer();
                 
                 foundValidCharacter = true;
                 break;
             }
         }
-
-        // If this character isn't valid, try the next team
+        
+        // Current character invalid or dead, move to next team
         CurrentTeamIndex = (CurrentTeamIndex + 1) % NumTeams;
         
-        // If we've gone through all teams for this character position, move to the next character
+        // If we wrapped around to team 0, move to the next character index
         if (CurrentTeamIndex == 0)
         {
             CurrentCharacterIndex = (CurrentCharacterIndex + 1) % CharactersPerTeam;
@@ -216,8 +222,9 @@ void AWormGameMode::StartNextTurn()
             (CurrentTeamIndex != startTeamIndex || 
              CurrentCharacterIndex != startCharIndex));
 
-    // If no valid character is found, end the game
-    if (!foundValidCharacter) {
+    // If no valid character found after checking everyone, game is over
+    if (!foundValidCharacter)
+    {
         CheckGameOverCondition();
     }
     
@@ -232,11 +239,10 @@ void AWormGameMode::StartNextTurn()
     }
     
     // Force GameState to replicate updated values
-    if (WormGS) {
+    if (WormGS)
+    {
         WormGS->ForceNetUpdate();
     }
-    
-    
 }
 
 // Enhanced StartTurnTimer function to update GameState
