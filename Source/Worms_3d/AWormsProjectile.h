@@ -16,6 +16,11 @@ public:
     // Tick function pour surveiller le mouvement
     virtual void Tick(float DeltaTime) override;
 
+    UPROPERTY(EditDefaultsOnly, Category = "Projectile", BlueprintReadWrite)
+    bool bIsSniperProjectile = false;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Projectile")
+    float DamageFalloffExponent = 1.5f; // Default for regular weapons
     // Rendre le composant de collision accessible en public
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     class USphereComponent* CollisionComp;
@@ -33,7 +38,8 @@ public:
     // Fonction pour l'explosion
     UFUNCTION(BlueprintCallable)
     void Explode();
-    
+    void DebugDamageCalculation(const FVector& ExplosionLocation, float DynamicExplosionRadius);
+
     // Initialiser le projectile avec une direction et une puissance
     UFUNCTION(BlueprintCallable, Category = "Projectile")
     void InitializeProjectile(FVector Direction, float Power);

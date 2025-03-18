@@ -457,8 +457,18 @@ void AWormProjectile::Explode()
     // Play explosion effects and sound
     Multicast_Explode(ExplosionLocation);
     
-    // Handle character damage
+    // Handle character damage - always apply this regardless of weapon type
     ApplyDamageToCharacters(ExplosionLocation, DynamicExplosionRadius);
+    
+    // For sniper projectiles, skip terrain destruction completely
+    if (bIsSniperProjectile)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Sniper projectile - skipping terrain destruction"));
+        Destroy();
+        return;
+    }
+    
+    // ONLY PROCEED WITH TERRAIN DESTRUCTION FOR NON-SNIPER WEAPONS
     
     // IMPROVEMENT 5: Prioritize direct voxel hit detection
     bool hitProcessed = false;
@@ -545,7 +555,66 @@ void AWormProjectile::Explode()
     Destroy();
 }
 
-
+void AWormProjectile::DebugDamageCalculation(const FVector& ExplosionLocation, float DynamicExplosionRadius)
+{
+    // Find all characters in a large radius (for debugging)
+    TArray<AActor*> OverlappingActors;
+    TArray<AActor*> ActorsToIgnore;
+    ActorsToIgnore.Add(this);
+    
+    // Use a much larger radius for debugging to see all potential targets
+    UKismetSystemLibrary::SphereOverlapActors(
+        GetWorld(),
+        ExplosionLocation,
+        DynamicExplosionRadius * 3.0f, // Larger radius to catch all nearby characters
+        TArray<TEnumAsByte<EObjectTypeQuery>>(),
+        AWormCharacter::StaticClass(),
+        ActorsToIgnore,
+        OverlappingActors
+    );
+    
+    UE_LOG(LogTemp, Warning, TEXT("=== DAMAGE CALCULATION DEBUG ==="));
+    UE_LOG(LogTemp, Warning, TEXT("Explosion at %s with radius %.1f and base damage %.1f"),
+        *ExplosionLocation.ToString(), DynamicExplosionRadius, ExplosionDamage);
+    UE_LOG(LogTemp, Warning, TEXT("Found %d potential targets"), OverlappingActors.Num());
+    
+    // Analyze damage for each potential target
+    for (AActor* Actor : OverlappingActors)
+    {
+        AWormCharacter* WormChar = Cast<AWormCharacter>(Actor);
+        if (WormChar)
+        {
+            FVector ImpactDirection = WormChar->GetActorLocation() - ExplosionLocation;
+            float Distance = ImpactDirection.Size();
+            
+            // Calculate damage using the same formula as in ApplyDamageToCharacters
+            float DistanceRatio = Distance / DynamicExplosionRadius;
+            float DamageCurve = FMath::Pow(1.0f - FMath::Min(1.0f, DistanceRatio), 1.5f);
+            float DamageToApply = ExplosionDamage * DamageCurve;
+            
+            UE_LOG(LogTemp, Warning, TEXT("Character: %s"), *WormChar->GetName());
+            UE_LOG(LogTemp, Warning, TEXT("  Distance: %.1f (%.1f%% of radius)"), 
+                Distance, (Distance / DynamicExplosionRadius) * 100.0f);
+            UE_LOG(LogTemp, Warning, TEXT("  DamageMultiplier: %.3f"), DamageCurve);
+            UE_LOG(LogTemp, Warning, TEXT("  FinalDamage: %.1f / %.1f (%.1f%%)"), 
+                DamageToApply, ExplosionDamage, (DamageToApply / ExplosionDamage) * 100.0f);
+            
+            // Show why some targets might receive zero damage
+            if (DamageToApply < 1.0f)
+            {
+                if (Distance > DynamicExplosionRadius)
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("  Reason: Target outside explosion radius by %.1f units"),
+                        Distance - DynamicExplosionRadius);
+                }
+                else 
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("  Reason: Damage falloff too steep for this radius"));
+                }
+            }
+        }
+    }
+}
 void AWormProjectile::Multicast_Explode_Implementation(FVector Location)
 {
     // Jouer l'effet d'explosion
@@ -560,18 +629,20 @@ void AWormProjectile::Multicast_Explode_Implementation(FVector Location)
         UGameplayStatics::PlaySoundAtLocation(GetWorld(), ExplosionSound, Location);
     }
 }
-
 void AWormProjectile::ApplyDamageToCharacters(const FVector& ExplosionLocation, float DynamicExplosionRadius)
 {
     TArray<AActor*> OverlappingActors;
     TArray<AActor*> ActorsToIgnore;
     ActorsToIgnore.Add(this);
     
-    // Use SphereOverlapActors for better detection
+    // For sniper weapon, use a much larger detection radius
+    // This makes it easier to hit targets with the sniper
+    float DetectionRadius = bIsSniperProjectile ? DynamicExplosionRadius * 4.0f : DynamicExplosionRadius;
+    
     UKismetSystemLibrary::SphereOverlapActors(
         GetWorld(),
         ExplosionLocation,
-        DynamicExplosionRadius,
+        DetectionRadius,
         TArray<TEnumAsByte<EObjectTypeQuery>>(),
         AWormCharacter::StaticClass(),
         ActorsToIgnore,
@@ -580,7 +651,7 @@ void AWormProjectile::ApplyDamageToCharacters(const FVector& ExplosionLocation, 
     
     UE_LOG(LogTemp, Warning, TEXT("Found %d actors in explosion radius"), OverlappingActors.Num());
     
-    // Apply damage to characters with improved physics
+    // Apply damage to characters
     for (AActor* Actor : OverlappingActors)
     {
         AWormCharacter* WormChar = Cast<AWormCharacter>(Actor);
@@ -596,52 +667,49 @@ void AWormProjectile::ApplyDamageToCharacters(const FVector& ExplosionLocation, 
             }
             else
             {
-                // Normalize BEFORE adjusting
+                // Normalize the direction
                 ImpactDirection.Normalize();
-                
-                // Create a more natural explosion impulse
-                float HorizontalFactor = FMath::Lerp(0.8f, 0.3f, Distance / DynamicExplosionRadius);
-                
-                // Determine horizontal direction (outward from explosion)
-                FVector HorizontalDir = ImpactDirection;
-                HorizontalDir.Z = 0;
-                
-                if (HorizontalDir.IsNearlyZero())
-                {
-                    // Random direction if horizontal component is negligible
-                    float RandomAngle = FMath::RandRange(0.0f, 2.0f * PI);
-                    HorizontalDir.X = FMath::Cos(RandomAngle);
-                    HorizontalDir.Y = FMath::Sin(RandomAngle);
-                }
-                else
-                {
-                    HorizontalDir.Normalize();
-                }
-                
-                // More vertical impulse for closer hits (launches characters upward)
-                float VerticalFactor = FMath::Lerp(0.8f, 0.4f, Distance / DynamicExplosionRadius);
-                
-                // Blend horizontal and vertical components for a more natural explosion
-                ImpactDirection = FVector(
-                    HorizontalDir.X * HorizontalFactor,
-                    HorizontalDir.Y * HorizontalFactor,
-                    VerticalFactor  // Higher upward component
-                ).GetSafeNormal();
             }
 
-            // More dramatic damage falloff curve
-            float DistanceRatio = Distance / DynamicExplosionRadius;
-            float DamageCurve = FMath::Pow(1.0f - FMath::Min(1.0f, DistanceRatio), 1.5f); // Sharper falloff
-            float DamageToApply = ExplosionDamage * DamageCurve;
-
-            // More dramatic impulse for gameplay feel
-            float ImpulseStrength = FMath::Max(2000.0f * DamageCurve, 800.0f);
+            // Calculate damage - completely different approach for sniper
+            float DamageToApply;
+            float ImpulseStrength;
+            
+            if (bIsSniperProjectile)
+            {
+                // For sniper: minimal falloff with distance - almost full damage no matter the distance
+                // within the detection radius
+                float MinDamagePercent = 0.8f; // Minimum 80% damage even at max range
+                float DistanceRatio = Distance / DetectionRadius;
+                
+                // This gives a much gentler falloff
+                float DamageCurve = FMath::Max(1.0f - (DistanceRatio * 0.2f), MinDamagePercent);
+                DamageToApply = ExplosionDamage * DamageCurve;
+                
+                // High knockback for sniper
+                ImpulseStrength = 3000.0f;
+                
+                UE_LOG(LogTemp, Warning, TEXT("SNIPER SHOT! Distance: %.1f, DamageMultiplier: %.2f"), 
+                    Distance, DamageCurve);
+            }
+            else
+            {
+                // Standard explosive weapons - sharper falloff curve
+                float DistanceRatio = Distance / DynamicExplosionRadius;
+                float DamageCurve = FMath::Pow(1.0f - FMath::Min(1.0f, DistanceRatio), DamageFalloffExponent);
+                DamageToApply = ExplosionDamage * DamageCurve;
+                
+                // Regular weapons - knockback based on distance
+                float KnockbackCurve = FMath::Pow(1.0f - FMath::Min(1.0f, DistanceRatio), 1.2f);
+                ImpulseStrength = FMath::Max(2000.0f * KnockbackCurve, 800.0f);
+            }
             
             // Add randomness to impulse for variety
             ImpulseStrength *= FMath::RandRange(0.9f, 1.1f);
 
             UE_LOG(LogTemp, Warning, TEXT("Applying %.1f damage to %s with impulse dir: %s, strength: %.1f"), 
                 DamageToApply, *WormChar->GetName(), *ImpactDirection.ToString(), ImpulseStrength);
+                
             if (GetInstigator())
             {
                 WormChar->SetInstigator(GetInstigator());
@@ -651,8 +719,7 @@ void AWormProjectile::ApplyDamageToCharacters(const FVector& ExplosionLocation, 
             WormChar->ApplyDamageToWorm(DamageToApply, ImpactDirection * ImpulseStrength);
         }
     }
-}
-
+} 
 void AWormProjectile::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
     Super::EndPlay(EndPlayReason);

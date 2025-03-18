@@ -235,6 +235,8 @@ void AWormGameMode::StartNextTurn()
     if (WormGS) {
         WormGS->ForceNetUpdate();
     }
+    
+    
 }
 
 // Enhanced StartTurnTimer function to update GameState
