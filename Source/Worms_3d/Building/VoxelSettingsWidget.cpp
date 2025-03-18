@@ -13,17 +13,17 @@ void UVoxelSettingsWidget::NativeConstruct()
 {
     Super::NativeConstruct();
 
-    // Initialiser les drapeaux
+    // Initializer flags
     bUpdatingUI = false;
     UpdateTimer = 0.0f;
 
-    // Configurer le titre
+    // Configure title
     if (TitleText)
     {
-        TitleText->SetText(FText::FromString(TEXT("Paramètres de Terrain Voxel")));
+        TitleText->SetText(FText::FromString(TEXT("Voxel Terrain Settings")));
     }
 
-    // Connecter les callbacks des boutons
+    // Connect button callbacks
     if (SaveButton)
     {
         SaveButton->OnClicked.AddDynamic(this, &UVoxelSettingsWidget::OnSaveButtonClicked);
@@ -39,7 +39,7 @@ void UVoxelSettingsWidget::NativeConstruct()
         DefaultsButton->OnClicked.AddDynamic(this, &UVoxelSettingsWidget::OnDefaultsButtonClicked);
     }
 
-    // Connecter les callbacks des contrôles de nombre de bâtiments
+    // Connect building count control callbacks
     if (NumberOfBuildingsSpinBox)
     {
         NumberOfBuildingsSpinBox->SetMinValue(1);
@@ -48,7 +48,7 @@ void UVoxelSettingsWidget::NativeConstruct()
 
         if (NumberOfBuildingsLabel)
         {
-            NumberOfBuildingsLabel->SetText(FText::FromString(TEXT("Nombre de bâtiments:")));
+            NumberOfBuildingsLabel->SetText(FText::FromString(TEXT("Number of buildings:")));
         }
     }
 
@@ -60,7 +60,7 @@ void UVoxelSettingsWidget::NativeConstruct()
 
         if (EnableStaircaseBuildingsLabel)
         {
-            EnableStaircaseBuildingsLabel->SetText(FText::FromString(TEXT("Activer les bâtiments en escalier")));
+            EnableStaircaseBuildingsLabel->SetText(FText::FromString(TEXT("Enable staircase buildings")));
         }
     }
 
@@ -73,11 +73,11 @@ void UVoxelSettingsWidget::NativeConstruct()
 
         if (NumberOfStaircaseBuildingsLabel)
         {
-            NumberOfStaircaseBuildingsLabel->SetText(FText::FromString(TEXT("Nombre d'escaliers:")));
+            NumberOfStaircaseBuildingsLabel->SetText(FText::FromString(TEXT("Number of staircases:")));
         }
     }
 
-    // Connecter les callbacks des contrôles de taille de zone
+    // Connect spawn area size control callbacks
     if (SpawnAreaSizeSlider)
     {
         SpawnAreaSizeSlider->SetMinValue(0.0f);
@@ -86,11 +86,11 @@ void UVoxelSettingsWidget::NativeConstruct()
 
         if (SpawnAreaSizeLabel)
         {
-            SpawnAreaSizeLabel->SetText(FText::FromString(TEXT("Taille de la zone de spawn:")));
+            SpawnAreaSizeLabel->SetText(FText::FromString(TEXT("Spawn area size:")));
         }
     }
 
-    // Connecter les callbacks des contrôles de taille de grille
+    // Connect grid size control callbacks
     if (GridSizeXSpinBox)
     {
         GridSizeXSpinBox->SetMinValue(5);
@@ -99,7 +99,7 @@ void UVoxelSettingsWidget::NativeConstruct()
 
         if (GridSizeXLabel)
         {
-            GridSizeXLabel->SetText(FText::FromString(TEXT("Taille X:")));
+            GridSizeXLabel->SetText(FText::FromString(TEXT("Size X:")));
         }
     }
 
@@ -111,7 +111,7 @@ void UVoxelSettingsWidget::NativeConstruct()
 
         if (GridSizeYLabel)
         {
-            GridSizeYLabel->SetText(FText::FromString(TEXT("Taille Y:")));
+            GridSizeYLabel->SetText(FText::FromString(TEXT("Size Y:")));
         }
     }
 
@@ -123,11 +123,11 @@ void UVoxelSettingsWidget::NativeConstruct()
 
         if (GridSizeZLabel)
         {
-            GridSizeZLabel->SetText(FText::FromString(TEXT("Taille Z:")));
+            GridSizeZLabel->SetText(FText::FromString(TEXT("Size Z:")));
         }
     }
 
-    // Configuration du contrôle de variation de hauteur
+    // Configure height variation control
     if (MaxHeightVariationSpinBox)
     {
         MaxHeightVariationSpinBox->SetMinValue(0);
@@ -136,11 +136,11 @@ void UVoxelSettingsWidget::NativeConstruct()
 
         if (MaxHeightVariationLabel)
         {
-            MaxHeightVariationLabel->SetText(FText::FromString(TEXT("Variation de hauteur:")));
+            MaxHeightVariationLabel->SetText(FText::FromString(TEXT("Height variation:")));
         }
     }
 
-    // Connecter les callbacks des contrôles de taille de voxel
+    // Connect voxel size control callbacks
     if (VoxelSizeSlider)
     {
         VoxelSizeSlider->SetMinValue(0.0f);
@@ -149,11 +149,11 @@ void UVoxelSettingsWidget::NativeConstruct()
 
         if (VoxelSizeLabel)
         {
-            VoxelSizeLabel->SetText(FText::FromString(TEXT("Taille des voxels:")));
+            VoxelSizeLabel->SetText(FText::FromString(TEXT("Voxel size:")));
         }
     }
 
-    // Connecter les callbacks des contrôles de lissage
+    // Connect smoothing control callbacks
     if (SmoothingFactorSlider)
     {
         SmoothingFactorSlider->SetMinValue(0.0f);
@@ -162,22 +162,22 @@ void UVoxelSettingsWidget::NativeConstruct()
 
         if (SmoothingFactorLabel)
         {
-            SmoothingFactorLabel->SetText(FText::FromString(TEXT("Facteur de lissage:")));
+            SmoothingFactorLabel->SetText(FText::FromString(TEXT("Smoothing factor:")));
         }
     }
 
-    // Connecter les callbacks des contrôles de couleurs aléatoires
+    // Connect random colors control callbacks
     if (UseRandomColorsCheckBox)
     {
         UseRandomColorsCheckBox->OnCheckStateChanged.AddDynamic(this, &UVoxelSettingsWidget::OnUseRandomColorsChanged);
 
         if (UseRandomColorsLabel)
         {
-            UseRandomColorsLabel->SetText(FText::FromString(TEXT("Utiliser des couleurs aléatoires")));
+            UseRandomColorsLabel->SetText(FText::FromString(TEXT("Use random colors")));
         }
     }
 
-    // Connecter les callbacks des contrôles de marge entre cubes
+    // Connect cube margin control callbacks
     if (CubeMarginSlider)
     {
         CubeMarginSlider->SetMinValue(0.0f);
@@ -186,22 +186,22 @@ void UVoxelSettingsWidget::NativeConstruct()
 
         if (CubeMarginLabel)
         {
-            CubeMarginLabel->SetText(FText::FromString(TEXT("Marge entre cubes:")));
+            CubeMarginLabel->SetText(FText::FromString(TEXT("Cube margin:")));
         }
     }
 
-    // Connecter les callbacks des contrôles de débris
+    // Connect debris control callbacks
     if (SpawnDebrisCheckBox)
     {
         SpawnDebrisCheckBox->OnCheckStateChanged.AddDynamic(this, &UVoxelSettingsWidget::OnSpawnDebrisChanged);
 
         if (SpawnDebrisLabel)
         {
-            SpawnDebrisLabel->SetText(FText::FromString(TEXT("Générer des débris")));
+            SpawnDebrisLabel->SetText(FText::FromString(TEXT("Generate debris")));
         }
     }
 
-    // Connecter les callbacks des contrôles de multiplicateur de débris
+    // Connect debris multiplier control callbacks
     if (DebrisAmountSlider)
     {
         DebrisAmountSlider->SetMinValue(0.0f);
@@ -210,38 +210,38 @@ void UVoxelSettingsWidget::NativeConstruct()
 
         if (DebrisAmountLabel)
         {
-            DebrisAmountLabel->SetText(FText::FromString(TEXT("Quantité de débris:")));
+            DebrisAmountLabel->SetText(FText::FromString(TEXT("Debris amount:")));
         }
     }
 
-    // Connecter les callbacks des contrôles de nuage d'impact
+    // Connect impact cloud control callbacks
     if (SpawnImpactCloudCheckBox)
     {
         SpawnImpactCloudCheckBox->OnCheckStateChanged.AddDynamic(this, &UVoxelSettingsWidget::OnSpawnImpactCloudChanged);
 
         if (SpawnImpactCloudLabel)
         {
-            SpawnImpactCloudLabel->SetText(FText::FromString(TEXT("Générer un nuage d'impact")));
+            SpawnImpactCloudLabel->SetText(FText::FromString(TEXT("Generate impact cloud")));
         }
     }
 
-    // Configurer les boutons
+    // Configure buttons
     if (SaveButton)
     {
-        SaveButton->SetToolTipText(FText::FromString(TEXT("Sauvegarder les paramètres")));
+        SaveButton->SetToolTipText(FText::FromString(TEXT("Save settings")));
     }
 
     if (LoadButton)
     {
-        LoadButton->SetToolTipText(FText::FromString(TEXT("Charger les paramètres sauvegardés")));
+        LoadButton->SetToolTipText(FText::FromString(TEXT("Load saved settings")));
     }
 
     if (DefaultsButton)
     {
-        DefaultsButton->SetToolTipText(FText::FromString(TEXT("Réinitialiser aux valeurs par défaut")));
+        DefaultsButton->SetToolTipText(FText::FromString(TEXT("Reset to default values")));
     }
 
-    // Charger les paramètres actuels
+    // Load current settings
     LoadSettings();
 }
 
@@ -268,7 +268,7 @@ void UVoxelSettingsWidget::NativeTick(const FGeometry& MyGeometry, float InDelta
 {
     Super::NativeTick(MyGeometry, InDeltaTime);
 
-    // Mettre à jour les labels des sliders à intervalle régulier
+    // Update slider labels at regular intervals
     if (!bUpdatingUI)
     {
         UpdateTimer += InDeltaTime;
@@ -282,53 +282,53 @@ void UVoxelSettingsWidget::NativeTick(const FGeometry& MyGeometry, float InDelta
 
 void UVoxelSettingsWidget::SaveSettings()
 {
-    // Obtenir les paramètres à partir des widgets
+    // Get settings from widgets
     FVoxelTerrainSettings NewSettings = GetSettingsFromWidgets();
 
-    // Mettre à jour le gestionnaire de paramètres
+    // Update settings manager
     UVoxelTerrainSettingsManager* Manager = UVoxelTerrainSettingsManager::GetInstance();
     if (Manager)
     {
         Manager->SetSettings(NewSettings);
         Manager->SaveSettings();
 
-        // Mettre à jour notre copie locale
+        // Update our local copy
         CurrentSettings = Manager->GetSettings();
 
-        // Mettre à jour l'interface utilisateur
+        // Update user interface
         UpdateWidgetsFromSettings(CurrentSettings);
     }
 
-    // Déclencher l'événement de changement de paramètres
+    // Trigger settings changed event
     OnSettingsChanged();
 }
 
 void UVoxelSettingsWidget::LoadSettings()
 {
-    // Charger les paramètres depuis le gestionnaire
+    // Load settings from manager
     UVoxelTerrainSettingsManager* Manager = UVoxelTerrainSettingsManager::GetInstance();
     if (Manager)
     {
         CurrentSettings = Manager->GetSettings();
 
-        // Mettre à jour les widgets
+        // Update widgets
         UpdateWidgetsFromSettings(CurrentSettings);
     }
 }
 
 void UVoxelSettingsWidget::ResetToDefaults()
 {
-    // Réinitialiser les paramètres aux valeurs par défaut
+    // Reset settings to default values
     UVoxelTerrainSettingsManager* Manager = UVoxelTerrainSettingsManager::GetInstance();
     if (Manager)
     {
         Manager->ResetToDefaults();
         CurrentSettings = Manager->GetSettings();
 
-        // Mettre à jour les widgets
+        // Update widgets
         UpdateWidgetsFromSettings(CurrentSettings);
 
-        // Déclencher l'événement de changement de paramètres
+        // Trigger settings changed event
         OnSettingsChanged();
     }
 }
@@ -473,7 +473,7 @@ void UVoxelSettingsWidget::OnSpawnImpactCloudChanged(bool Value)
 
 void UVoxelSettingsWidget::UpdateWidgetsFromSettings(const FVoxelTerrainSettings& Settings)
 {
-    // Marquer comme en cours de mise à jour pour éviter les callbacks en boucle
+    // Mark as updating to avoid callback loops
     bUpdatingUI = true;
 
     if (NumberOfStaircaseBuildingsSpinBox)
@@ -481,7 +481,7 @@ void UVoxelSettingsWidget::UpdateWidgetsFromSettings(const FVoxelTerrainSettings
         NumberOfStaircaseBuildingsSpinBox->SetValue(Settings.NumberOfStaircaseBuildings);
     }
 
-    // Mettre à jour chaque widget avec la valeur correspondante
+    // Update each widget with corresponding value
     if (NumberOfBuildingsSpinBox)
     {
         NumberOfBuildingsSpinBox->SetValue(Settings.NumberOfBuildings);
@@ -547,11 +547,11 @@ void UVoxelSettingsWidget::UpdateWidgetsFromSettings(const FVoxelTerrainSettings
         SpawnImpactCloudCheckBox->SetCheckedState(Settings.bSpawnImpactCloud ? ECheckBoxState::Checked : ECheckBoxState::Unchecked);
     }
 
-    // Mettre à jour les labels et les dépendances
+    // Update labels and dependencies
     UpdateSliderLabels();
     UpdateControlDependencies();
 
-    // Fin de la mise à jour
+    // End of update
     bUpdatingUI = false;
 }
 
@@ -570,7 +570,7 @@ FVoxelTerrainSettings UVoxelSettingsWidget::GetSettingsFromWidgets()
         Settings.NumberOfStaircaseBuildings = FMath::RoundToInt(NumberOfStaircaseBuildingsSpinBox->GetValue());
     }
 
-    // Lire les valeurs de chaque widget
+    // Read values from each widget
     if (NumberOfBuildingsSpinBox)
     {
         Settings.NumberOfBuildings = FMath::RoundToInt(NumberOfBuildingsSpinBox->GetValue());
@@ -636,7 +636,7 @@ FVoxelTerrainSettings UVoxelSettingsWidget::GetSettingsFromWidgets()
         Settings.bSpawnImpactCloud = (SpawnImpactCloudCheckBox->GetCheckedState() == ECheckBoxState::Checked);
     }
 
-    // Valider les paramètres avant de les renvoyer
+    // Validate settings before returning
     Settings.Validate();
 
     return Settings;
@@ -658,17 +658,17 @@ void UVoxelSettingsWidget::UpdateSliderLabels()
     {
         VoxelSizeValue->SetText(FText::FromString(FString::Printf(TEXT("%.0f"), CurrentSettings.VoxelSize)));
     }
-    
+
     if (SmoothingFactorValue)
     {
         SmoothingFactorValue->SetText(FText::FromString(FString::Printf(TEXT("%.3f"), CurrentSettings.SmoothingFactor)));
     }
-    
+
     if (CubeMarginValue)
     {
         CubeMarginValue->SetText(FText::FromString(FString::Printf(TEXT("%.3f"), CurrentSettings.CubeMargin)));
     }
-    
+
     if (DebrisAmountValue)
     {
         DebrisAmountValue->SetText(FText::FromString(FString::Printf(TEXT("%.1f"), CurrentSettings.DebrisAmountMultiplier)));
@@ -677,7 +677,7 @@ void UVoxelSettingsWidget::UpdateSliderLabels()
 
 void UVoxelSettingsWidget::UpdateControlDependencies()
 {
-    // Désactiver les contrôles de débris si la génération de débris est désactivée
+    // Disable debris controls if debris generation is disabled
     bool bDebrisEnabled = CurrentSettings.bSpawnDebrisOnDestruction;
     bool bStaircasesEnabled = CurrentSettings.bEnableStaircaseBuildings;
 

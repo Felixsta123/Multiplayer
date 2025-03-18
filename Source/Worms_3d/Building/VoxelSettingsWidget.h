@@ -14,7 +14,7 @@
 #include "VoxelSettingsWidget.generated.h"
 
 /**
- * Widget pour configurer les paramètres de terrain voxel dans un lobby
+ * Widget for configuring voxel terrain settings in a lobby
  */
 UCLASS()
 class WORMS_3D_API UVoxelSettingsWidget : public UUserWidget
@@ -22,13 +22,13 @@ class WORMS_3D_API UVoxelSettingsWidget : public UUserWidget
     GENERATED_BODY()
 
 public:
-    // Initialisation du widget
+    // Widget initialization
     virtual void NativeConstruct() override;
 
-    // Mise à jour du widget à chaque frame
+    // Widget update each frame
     virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
-    // Fonctions principales
+    // Main functions
     UFUNCTION(BlueprintCallable, Category = "Voxel Settings")
     void SaveSettings();
 
@@ -38,31 +38,31 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Voxel Settings")
     void ResetToDefaults();
 
-    // Événement déclenché lorsque les paramètres sont modifiés
+    // Event triggered when settings are changed
     UFUNCTION(BlueprintImplementableEvent, Category = "Voxel Settings")
     void OnSettingsChanged();
 
 protected:
-    // === Section des contrôles de base ===
+    // === Basic controls section ===
 
-    // Container vertical principal
+    // Main vertical container
     UPROPERTY(meta = (BindWidget))
     UVerticalBox* MainContainer;
 
-    // Titre du widget
+    // Widget title
     UPROPERTY(meta = (BindWidget))
     UTextBlock* TitleText;
 
-    // === Section des paramètres de bâtiments ===
+    // === Building settings section ===
 
-    // Nombre de bâtiments
+    // Number of buildings
     UPROPERTY(meta = (BindWidget))
     USpinBox* NumberOfBuildingsSpinBox;
 
     UPROPERTY(meta = (BindWidget))
     UTextBlock* NumberOfBuildingsLabel;
 
-    // Taille de la zone de spawn
+    // Spawn area size
     UPROPERTY(meta = (BindWidget))
     USlider* SpawnAreaSizeSlider;
 
@@ -85,30 +85,30 @@ protected:
     UPROPERTY(meta = (BindWidget))
     UTextBlock* NumberOfStaircaseBuildingsLabel;
 
-    // === Section des paramètres de voxels ===
+    // === Voxel settings section ===
 
-    // Taille de la grille X
+    // Grid size X
     UPROPERTY(meta = (BindWidget))
     USpinBox* GridSizeXSpinBox;
 
     UPROPERTY(meta = (BindWidget))
     UTextBlock* GridSizeXLabel;
 
-    // Taille de la grille Y
+    // Grid size Y
     UPROPERTY(meta = (BindWidget))
     USpinBox* GridSizeYSpinBox;
 
     UPROPERTY(meta = (BindWidget))
     UTextBlock* GridSizeYLabel;
 
-    // Taille de la grille Z
+    // Grid size Z
     UPROPERTY(meta = (BindWidget))
     USpinBox* GridSizeZSpinBox;
 
     UPROPERTY(meta = (BindWidget))
     UTextBlock* GridSizeZLabel;
 
-    // Variation de hauteur maximum
+    // Maximum height variation
     UPROPERTY(meta = (BindWidget))
     USpinBox* MaxHeightVariationSpinBox;
 
@@ -118,7 +118,7 @@ protected:
     UFUNCTION()
     void OnMaxHeightVariationChanged(float Value);
 
-    // Taille de voxel
+    // Voxel size
     UPROPERTY(meta = (BindWidget))
     USlider* VoxelSizeSlider;
 
@@ -128,7 +128,7 @@ protected:
     UPROPERTY(meta = (BindWidget))
     UTextBlock* VoxelSizeValue;
 
-    // Facteur de lissage
+    // Smoothing factor
     UPROPERTY(meta = (BindWidget))
     USlider* SmoothingFactorSlider;
 
@@ -138,14 +138,14 @@ protected:
     UPROPERTY(meta = (BindWidget))
     UTextBlock* SmoothingFactorValue;
 
-    // Utiliser des couleurs aléatoires
+    // Use random colors
     UPROPERTY(meta = (BindWidget))
     UCheckBox* UseRandomColorsCheckBox;
 
     UPROPERTY(meta = (BindWidget))
     UTextBlock* UseRandomColorsLabel;
 
-    // Marge entre cubes
+    // Cube margin
     UPROPERTY(meta = (BindWidget))
     USlider* CubeMarginSlider;
 
@@ -155,16 +155,16 @@ protected:
     UPROPERTY(meta = (BindWidget))
     UTextBlock* CubeMarginValue;
 
-    // === Section des paramètres de débris ===
+    // === Debris settings section ===
 
-    // Débris à la destruction
+    // Spawn debris on destruction
     UPROPERTY(meta = (BindWidget))
     UCheckBox* SpawnDebrisCheckBox;
 
     UPROPERTY(meta = (BindWidget))
     UTextBlock* SpawnDebrisLabel;
 
-    // Multiplicateur de débris
+    // Debris multiplier
     UPROPERTY(meta = (BindWidget))
     USlider* DebrisAmountSlider;
 
@@ -174,14 +174,14 @@ protected:
     UPROPERTY(meta = (BindWidget))
     UTextBlock* DebrisAmountValue;
 
-    // Nuage d'impact
+    // Impact cloud
     UPROPERTY(meta = (BindWidget))
     UCheckBox* SpawnImpactCloudCheckBox;
 
     UPROPERTY(meta = (BindWidget))
     UTextBlock* SpawnImpactCloudLabel;
 
-    // === Section des boutons d'action ===
+    // === Action buttons section ===
 
     UPROPERTY(meta = (BindWidget))
     UHorizontalBox* ButtonsContainer;
@@ -195,7 +195,7 @@ protected:
     UPROPERTY(meta = (BindWidget))
     UButton* DefaultsButton;
 
-    // === Callbacks de boutons ===
+    // === Button callbacks ===
 
     UFUNCTION()
     void OnSaveButtonClicked();
@@ -206,7 +206,7 @@ protected:
     UFUNCTION()
     void OnDefaultsButtonClicked();
 
-    // === Callbacks de changement de valeur ===
+    // === Value change callbacks ===
 
     UFUNCTION()
     void OnNumberOfBuildingsChanged(float Value);
@@ -251,25 +251,25 @@ protected:
     UFUNCTION()
     void OnSpawnImpactCloudChanged(bool Value);
 
-    // === Fonctions utilitaires ===
+    // === Utility functions ===
 
-    // Mise à jour des widgets à partir des paramètres
+    // Update widgets from settings
     void UpdateWidgetsFromSettings(const FVoxelTerrainSettings& Settings);
 
-    // Obtention des paramètres à partir des widgets
+    // Get settings from widgets
     FVoxelTerrainSettings GetSettingsFromWidgets();
 
-    // Mise à jour des valeurs textuelles des sliders
+    // Update slider text values
     void UpdateSliderLabels();
 
-    // Activation/désactivation des contrôles selon les dépendances
+    // Enable/disable controls based on dependencies
     void UpdateControlDependencies();
 
-    // Paramètres courants
+    // Current settings
     UPROPERTY()
     FVoxelTerrainSettings CurrentSettings;
 
-    // Drapeaux de mise à jour
+    // Update flags
     bool bUpdatingUI;
     float UpdateTimer;
     const float UpdateInterval = 0.5f;
